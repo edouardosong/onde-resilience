@@ -1,10 +1,10 @@
 /// Cryptography — Ed25519 identities, ChaCha20-Poly1305 encryption, ZK transactions
 
-use ed25519_dalek::{SigningKey, VerifyingKey, Signature, Verifier, Signer};
+use ed25519_dalek::{SigningKey, VerifyingKey, Verifier, Signer};
 use ed25519_dalek::Signature as EdSignature;
 use chacha20poly1305::{
     ChaCha20Poly1305, Key, Nonce, KeyInit,
-    aead::{Aead, rand_core::OsRng as AeadOsRng},
+    aead::Aead,
 };
 use rand::rngs::OsRng as RandOsRng;
 use rand::RngCore;
