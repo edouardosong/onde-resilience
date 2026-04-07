@@ -1,0 +1,10 @@
+[
+    {
+        "merged": "com.onde.resilience.app-merged_res-29:/drawable_ic_launcher_foreground.xml.flat",
+        "source": "com.onde.resilience.app-main-31:/drawable/ic_launcher_foreground.xml"
+    },
+    {
+        "merged": "com.onde.resilience.app-merged_res-29:/layout_activity_main.xml.flat",
+        "source": "com.onde.resilience.app-main-31:/layout/activity_main.xml"
+    }
+]

@@ -81,6 +81,14 @@ RUN sdkmanager \
     "ndk;26.2.11394342"
 
 # ──────────────────────────────────────────────────────────────────────────────
+# 3b. GRADLE (for Android builds)
+# ──────────────────────────────────────────────────────────────────────────────
+RUN curl -sL https://services.gradle.org/distributions/gradle-8.2-bin.zip -o /tmp/gradle.zip && \
+    unzip -q /tmp/gradle.zip -d /opt && \
+    rm /tmp/gradle.zip
+ENV PATH="${PATH}:/opt/gradle-8.2/bin"
+
+# ──────────────────────────────────────────────────────────────────────────────
 # 4. PYTHON ENVIRONMENT
 # ──────────────────────────────────────────────────────────────────────────────
 RUN pip3 install \
