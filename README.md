@@ -4,7 +4,8 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org)
-[![Tauri](https://img.shields.io/badge/built%20with-Tauri-black.svg)](https://tauri.app)
+[![Tests](https://img.shields.io/badge/tests-43%20passing-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-0.2.4-blue.svg)]()
 
 ---
 
@@ -14,17 +15,17 @@
 
 ### Fonctionnalités Clés
 
-| Module | Description |
-|---|---|
-| 🔄 **Réseau Mesh** | Wi-Fi Aware, BLE, LoRa (Meshtastic), Ethernet Bridge. Routage DTN store-and-forward |
-| 📝 **Social Text-Only** | Protocole Nostr. Flux d'alertes 280 car. + entraide hiérarchisée. Zéro image |
-| 🎙️ **Voix Asynchrone** | Mémos vocaux Opus 8kbps transitant via DTN, avec transcription STT automatique |
-| 🧠 **IA Locale** | PocketPal mobile (Qwen 0.8-9B quantized) + Super-Oracles desktop (70B+ via RPC) |
-| 🗺️ **Cartes Offline** | MBTiles vectorielles + positionnement Geohash radar |
-| 📚 **Encyclopédie** | Lecteur ZIM (Wikipédia hors-ligne) |
-| 💰 **Finance ZK** | Transactions asynchrones ZK-Proofs type Mina. Push blockchain quand internet dispo |
-| 📁 **Méga-Archives** | IPFS seeder desktop : APK, ZIM, modèles IA |
-| 🔐 **Sécurité** | Ed25519, ChaCha20-Poly1305, PoW antispam CPU, Handshake DNS |
+| Module | Description | Statut |
+|---|---|---|
+| 🔄 **Réseau Mesh** | Wi-Fi Aware, BLE, LoRa (Meshtastic), Ethernet Bridge. Routage DTN store-and-forward | ✅ Core |
+| 📝 **Social Text-Only** | Protocole Nostr. Flux d'alertes 280 car. + entraide hiérarchisée. Zéro image | ✅ Core |
+| 🎙️ **Voix Asynchrone** | Mémos vocaux Opus 8kbps transitant via DTN, avec transcription STT automatique | ⚠️ Mock |
+| 🧠 **IA Locale** | PocketPal mobile (Qwen 0.8-9B quantized) + Super-Oracles desktop (70B+ via RPC) | ⚠️ Mock |
+| 🗺️ **Cartes Offline** | MBTiles vectorielles + positionnement Geohash radar | ✅ Demo |
+| 📚 **Encyclopédie** | Lecteur ZIM (Wikipédia hors-ligne) | ⚠️ Mock |
+| 💰 **Finance ZK** | Transactions asynchrones ZK-Proofs type Mina. Push blockchain quand internet dispo | ✅ Core |
+| 📁 **Méga-Archives** | IPFS seeder desktop : APK, ZIM, modèles IA | ✅ Demo |
+| 🔐 **Sécurité** | Ed25519, ChaCha20-Poly1305, PoW antispam CPU, Handshake DNS | ✅ Core |
 
 ---
 
@@ -77,9 +78,14 @@ onde/
 │   │   ├── storage/mod.rs       # ZIM + MBTiles + IPFS
 │   │   ├── ai/mod.rs           # AI Engine manager
 │   │   └── node/mod.rs         # Node orchestrator
+│   ├── tests/
+│   │   └── integration_e2e.rs  # 12 end-to-end integration tests
 │   └── crates/
-│       ├── dtn-router/         # Store-and-Forward routing
-│       └── llm-inference/      # PocketPal + Oracle RPC
+│       ├── dtn-router/         # Store-and-Forward routing (1 test)
+│       ├── llm-inference/      # PocketPal + Oracle RPC (3 tests)
+│       ├── llama-bind/          # llama.cpp GGML FFI (5 tests)
+│       ├── whisper-stt/         # Whisper.cpp STT (4 tests)
+│       └── zim-parser/          # ZIM file parser (3 tests)
 ├── ui/                          # PHASE 3 — Tauri application
 │   ├── src/
 │   │   └── index.html          # AMOLED Black UI (standalone)
@@ -290,13 +296,62 @@ cargo tauri ios build
 
 ---
 
+## 🧪 Tests
+
+### Suite complète : 43 tests
+
+```bash
+# Tous les tests
+cd core && cargo test --workspace
+
+# Résultats :
+# dtn-router:      1 test   ✅ Store-and-forward
+# llama-bind:      5 tests  ✅ Model selection, mock generation, quantization
+# llm-inference:   3 tests  ✅ Local inference, model auto-selection
+# whisper-stt:     4 tests  ✅ Engine creation, mock transcription
+# zim-parser:      3 tests  ✅ HTML extraction, categories, ZIM URL
+# onde-core:      15 tests  ✅ Crypto, Network, Protocol, Storage, Node
+# integration_e2e: 12 tests ✅ Scénarios end-to-end complets
+```
+
+### Tests d'Intégration End-to-End (12 scénarios)
+
+| # | Scénario | Vérifié |
+|---|----------|---------|
+| 1 | Alert → Gossip → Reception | PoW, signature, gossip propagation |
+| 2 | ZK Transaction async flow | Proof generation, pool submit/commit |
+| 3 | Voice Memo → STT → Transcription | Event creation, mock Opus, French STT |
+| 4 | AI Query → Oracle Response | Inference, first-aid content validation |
+| 5 | DTN Store-and-Forward | Buffer, encounter, delivery, stats |
+| 6 | Full Node Lifecycle | Start → alert → AI → status → stop |
+| 7 | Multi-Node Gossip (5 nodes) | Network flooding, all nodes receive |
+| 8 | Storage Integration | ZIM search, MBTiles tiles, IPFS seeds |
+| 9 | PoW Antispam Stress | 10 events, difficulty 2, hash verification |
+| 10 | Crypto Sign/Verify Chain | Multi-node verification, tamper detection |
+| 11 | DTN TTL Expiration | TTL decrement, message expiry |
+| 12 | DTN Buffer Overflow | Priority-based drop, max buffer |
+
+---
+
+## 📦 Releases
+
+| Version | Date | Description |
+|---------|------|-------------|
+| **v0.2.4** | 2026-04-07 | Clean crypto imports, 43 tests all passing |
+| **v0.2.3** | 2026-04-07 | 12 tests d'intégration end-to-end |
+| **v0.2.2** | 2026-04-07 | Fix compilation errors, 35 tests passing |
+| **v0.2.1** | 2026-04-07 | APK Android ARM64 built + released |
+| **v0.2.0** | 2026-04-07 | Core Rust initial (network, protocol, crypto, storage, AI) |
+
+---
+
 ## 🗺️ Roadmap
 
-### Version actuelle : 0.2.1 (Release)
+### Version actuelle : 0.2.4
 - ✅ Core Rust: network, protocol, crypto, storage, AI
 - ✅ SimPy simulation network (11 000 noeuds)
 - ✅ UI AMOLED Black standalone HTML
-- ✅ Application Android WebView (APK)
+- ✅ Application Android WebView (APK v0.2.1)
 - ✅ Tauri desktop skeleton
 - ✅ DTN router (store-and-forward)
 - ✅ Yggdrasil addressing
@@ -307,8 +362,10 @@ cargo tauri ios build
 - ✅ ZIM file parser (openZIM, 10 categories FR, recherche)
 - ✅ Whisper.cpp STT (Tiny→Large, mock ready)
 - ✅ llama-bind (Qwen2.5, SmolLM, Phi-3, GGUF quantization)
+- ✅ **43 tests** (31 unit + 12 intégration e2e)
 - 🔄 Wi-Fi Aware native Android
 - 🔄 IPFS-lite node complet
+- 🔄 Modèles IA/STT réels (téléchargement séparé)
 
 ### Version 1.0.0 (Objectif)
 - [ ] Production builds: APK, IPA, EXE, DMG, AppImage
@@ -316,25 +373,8 @@ cargo tauri ios build
 - [ ] Mina Protocol integration
 - [ ] Handshake HNS resolution
 - [ ] Meshtastic LoRa integration
-
----
-
-## 🧪 Tests
-
-```bash
-# Core Rust tests
-cd core && cargo test
-
-# Expected results:
-# running 12 tests
-# test crypto::tests::test_identity_sign_verify ... ok
-# test crypto::tests::test_zk_transaction_creation ... ok
-# test network::tests::test_transport_ranges ... ok
-# test protocol::tests::test_alert_size_limit ... ok
-# test storage::tests::test_geohash ... ok
-# test node::tests::test_node_creation ... ok
-# ... all passed
-```
+- [ ] Modèles IA bundlés (Qwen GGUF + Whisper)
+- [ ] Fichiers ZIM bundlés (Wikipedia offline)
 
 ---
 
