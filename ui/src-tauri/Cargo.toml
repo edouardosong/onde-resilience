@@ -13,6 +13,8 @@ path = "src/main.rs"
 
 [dependencies]
 tauri = { version = "2.0", features = [] }
+tauri-plugin-log = "2.0"
+log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 onde-core = { path = "../../core" }
@@ -20,7 +22,7 @@ tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 
 [build-dependencies]
-tauri-build = { version = "2.0" }
+tauri-build = { version = "2.0", features = [] }
 
 [profile.release]
 opt-level = "z"

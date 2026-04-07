@@ -18,6 +18,7 @@ members = [
 [lib]
 name = "onde_core"
 path = "src/lib.rs"
+crate-type = ["lib", "cdylib"]
 
 [[bin]]
 name = "onde_node"
