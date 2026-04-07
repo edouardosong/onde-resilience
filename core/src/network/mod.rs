@@ -107,7 +107,7 @@ impl YggdrasilAddress {
 
     /// Generate IPv6 ULA address: 200:xxxx:...
     pub fn generate_ipv6(&self) -> String {
-        let hash = Sha256::digest(format!("ygg:{self.node_id}"));
+        let hash = Sha256::digest(format!("ygg:{}", self.node_id));
         let hex = format!("{hash:x}");
 
         let mut addr = "200".to_string();

@@ -86,8 +86,8 @@ impl MeshEvent {
         }
     }
 
-    fn compute_id(pubkey: &str, kind: &OndeMessageType, content: &str) -> String {
-        let data = format!("{pubkey:?}:{content}");
+    fn compute_id(pubkey: &str, _kind: &OndeMessageType, content: &str) -> String {
+        let data = format!("{}:{}", pubkey, content);
         let hash = Sha256::digest(data.as_bytes());
         format!("{hash:x}")
     }
@@ -184,7 +184,7 @@ impl GossipProtocol {
         }
 
         if event.validate().is_ok() {
-            self.known_events.insert(event.id);
+            self.known_events.insert(event.id.clone());
             self.pending_broadcasts.push(event);
             true
         } else {

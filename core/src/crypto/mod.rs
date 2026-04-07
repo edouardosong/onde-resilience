@@ -1,9 +1,9 @@
 /// Cryptography — Ed25519 identities, ChaCha20-Poly1305 encryption, ZK transactions
 
-use ed25519_dalek::{SigningKey, VerifyingKey, Signature};
+use ed25519_dalek::{SigningKey, VerifyingKey, Signature, Verifier, Signer};
 use ed25519_dalek::Signature as EdSignature;
 use chacha20poly1305::{
-    ChaCha20Poly1305, Key, Nonce,
+    ChaCha20Poly1305, Key, Nonce, KeyInit,
     aead::{Aead, rand_core::OsRng as AeadOsRng},
 };
 use rand::rngs::OsRng as RandOsRng;
@@ -63,9 +63,8 @@ impl Identity {
     /// Verify signature from raw public key
     pub fn verify_from_pubkey(pubkey_bytes: &[u8; 32], data: &[u8], sig_bytes: &[u8; 64]) -> bool {
         if let Ok(vk) = VerifyingKey::from_bytes(pubkey_bytes) {
-            if let Ok(sig) = EdSignature::from_bytes(sig_bytes) {
-                return vk.verify(data, &sig).is_ok();
-            }
+            let sig = EdSignature::from_bytes(sig_bytes);
+            return vk.verify(data, &sig).is_ok();
         }
         false
     }
@@ -113,7 +112,7 @@ impl EncryptedEnvelope {
         let cipher = ChaCha20Poly1305::new(key_bytes);
 
         cipher.decrypt(nonce, self.ciphertext.as_ref())
-            .map_err(|e| e.to_string())
+            .map_err(|e: chacha20poly1305::Error| e.to_string())
     }
 }
 
@@ -160,7 +159,7 @@ impl ZkProof {
         let commitment = hex::encode(Sha256::digest(data.as_bytes()));
 
         Self {
-            commitment,
+            commitment: commitment.clone(),
             public_inputs: vec![sender.to_string(), receiver.to_string()],
             proof_data: commitment.as_bytes().to_vec(),
         }

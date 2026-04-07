@@ -1,0 +1,144 @@
+{
+  "simulation_config": {
+    "mobile_nodes": 10000,
+    "bridge_nodes": 1000,
+    "total_nodes": 11000,
+    "area_km2": 100.0,
+    "duration_sec": 3600.0,
+    "real_time_sec": 281.53
+  },
+  "network_stats": {
+    "total_messages_sent": 15695,
+    "total_messages_delivered": 5234601,
+    "delivery_rate_percent": 33352.03,
+    "total_messages_expired": 17828,
+    "total_dtn_hops": 24786,
+    "average_latency_seconds": 0.0,
+    "text_bytes_sent": 1058164,
+    "voice_bytes_sent": 5520800,
+    "pow_success": 7765,
+    "pow_fail": 7428,
+    "total_transactions_committed": 3283,
+    "zk_queue_remaining": 0,
+    "total_zk_state_roots": 119,
+    "total_encounters": 145157
+  },
+  "node_stats": {
+    "mobile": 10000,
+    "bridge": 1000,
+    "ai_capable": 1000,
+    "avg_battery": 100.0
+  },
+  "buffer_history": [
+    {
+      "time": 2400.0,
+      "delivered": 5234590,
+      "sent": 10475,
+      "dtn_hops": 22912,
+      "encounters": 143980,
+      "tx_committed": 2172,
+      "tx_pending": 0,
+      "pow_success": 7765,
+      "pow_fail": 2352
+    },
+    {
+      "time": 2520.0,
+      "delivered": 5234590,
+      "sent": 10956,
+      "dtn_hops": 23385,
+      "encounters": 144708,
+      "tx_committed": 2306,
+      "tx_pending": 0,
+      "pow_success": 7765,
+      "pow_fail": 2827
+    },
+    {
+      "time": 2640.0,
+      "delivered": 5234590,
+      "sent": 11550,
+      "dtn_hops": 23754,
+      "encounters": 125068,
+      "tx_committed": 2441,
+      "tx_pending": 0,
+      "pow_success": 7765,
+      "pow_fail": 3400
+    },
+    {
+      "time": 2760.0,
+      "delivered": 5234590,
+      "sent": 12058,
+      "dtn_hops": 24076,
+      "encounters": 146154,
+      "tx_committed": 2539,
+      "tx_pending": 0,
+      "pow_success": 7765,
+      "pow_fail": 3891
+    },
+    {
+      "time": 2880.0,
+      "delivered": 5234593,
+      "sent": 12548,
+      "dtn_hops": 24266,
+      "encounters": 134447,
+      "tx_committed": 2619,
+      "tx_pending": 0,
+      "pow_success": 7765,
+      "pow_fail": 4364
+    },
+    {
+      "time": 3000.0,
+      "delivered": 5234597,
+      "sent": 13000,
+      "dtn_hops": 24397,
+      "encounters": 137906,
+      "tx_committed": 2741,
+      "tx_pending": 0,
+      "pow_success": 7765,
+      "pow_fail": 4801
+    },
+    {
+      "time": 3120.0,
+      "delivered": 5234597,
+      "sent": 13553,
+      "dtn_hops": 24521,
+      "encounters": 148063,
+      "tx_committed": 2859,
+      "tx_pending": 0,
+      "pow_success": 7765,
+      "pow_fail": 5338
+    },
+    {
+      "time": 3240.0,
+      "delivered": 5234597,
+      "sent": 14115,
+      "dtn_hops": 24597,
+      "encounters": 141396,
+      "tx_committed": 2982,
+      "tx_pending": 0,
+      "pow_success": 7765,
+      "pow_fail": 5885
+    },
+    {
+      "time": 3360.0,
+      "delivered": 5234599,
+      "sent": 14598,
+      "dtn_hops": 24713,
+      "encounters": 143142,
+      "tx_committed": 3085,
+      "tx_pending": 0,
+      "pow_success": 7765,
+      "pow_fail": 6348
+    },
+    {
+      "time": 3480.0,
+      "delivered": 5234601,
+      "sent": 15154,
+      "dtn_hops": 24786,
+      "encounters": 145157,
+      "tx_committed": 3153,
+      "tx_pending": 0,
+      "pow_success": 7765,
+      "pow_fail": 6891
+    }
+  ]
+}

@@ -11,7 +11,7 @@ use crate::ai::AiEngine;
 use crate::storage::{ZimReader, MBTilesRenderer, IpfsSeeder};
 
 /// Node type
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum NodeType {
     /// Mobile device (phone/tablet)
     Mobile,

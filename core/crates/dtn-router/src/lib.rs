@@ -43,7 +43,7 @@ pub struct DtnRouter {
     stats: Mutex<RouterStats>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct RouterStats {
     pub total_stored: u64,
     pub total_forwarded: u64,
@@ -98,30 +98,27 @@ impl DtnRouter {
         let mut stats = self.stats.lock().await;
 
         if let Some(buf) = buffers.get_mut(from) {
-            let remaining: VecDeque<DtnMessage> = buf
-                .drain_filter(|msg| {
-                    // Deliver if destination matches or broadcast
-                    let should_deliver = match &msg.destination {
-                        Some(dest) => dest == to,
-                        None => true,
-                    };
-
-                    if should_deliver && msg.hop_count < msg.ttl {
-                        let mut deliverable = msg.clone();
-                        deliverable.hop_count += 1;
-                        stats.total_forwarded += 1;
-                        stats.total_delivered += 1;
-                        forwarded.push(deliverable);
-                        true // remove from buffer
-                    } else if msg.hop_count >= msg.ttl {
-                        stats.total_expired += 1;
-                        true // expire
-                    } else {
-                        false // keep in buffer
-                    }
-                })
-                .collect();
-            *buf = remaining;
+            let mut to_remove = Vec::new();
+            for (idx, msg) in buf.iter().enumerate() {
+                let should_deliver = match &msg.destination {
+                    Some(dest) => dest == to,
+                    None => true,
+                };
+                if should_deliver && msg.hop_count < msg.ttl {
+                    let mut deliverable = msg.clone();
+                    deliverable.hop_count += 1;
+                    stats.total_forwarded += 1;
+                    stats.total_delivered += 1;
+                    forwarded.push(deliverable);
+                    to_remove.push(idx);
+                } else if msg.hop_count >= msg.ttl {
+                    stats.total_expired += 1;
+                    to_remove.push(idx);
+                }
+            }
+            for idx in to_remove.into_iter().rev() {
+                buf.remove(idx);
+            }
         }
 
         forwarded
@@ -153,24 +150,40 @@ impl DtnRouter {
 
     /// Decrement TTL and expire old messages
     pub async fn tick(&self, node_id: &str) -> Vec<DtnMessage> {
-        let mut buffers = self.buffers.lock().await;
-        let mut expired = Vec::new();
-        let mut stats = self.stats.lock().await;
+        // Collect expired messages first
+        let (expired, expired_count) = {
+            let mut buffers = self.buffers.lock().await;
+            let mut expired = Vec::new();
+            let mut expired_count: u64 = 0;
 
-        if let Some(buf) = buffers.get_mut(node_id) {
-            let remaining: VecDeque<DtnMessage> = buf
-                .drain_filter(|msg| {
-                    msg.ttl = msg.ttl.saturating_sub(1);
-                    if msg.ttl == 0 {
-                        stats.total_expired += 1;
+            if let Some(buf) = buffers.get_mut(node_id) {
+                let mut to_remove = Vec::new();
+                for (idx, msg) in buf.iter().enumerate() {
+                    let new_ttl = msg.ttl.saturating_sub(1);
+                    if new_ttl == 0 {
+                        expired_count += 1;
                         expired.push(msg.clone());
-                        true // remove
+                        to_remove.push(idx);
                     } else {
-                        false // keep
+                        // We'll update TTL after releasing borrow
                     }
-                })
-                .collect();
-            *buf = remaining;
+                }
+                // Remove expired (reverse order)
+                for idx in to_remove.into_iter().rev() {
+                    buf.remove(idx);
+                }
+                // Update remaining TTL
+                for msg in buf.iter_mut() {
+                    msg.ttl = msg.ttl.saturating_sub(1);
+                }
+            }
+            (expired, expired_count)
+        };
+
+        // Update stats separately
+        if expired_count > 0 {
+            let mut stats = self.stats.lock().await;
+            stats.total_expired += expired_count;
         }
 
         expired
