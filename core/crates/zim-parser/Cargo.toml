@@ -1,0 +1,17 @@
+[package]
+name = "zim-parser"
+version = "0.2.0"
+edition = "2021"
+description = "ZIM file (openZIM) parser for offline Wikipedia"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tokio = { version = "1", features = ["full"] }
+lzma-rs = "0.3"  # ZIM uses LZMA/XZ compression
+flate2 = "1.0"   # Some ZIM versions use deflate
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "macros"] }
+tempfile = "3"

@@ -47,6 +47,12 @@ llm-inference = { path = "crates/llm-inference" }
 # DTN routing
 dtn-router = { path = "crates/dtn-router" }
 
+# Speech-to-Text (whisper.cpp)
+whisper-stt = { path = "crates/whisper-stt", features = ["mock"] }
+
+# ZIM file parser (offline Wikipedia)
+zim-parser = { path = "crates/zim-parser" }
+
 # Feature flags
 [features]
 default = ["mobile"]

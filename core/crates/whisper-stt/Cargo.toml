@@ -1,0 +1,25 @@
+[package]
+name = "whisper-stt"
+version = "0.2.0"
+edition = "2021"
+description = "Whisper.cpp Speech-to-Text bindings for ONDE"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tokio = { version = "1", features = ["full"] }
+hound = "3.5"  # WAV audio handling
+cpal = { version = "0.15", optional = true }  # Audio capture
+
+[dependencies.whisper-rs]
+version = "0.13"
+# whisper-rs wraps whisper.cpp with GGML models
+
+[features]
+default = ["audio-capture"]
+audio-capture = ["cpal"]
+mock = []  # Simulated STT for testing without model
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "macros"] }
