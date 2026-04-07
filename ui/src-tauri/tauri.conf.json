@@ -1,0 +1,35 @@
+{
+  "productName": "ONDE",
+  "version": "0.1.0",
+  "identifier": "citoyen.onde.mesh",
+  "build": {
+    "frontendDist": "../src",
+    "devUrl": "http://localhost:1420"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "ONDE — Réseau de Résilience Citoyen",
+        "width": 480,
+        "height": 900,
+        "resizable": true,
+        "fullscreen": false,
+        "backgroundColor": "#000000"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

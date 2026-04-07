@@ -1,0 +1,45 @@
+# === Rust ===
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+*.egg
+
+# === Simulation Results ===
+simulation/results/*.json
+
+# === IDE ===
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# === OS ===
+.DS_Store
+Thumbs.db
+
+# === Tauri ===
+src-tauri/gen/
+src-tauri/target/
+icons/
+
+# === Build Artifacts ===
+*.apk
+*.ipa
+*.exe
+*.dmg
+*.AppImage
+
+# === Docker Volumes ===
+*.vol
+
+# === Debug ===
+*.log

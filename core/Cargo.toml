@@ -1,0 +1,68 @@
+[package]
+name = "onde-core"
+version = "0.1.0"
+edition = "2021"
+authors = ["ONDE Project"]
+description = "Core network engine for ONDE citizen resilience mesh network"
+license = "MIT"
+
+[lib]
+name = "onde_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "onde_node"
+path = "src/bin/node.rs"
+doc = false
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Cryptography
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+sha2 = "0.10"
+rand = "0.8"
+chacha20poly1305 = "0.10"
+hex = "0.4"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Network
+socket2 = "0.5"
+bytes = "1"
+
+# AI inference (GGML via C binding wrapper)
+# In production: llama-cpp-sys or similar
+# For now: mock interface for local inference
+llm-inference = { path = "crates/llm-inference" }
+
+# DTN routing
+dtn-router = { path = "crates/dtn-router" }
+
+# Feature flags
+[features]
+default = ["mobile"]
+mobile = []       # Mobile device profile
+desktop = ["llm-inference/heavy-models"]  # Desktop oracle profile
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+# Android NDK cross-compilation
+[target.aarch64-linux-android]
+linker = "aarch64-linux-android21-clang"

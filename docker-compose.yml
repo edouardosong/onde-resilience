@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: onde-dev
+    volumes:
+      - .:/workspace
+      - cargo-registry:/root/.cargo/registry
+      - cargo-git:/root/.cargo/git
+      - cargo-target:/workspace/core/target
+    environment:
+      - RUST_BACKTRACE=1
+      - ANDROID_HOME=/opt/android-sdk
+      - ANDROID_NDK_HOME=/opt/android-sdk/ndk/26.2.11394342
+    stdin_open: true
+    tty: true
+    ports:
+      - "3000:3000"   # Dev server
+      - "8080:8080"   # Oracle RPC
+      - "9000:9000"   # IPFS gateway
+    networks:
+      - mesh-net
+
+  simulation:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: onde-sim
+    volumes:
+      - .:/workspace
+    command: python3 simulation/mesh_sim.py
+    profiles:
+      - sim
+
+volumes:
+  cargo-registry:
+  cargo-git:
+  cargo-target:
+
+networks:
+  mesh-net:
+    driver: bridge

@@ -1,0 +1,1081 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#000000">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>ONDE — Réseau de Résilience Citoyen</title>
+    <style>
+        /* ===== AMOLED BLACK PUR THEME ===== */
+        :root {
+            --black: #000000;
+            --surface: #0A0A0A;
+            --surface-elevated: #111111;
+            --border: #1A1A1A;
+            --accent: #00FF88;
+            --accent-dim: #00CC6A;
+            --danger: #FF4444;
+            --warning: #FFB300;
+            --info: #448AFF;
+            --text-primary: #E8E8E8;
+            --text-secondary: #888888;
+            --text-dim: #444444;
+            --radius: 12px;
+            --radius-sm: 8px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html, body {
+            height: 100%;
+            background: var(--black);
+            color: var(--text-primary);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ===== APP SHELL ===== */
+        #app {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            max-width: 480px;
+            margin: 0 auto;
+        }
+
+        /* ===== HEADER ===== */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: var(--black);
+            border-bottom: 1px solid var(--border);
+            position: relative;
+            z-index: 10;
+        }
+
+        .header .logo {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--accent);
+            letter-spacing: 2px;
+        }
+
+        .header .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--accent);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(0, 255, 136, 0.4); }
+            50% { opacity: 0.7; box-shadow: 0 0 0 6px rgba(0, 255, 136, 0); }
+        }
+
+        .header .mesh-badge {
+            font-size: 11px;
+            padding: 3px 8px;
+            background: var(--surface-elevated);
+            color: var(--text-secondary);
+            border-radius: 20px;
+            border: 1px solid var(--border);
+        }
+
+        /* ===== MAIN CONTENT ===== */
+        .content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            scroll-behavior: smooth;
+        }
+
+        .content::-webkit-scrollbar { width: 4px; }
+        .content::-webkit-scrollbar-track { background: var(--black); }
+        .content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+        /* ===== FEED ===== */
+        .feed { display: flex; flex-direction: column; gap: 12px; }
+
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px;
+            transition: background 0.2s;
+        }
+
+        .card:active { background: var(--surface-elevated); }
+
+        .card .card-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .card .avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: var(--accent);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            color: var(--black);
+            font-size: 14px;
+        }
+
+        .card .meta { flex: 1; }
+        .card .meta .name { font-weight: 600; font-size: 14px; }
+        .card .meta .time { font-size: 11px; color: var(--text-secondary); }
+
+        .card .card-type {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+        .card .card-type.alert { background: var(--danger); color: #fff; }
+        .card .card-type.aid { background: var(--info); color: #fff; }
+        .card .card-type.voice { background: var(--warning); color: #000; }
+
+        .card .content {
+            font-size: 14px;
+            line-height: 1.5;
+            color: var(--text-primary);
+        }
+
+        .card .pow-badge {
+            font-size: 10px;
+            color: var(--accent-dim);
+            margin-top: 8px;
+        }
+
+        .card .voice-player {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 10px;
+            padding: 10px;
+            background: var(--black);
+            border-radius: var(--radius-sm);
+        }
+
+        .card .voice-player .play-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--accent);
+            border: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        .card .voice-player .waveform {
+            flex: 1;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            gap: 2px;
+        }
+
+        .card .voice-player .waveform .bar {
+            width: 3px;
+            background: var(--accent-dim);
+            border-radius: 2px;
+        }
+
+        .card .voice-player .duration {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        /* ===== WRITE POST ===== */
+        .compose-bar {
+            display: flex;
+            padding: 12px 16px;
+            background: var(--surface);
+            border-top: 1px solid var(--border);
+            gap: 10px;
+        }
+
+        .compose-bar input {
+            flex: 1;
+            background: var(--black);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 10px 16px;
+            color: var(--text-primary);
+            font-size: 14px;
+            outline: none;
+        }
+
+        .compose-bar input:focus {
+            border-color: var(--accent);
+        }
+
+        .compose-bar input::placeholder { color: var(--text-dim); }
+
+        .compose-bar button {
+            background: var(--accent);
+            color: var(--black);
+            border: none;
+            border-radius: var(--radius);
+            padding: 10px 20px;
+            font-weight: 700;
+            font-size: 14px;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .compose-bar button:active { opacity: 0.7; }
+
+        /* ===== NAV TABS ===== */
+        .nav-tabs {
+            display: flex;
+            background: var(--black);
+            border-top: 1px solid var(--border);
+            padding: 8px 0;
+            padding-bottom: max(8px, env(safe-area-inset-bottom));
+        }
+
+        .nav-tabs .tab {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            padding: 8px 0;
+            cursor: pointer;
+            color: var(--text-secondary);
+            font-size: 10px;
+            transition: color 0.2s;
+            border: none;
+            background: none;
+        }
+
+        .nav-tabs .tab.active { color: var(--accent); }
+
+        .nav-tabs .tab .icon {
+            font-size: 20px;
+        }
+
+        /* ===== PAGE PAGES ===== */
+        .page { display: none; }
+        .page.active { display: block; }
+
+        /* ===== RADAR PAGE ===== */
+        .radar-container {
+            width: 100%;
+            aspect-ratio: 1;
+            max-height: 350px;
+            margin: 0 auto 20px;
+            border: 2px solid var(--accent-dim);
+            border-radius: 50%;
+            position: relative;
+            background: var(--surface);
+            overflow: hidden;
+        }
+
+        .radar-container .radar-sweep {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 50%;
+            height: 2px;
+            background: linear-gradient(90deg, var(--accent), transparent);
+            transform-origin: 0 0;
+            animation: sweep 3s linear infinite;
+        }
+
+        @keyframes sweep {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .radar-container .radar-ring {
+            position: absolute;
+            border: 1px solid var(--border);
+            border-radius: 50%;
+        }
+
+        .radar-container .radar-ring:nth-child(1) {
+            top: 25%; left: 25%; width: 50%; height: 50%;
+        }
+
+        .radar-container .radar-ring:nth-child(2) {
+            top: 10%; left: 10%; width: 80%; height: 80%;
+        }
+
+        .radar-container .node-dot {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent);
+            transform: translate(-50%, -50%);
+        }
+
+        .radar-container .node-dot.bridge {
+            width: 12px;
+            height: 12px;
+            background: var(--info);
+        }
+
+        .radar-label {
+            text-align: center;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+        }
+
+        .geohash-display {
+            text-align: center;
+            padding: 12px;
+            background: var(--surface-elevated);
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+            margin-bottom: 16px;
+        }
+
+        .geohash-display .label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-secondary);
+        }
+
+        .geohash-display .value {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--accent);
+            font-family: monospace;
+            letter-spacing: 3px;
+        }
+
+        /* ===== AI CHAT PAGE ===== */
+        .ai-chat {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        .ai-chat .messages {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .ai-chat .msg {
+            max-width: 80%;
+            padding: 12px 16px;
+            border-radius: 16px;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        .ai-chat .msg.user {
+            align-self: flex-end;
+            background: var(--accent-dim);
+            color: var(--black);
+            border-bottom-right-radius: 4px;
+        }
+
+        .ai-chat .msg.ai {
+            align-self: flex-start;
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            border-bottom-left-radius: 4px;
+        }
+
+        .ai-chat .msg .meta {
+            font-size: 10px;
+            color: var(--text-dim);
+            margin-top: 4px;
+        }
+
+        .ai-input-area {
+            display: flex;
+            gap: 10px;
+        }
+
+        .ai-input-area input {
+            flex: 1;
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 12px 16px;
+            color: var(--text-primary);
+            font-size: 14px;
+            outline: none;
+        }
+
+        .ai-input-area input:focus { border-color: var(--accent); }
+
+        .ai-input-area button {
+            background: var(--accent);
+            color: var(--black);
+            border: none;
+            border-radius: var(--radius);
+            padding: 12px 16px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .model-badge {
+            font-size: 11px;
+            color: var(--accent-dim);
+            text-align: center;
+            margin-bottom: 12px;
+        }
+
+        /* ===== WALLET PAGE ===== */
+        .wallet-balance {
+            text-align: center;
+            padding: 24px;
+            background: var(--surface-elevated);
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            margin-bottom: 16px;
+        }
+
+        .wallet-balance .amount {
+            font-size: 36px;
+            font-weight: 700;
+            color: var(--accent);
+        }
+
+        .wallet-balance .unit {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        .tx-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .tx-item {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            background: var(--surface);
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+        }
+
+        .tx-item .tx-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            margin-right: 12px;
+        }
+
+        .tx-item .tx-icon.sent { background: rgba(255, 68, 68, 0.2); }
+        .tx-item .tx-icon.received { background: rgba(0, 255, 136, 0.2); }
+        .tx-item .tx-icon.pending { background: rgba(255, 179, 0, 0.2); }
+
+        .tx-item .tx-details { flex: 1; }
+        .tx-item .tx-details .tx-label { font-size: 14px; font-weight: 500; }
+        .tx-item .tx-details .tx-time { font-size: 11px; color: var(--text-secondary); }
+        .tx-item .tx-amount { font-weight: 600; }
+        .tx-item .tx-amount.positive { color: var(--accent); }
+        .tx-item .tx-amount.negative { color: var(--danger); }
+        .tx-item .tx-amount.pending { color: var(--warning); }
+
+        /* ===== ENCYCLOPEDIA PAGE ===== */
+        .search-box {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .search-box input {
+            flex: 1;
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 12px 16px;
+            color: var(--text-primary);
+            font-size: 14px;
+            outline: none;
+        }
+
+        .search-box input:focus { border-color: var(--accent); }
+        .search-box button {
+            background: var(--accent);
+            color: var(--black);
+            border: none;
+            border-radius: var(--radius);
+            padding: 12px 20px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .article-card {
+            padding: 16px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            margin-bottom: 10px;
+        }
+
+        .article-card h3 {
+            font-size: 16px;
+            color: var(--accent);
+            margin-bottom: 6px;
+        }
+
+        .article-card p {
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.4;
+        }
+
+        /* ===== P2P SHARE PAGE ===== */
+        .qr-area {
+            text-align: center;
+            padding: 30px;
+        }
+
+        .qr-code {
+            width: 200px;
+            height: 200px;
+            margin: 0 auto 16px;
+            background: #fff;
+            border-radius: var(--radius);
+            display: grid;
+            place-items: center;
+            font-size: 48px;
+        }
+
+        .qr-hint {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .file-drop {
+            border: 2px dashed var(--border);
+            border-radius: var(--radius);
+            padding: 40px 20px;
+            text-align: center;
+            margin-top: 20px;
+            transition: border-color 0.3s;
+        }
+
+        .file-drop:hover { border-color: var(--accent); }
+
+        /* ===== SECTION HEADERS ===== */
+        .section-title {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 16px;
+            color: var(--text-primary);
+        }
+
+        /* ===== EMPTY STATE ===== */
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-secondary);
+        }
+
+        .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+        .empty-state .label { font-size: 14px; }
+
+        /* ===== NODE INFO ===== */
+        .node-info {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .node-stat {
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 12px;
+            text-align: center;
+        }
+
+        .node-stat .stat-value {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--accent);
+        }
+
+        .node-stat .stat-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* ===== RESPONSIVE ===== */
+        @media (min-width: 481px) {
+            #app {
+                border-left: 1px solid var(--border);
+                border-right: 1px solid var(--border);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <!-- HEADER -->
+        <div class="header">
+            <div class="logo">⧫ ONDE</div>
+            <div class="mesh-badge" id="mesh-badge">Mesh Actif</div>
+            <div class="status-dot" id="status-dot"></div>
+        </div>
+
+        <!-- CONTENT AREA -->
+        <div class="content">
+            <!-- ALERT FEED PAGE -->
+            <div class="page active" id="page-feed">
+                <div style="display:flex;gap:6px;margin-bottom:16px;">
+                    <button id="btn-alerts" style="flex:1;padding:8px;border-radius:20px;border:1px solid var(--accent);background:var(--accent);color:var(--black);font-weight:600;font-size:12px;cursor:pointer;">Alertes</button>
+                    <button id="btn-aid" style="flex:1;padding:8px;border-radius:20px;border:1px solid var(--border);background:transparent;color:var(--text-secondary);font-weight:600;font-size:12px;cursor:pointer;">Entraide</button>
+                </div>
+                <div class="feed" id="feed-container">
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="avatar">AL</div>
+                            <div class="meta">
+                                <div class="name">Alice</div>
+                                <div class="time">Il y a 2 min</div>
+                            </div>
+                            <span class="card-type alert">ALERTE</span>
+                        </div>
+                        <div class="content">⚠️ Coupure réseau secteur Nord. Point d'eau disponible Place de la Mairie. Apportez vos bouteilles.</div>
+                        <div class="pow-badge">✓ PoW vérifié · 4 hops</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="avatar" style="background:var(--info);">BM</div>
+                            <div class="meta">
+                                <div class="name">Bob Martin</div>
+                                <div class="time">Il y a 15 min</div>
+                            </div>
+                            <span class="card-type aid">ENTRAIDE</span>
+                        </div>
+                        <div class="content">Possède un groupe électrogène et des médicaments. Quartier sud — contactez-moi pour coordination. Disponible jusqu'à 20h.</div>
+                        <div class="pow-badge">✓ PoW vérifié · 2 hops</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="avatar" style="background:var(--warning);">CD</div>
+                            <div class="meta">
+                                <div class="name">Claire D.</div>
+                                <div class="time">Il y a 32 min</div>
+                            </div>
+                            <span class="card-type voice">VOIX</span>
+                        </div>
+                        <div class="content">Mémo vocal — transcription auto :</div>
+                        <div class="voice-player">
+                            <button class="play-btn">▶</button>
+                            <div class="waveform" id="waveform-1"></div>
+                            <span class="duration">0:12</span>
+                        </div>
+                        <div style="font-size:12px;color:var(--text-secondary);margin-top:8px;font-style:italic;">
+                            "J'ai des couvertures et de la nourriture chaude au 15 rue Victor Hugo"</div>
+                        <div class="pow-badge">✓ PoW vérifié · Opus 8kbps</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RADAR PAGE -->
+            <div class="page" id="page-radar">
+                <h2 class="section-title">📡 Radar Mesh</h2>
+                <div class="geohash-display">
+                    <div class="label">Votre position Geohash</div>
+                    <div class="value" id="geohash-value">u09tunq</div>
+                </div>
+                <div class="node-info">
+                    <div class="node-stat">
+                        <div class="stat-value" id="node-count">47</div>
+                        <div class="stat-label">Nœuds proches</div>
+                    </div>
+                    <div class="node-stat">
+                        <div class="stat-value" id="bridge-count">3</div>
+                        <div class="stat-label">Ponts desktop</div>
+                    </div>
+                    <div class="node-stat">
+                        <div class="stat-value" id="dtn-buffer">12</div>
+                        <div class="stat-label">Msg en attente</div>
+                    </div>
+                    <div class="node-stat">
+                        <div class="stat-value" id="uptime-label">6h</div>
+                        <div class="stat-label">Uptime</div>
+                    </div>
+                </div>
+                <div class="radar-container">
+                    <div class="radar-ring"></div>
+                    <div class="radar-ring"></div>
+                    <div class="radar-sweep"></div>
+                </div>
+                <p class="radar-label">Rayon affiché : 500m · Précision Geohash : ~150m</p>
+            </div>
+
+            <!-- AI CHAT PAGE -->
+            <div class="page" id="page-ai">
+                <h2 class="section-title">🧠 Assistant IA</h2>
+                <div class="model-badge" id="model-badge">Modèle local : Qwen 1.8B (Q4_K_M)</div>
+                <div class="ai-chat">
+                    <div class="messages" id="ai-messages">
+                        <div class="msg ai">
+                            👋 Je suis votre assistant local ONDE. Je peux vous aider avec les premiers secours, la navigation hors-ligne, ou répondre à vos questions.
+                            <div class="meta">PocketPal · 1.8B · inférence locale</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="ai-input-area">
+                    <input type="text" id="ai-input" placeholder="Posez votre question...">
+                    <button id="ai-send">➤</button>
+                </div>
+            </div>
+
+            <!-- WALLET PAGE -->
+            <div class="page" id="page-wallet">
+                <h2 class="section-title">💰 Portefeuille Hors-Ligne</h2>
+                <div class="wallet-balance">
+                    <div class="amount" id="wallet-amount">247.50</div>
+                    <div class="unit">crédits · Transactions ZK asynchrones</div>
+                </div>
+                <div style="display:flex;gap:8px;margin-bottom:16px;">
+                    <button id="btn-send-tx" style="flex:1;padding:10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--accent);color:var(--black);font-weight:600;font-size:13px;cursor:pointer;">Envoyer</button>
+                    <button style="flex:1;padding:10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:transparent;color:var(--text-secondary);font-weight:600;font-size:13px;cursor:pointer;">Recevoir</button>
+                </div>
+                <div style="font-size:11px;color:var(--text-secondary);margin-bottom:10px;border-bottom:1px solid var(--border);padding-bottom:6px;">HISTORIQUE</div>
+                <div class="tx-list" id="tx-list">
+                    <div class="tx-item">
+                        <div class="tx-icon sent">↗</div>
+                        <div class="tx-details">
+                            <div class="tx-label">Envoyé à Carol P.</div>
+                            <div class="tx-time">u09tu... · Il y a 1h</div>
+                        </div>
+                        <div class="tx-amount negative">-25.00</div>
+                    </div>
+                    <div class="tx-item">
+                        <div class="tx-icon received">↙</div>
+                        <div class="tx-details">
+                            <div class="tx-label">Reçu de Bob M.</div>
+                            <div class="tx-time">u09tx... · Il y a 3h</div>
+                        </div>
+                        <div class="tx-amount positive">+50.00</div>
+                    </div>
+                    <div class="tx-item">
+                        <div class="tx-icon pending">⏳</div>
+                        <div class="tx-details">
+                            <div class="tx-label">En attente — 2 tx</div>
+                            <div class="tx-time">En file · Sera poussé à la blockchain</div>
+                        </div>
+                        <div class="tx-amount pending">15.00</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ENCYCLOPEDIA PAGE -->
+            <div class="page" id="page-encyclopedia">
+                <h2 class="section-title">📚 Encyclopédie</h2>
+                <div class="search-box">
+                    <input type="text" id="search-input" placeholder="Rechercher dans Wikipédia hors-ligne...">
+                    <button id="search-btn">🔍</button>
+                </div>
+                <div class="node-info" style="margin-bottom:16px;">
+                    <div class="node-stat">
+                        <div class="stat-value">90</div>
+                        <div class="stat-label">Go ZIM chargé</div>
+                    </div>
+                    <div class="node-stat">
+                        <div class="stat-value">6.5M</div>
+                        <div class="stat-label">Articles</div>
+                    </div>
+                </div>
+                <div id="article-results">
+                    <div class="article-card">
+                        <h3>Premiers secours</h3>
+                        <p>Les premiers secours sont les gestes effectués par une personne pour porter assistance à une autre en attendant l'arrivée des secours d'urgence.</p>
+                    </div>
+                    <div class="article-card">
+                        <h3>Survie en milieu hostile</h3>
+                        <p>La survie en milieu hostile regroupe l'ensemble des techniques permettant de vivre dans un environnement défavorable.</p>
+                    </div>
+                    <div class="article-card">
+                        <h3>Purification de l'eau</h3>
+                        <p>La purification de l'eau est le processus d'élimination des contaminants chimiques, biologiques et physiques de l'eau.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- P2P SHARE PAGE -->
+            <div class="page" id="page-p2p">
+                <h2 class="section-title">📱 Partage P2P</h2>
+                <div class="qr-area">
+                    <div class="qr-code">⧫</div>
+                    <div style="font-size:14px;margin-bottom:4px;">Scannez ce QR pour appairer</div>
+                    <div class="qr-hint">L'appareil distant créera un hotspot temporaire</div>
+                </div>
+                <div class="file-drop" id="file-drop">
+                    <div style="font-size:32px;margin-bottom:8px;">📂</div>
+                    <div style="font-size:14px;">Glissez un fichier ici ou tapez pour sélectionner</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- COMPOSE BAR (visible only on feed page) -->
+        <div class="compose-bar" id="compose-bar">
+            <input type="text" id="compose-input" maxlength="280" placeholder="⚠️ Alerte ou message d'entraide (280 car.)">
+            <button id="compose-send">⧫</button>
+        </div>
+
+        <!-- NAV TABS -->
+        <div class="nav-tabs">
+            <button class="tab active" data-page="page-feed">
+                <span class="icon">⚡</span>
+                <span>Alertes</span>
+            </button>
+            <button class="tab" data-page="page-radar">
+                <span class="icon">📡</span>
+                <span>Radar</span>
+            </button>
+            <button class="tab" data-page="page-ai">
+                <span class="icon">🧠</span>
+                <span>IA</span>
+            </button>
+            <button class="tab" data-page="page-wallet">
+                <span class="icon">💰</span>
+                <span>Wallet</span>
+            </button>
+            <button class="tab" data-page="page-encyclopedia">
+                <span class="icon">📚</span>
+                <span>Wiki</span>
+            </button>
+            <button class="tab" data-page="page-p2p">
+                <span class="icon">📱</span>
+                <span>P2P</span>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // ===== NAVIGATION =====
+        document.querySelectorAll('.nav-tabs .tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById(tab.dataset.page).classList.add('active');
+                
+                // Toggle compose bar
+                const composeBar = document.getElementById('compose-bar');
+                composeBar.style.display = tab.dataset.page === 'page-feed' ? 'flex' : 'none';
+            });
+        });
+
+        // ===== COMPOSE =====
+        document.getElementById('compose-send').addEventListener('click', () => {
+            const input = document.getElementById('compose-input');
+            if (input.value && input.value.trim()) {
+                // Simulate PoW + publish
+                const feed = document.getElementById('feed-container');
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.innerHTML = `
+                    <div class="card-header">
+                        <div class="avatar">MO</div>
+                        <div class="meta">
+                            <div class="name">Moi</div>
+                            <div class="time">À l'instant</div>
+                        </div>
+                        <span class="card-type alert">ALERTE</span>
+                    </div>
+                    <div class="content">${input.value}</div>
+                    <div class="pow-badge">✓ PoW calculé · 0 hops · diffusion en cours...</div>
+                `;
+                feed.insertBefore(card, feed.firstChild);
+                input.value = '';
+            }
+        });
+
+        // ===== FEED TABS =====
+        document.getElementById('btn-alerts').addEventListener('click', function() {
+            this.style.borderColor = 'var(--accent)';
+            this.style.background = 'var(--accent)';
+            this.style.color = 'var(--black)';
+            const aid = document.getElementById('btn-aid');
+            aid.style.borderColor = 'var(--border)';
+            aid.style.background = 'transparent';
+            aid.style.color = 'var(--text-secondary)';
+        });
+
+        document.getElementById('btn-aid').addEventListener('click', function() {
+            this.style.borderColor = 'var(--accent)';
+            this.style.background = 'var(--accent)';
+            this.style.color = 'var(--black)';
+            const alerts = document.getElementById('btn-alerts');
+            alerts.style.borderColor = 'var(--border)';
+            alerts.style.background = 'transparent';
+            alerts.style.color = 'var(--text-secondary)';
+        });
+
+        // ===== WAVEFORM GENERATOR =====
+        (function generateWaveform() {
+            const container = document.getElementById('waveform-1');
+            if (!container) return;
+            for (let i = 0; i < 30; i++) {
+                const bar = document.createElement('div');
+                bar.className = 'bar';
+                bar.style.height = `${Math.random() * 24 + 4}px`;
+                container.appendChild(bar);
+            }
+        })();
+
+        // ===== RADAR NODES =====
+        (function populateRadar() {
+            const radar = document.querySelector('.radar-container');
+            if (!radar) return;
+            const nodes = [
+                {x: 35, y: 45, bridge: false},
+                {x: 60, y: 30, bridge: false},
+                {x: 50, y: 50, bridge: true},
+                {x: 25, y: 65, bridge: false},
+                {x: 70, y: 55, bridge: false},
+                {x: 45, y: 20, bridge: true},
+                {x: 80, y: 40, bridge: false},
+                {x: 20, y: 35, bridge: false},
+                {x: 55, y: 70, bridge: false},
+                {x: 40, y: 60, bridge: true},
+            ];
+            nodes.forEach(n => {
+                const dot = document.createElement('div');
+                dot.className = 'node-dot' + (n.bridge ? ' bridge' : '');
+                dot.style.left = n.x + '%';
+                dot.style.top = n.y + '%';
+                radar.appendChild(dot);
+            });
+        })();
+
+        // ===== AI CHAT =====
+        document.getElementById('ai-send').addEventListener('click', () => {
+            const input = document.getElementById('ai-input');
+            const messages = document.getElementById('ai-messages');
+            if (!input.value.trim() || !messages) return;
+
+            // User message
+            const userMsg = document.createElement('div');
+            userMsg.className = 'msg user';
+            userMsg.textContent = input.value;
+            messages.appendChild(userMsg);
+
+            const userText = input.value;
+            input.value = '';
+
+            // Simulated AI response
+            setTimeout(() => {
+                const aiMsg = document.createElement('div');
+                aiMsg.className = 'msg ai';
+                aiMsg.innerHTML = `${getAiResponse(userText)}<div class="meta">PocketPal · inférence locale · ${Math.floor(Math.random() * 2000 + 500)}ms</div>`;
+                messages.appendChild(aiMsg);
+                messages.scrollTop = messages.scrollHeight;
+            }, 800);
+
+            messages.scrollTop = messages.scrollHeight;
+        });
+
+        function getAiResponse(input) {
+            const responses = [
+                "D'après les connaissances disponibles, voici ce que je peux vous dire : cette information est stockée dans la base ZIM locale. Les premiers secours nécessitent une formation — je peux vous guider vers les gestes de base.",
+                "Je n'ai pas trouvé de réponse exacte dans ma base locale. Je pourrais déléguer cette requête à un super-oracle desktop si un pont est disponible dans votre réseau mesh.",
+                "Information trouvée : dans une situation d'urgence, identifiez d'abord les risques environnementaux. Le radar mesh montre 47 nœuds actifs dans votre zone — l'entraide est disponible.",
+                "Modèle local actif : je traite les informations de survie médicale, navigation hors-ligne et protocoles d'urgence. Pour des analyses plus complexes, demandez le relais oracle.",
+            ];
+            return responses[Math.floor(Math.random() * responses.length)];
+        }
+
+        // ===== SEARCH ENCYCLOPEDIA =====
+        document.getElementById('search-btn').addEventListener('click', () => {
+            const input = document.getElementById('search-input');
+            const results = document.getElementById('article-results');
+            if (input.value && results) {
+                results.innerHTML = `
+                    <div class="article-card">
+                        <h3>Résultats pour "${input.value}"</h3>
+                        <p>Recherche effectuée dans l'archive ZIM locale. 12 articles trouvés.</p>
+                    </div>
+                    <div class="article-card">
+                        <h3>${input.value} — Guide pratique</h3>
+                        <p>Contenus hors-ligne disponibles depuis le cache IPFS local du nœud.</p>
+                    </div>
+                `;
+            }
+        });
+
+        // ===== LIVE CLOCK & STATUS =====
+        setInterval(() => {
+            const dot = document.getElementById('status-dot');
+            if (dot) {
+                const meshBadge = document.getElementById('mesh-badge');
+                if (Math.random() > 0.95) {
+                    dot.style.background = 'var(--warning)';
+                    if (meshBadge) meshBadge.textContent = 'Mesh faible';
+                } else {
+                    dot.style.background = 'var(--accent)';
+                    if (meshBadge) meshBadge.textContent = 'Mesh Actif';
+                }
+            }
+        }, 5000);
+
+        // ===== SIMULATED FEED UPDATES =====
+        const feedData = [
+            { name: 'David R.', type: 'alert', content: '⚠️ Route bloquée km 12. Évacuation par le sentier forestier. 5 blessés légers signalés.' },
+            { name: 'Emma L.', type: 'aid', content: 'Besoin de médicaments anti-diarrhéiques. Famille de 4, réfugiés au gymnase. Contactez-nous via le mesh.' },
+            { name: 'François K.', type: 'alert', content: '🔋 Chargeur solaire disponible à la bibliothèque. Apportez vos appareils 14h-18h aujourd\'hui.' },
+        ];
+
+        let feedIdx = 0;
+        setInterval(() => {
+            if (feedIdx >= feedData.length) return;
+            const post = feedData[feedIdx++];
+            const feed = document.getElementById('feed-container');
+            const card = document.createElement('div');
+            card.className = 'card';
+            const typeClass = post.type === 'alert' ? 'alert' : 'aid';
+            const typeLabel = post.type === 'alert' ? 'ALERTE' : 'ENTRAIDE';
+            const bgColor = post.type === 'alert' ? 'var(--danger)' : 'var(--info)';
+            card.innerHTML = `
+                <div class="card-header">
+                    <div class="avatar" style="background:${bgColor};">${post.name[0]}</div>
+                    <div class="meta">
+                        <div class="name">${post.name}</div>
+                        <div class="time">À l'instant</div>
+                    </div>
+                    <span class="card-type ${typeClass}">${typeLabel}</span>
+                </div>
+                <div class="content">${post.content}</div>
+                <div class="pow-badge">✓ PoW vérifié · ${Math.floor(Math.random() * 5)} hops · DTN store-and-forward</div>
+            `;
+            if (feed) feed.insertBefore(card, feed.firstChild);
+        }, 30000);
+    </script>
+</body>
+</html>

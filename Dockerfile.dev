@@ -1,0 +1,107 @@
+##############################################################################
+# ONDE — Réseau de Résilience Citoyen
+# Dockerfile.dev — Environnement de développement complet
+# Cible: Build cross-platform Android, Windows, Linux, macOS (via Tauri)
+##############################################################################
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 1. SYSTEM DEPENDENCIES
+# ──────────────────────────────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    libfontconfig1-dev \
+    libgtk-3-dev \
+    libwebkit2gtk-4.0-dev \
+    libappindicator3-dev \
+    libayatana-appindicator3-dev \
+    libsoup2.4-dev \
+    libjavascriptcoregtk-4.0-dev \
+    curl \
+    git \
+    wget \
+    unzip \
+    zip \
+    cmake \
+    ninja-build \
+    clang \
+    llvm \
+    python3 \
+    python3-pip \
+    python3-venv \
+    jq \
+    locales \
+    file \
+    && locale-gen en_US.UTF-8 \
+    && rm -rf /var/lib/apt/lists/*
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 2. RUST TOOLCHAIN
+# ──────────────────────────────────────────────────────────────────────────────
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Install Rust stable + nightly + cross-compilation targets
+RUN rustup default stable && \
+    rustup component add rustfmt clippy && \
+    rustup target add \
+        aarch64-linux-android \
+        armv7-linux-androideabi \
+        x86_64-linux-android \
+        aarch64-unknown-linux-gnu \
+        x86_64-unknown-linux-gnu
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 3. ANDROID SDK/NDK (auto-accept licences)
+# ──────────────────────────────────────────────────────────────────────────────
+ENV ANDROID_HOME=/opt/android-sdk
+ENV PATH="${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/platform-tools:${PATH}"
+ENV ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/26.2.11394342"
+
+RUN mkdir -p ${ANDROID_HOME}/cmdline-tools && \
+    cd /tmp && \
+    wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdtools.zip && \
+    unzip -q cmdtools.zip && \
+    mv cmdline-tools ${ANDROID_HOME}/cmdline-tools/latest && \
+    rm cmdtools.zip
+
+RUN yes | sdkmanager --licenses 2>/dev/null || true
+RUN sdkmanager \
+    "platforms;android-34" \
+    "build-tools;34.0.0" \
+    "platform-tools" \
+    "ndk;26.2.11394342"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 4. PYTHON ENVIRONMENT
+# ──────────────────────────────────────────────────────────────────────────────
+RUN pip3 install --break-system-packages \
+    simpy \
+    numpy \
+    matplotlib \
+    pandas \
+    opuslib \
+    sounddevice \
+    cryptography
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 5. TAURI CONFIGURATION (Linux build target)
+# ──────────────────────────────────────────────────────────────────────────────
+# Tauri est géré via le Cargo.toml du projet UI
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 6. WORKSPACE
+# ──────────────────────────────────────────────────────────────────────────────
+WORKDIR /workspace
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 7. ENTRY POINT
+# ──────────────────────────────────────────────────────────────────────────────
+CMD ["/bin/bash"]

@@ -1,0 +1,19 @@
+[package]
+name = "llm-inference"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+
+# In production: llama-cpp-sys for GGML inference
+# For now: mock interface with quantized model simulator
+
+[features]
+default = []
+heavy-models = []  # Enable 70B+ model support (desktop oracle)
+
+[dev-dependencies]
