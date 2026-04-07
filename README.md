@@ -292,22 +292,22 @@ cargo tauri ios build
 
 ## 🗺️ Roadmap
 
-### Version actuelle : 0.1.0 (Prototype)
+### Version actuelle : 0.2.0 (En développement)
 - ✅ Core Rust: network, protocol, crypto, storage, AI
-- ✅ SimPy simulation network
+- ✅ SimPy simulation network (11 000 noeuds)
 - ✅ UI AMOLED Black standalone HTML
+- ✅ Application Android WebView (APK)
 - ✅ Tauri desktop skeleton
 - ✅ DTN router (store-and-forward)
 - ✅ Yggdrasil addressing
 - ✅ ZK transaction pool
 - ✅ PocketPal AI inference
-
-### Version 0.2.0 (À venir)
-- [ ] Intégration llama.cpp (GGML FFI)
-- [ ] Wi-Fi Aware native Android
-- [ ] IPFS-lite node complet
-- [ ] Whisper.cpp STT
-- [ ] ZIM file parser complet
+- ✅ Build Android ARM64 compilé
+- 🔄 Intégration llama.cpp (GGML FFI)
+- 🔄 Wi-Fi Aware native Android
+- 🔄 IPFS-lite node complet
+- 🔄 Whisper.cpp STT
+- 🔄 ZIM file parser complet
 
 ### Version 1.0.0 (Objectif)
 - [ ] Production builds: APK, IPA, EXE, DMG, AppImage
