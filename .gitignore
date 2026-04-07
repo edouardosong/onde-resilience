@@ -1,45 +1,31 @@
-# === Rust ===
-/target/
-**/*.rs.bk
-Cargo.lock
+# Build artifacts
+**/target/
+**/build/
+**/.gradle/
+**/*.apk
 
-# === Python ===
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-*.egg-info/
-dist/
-*.egg
+# Docker
+**/*.d
+**/.fingerprint/
+**/CACHEDIR.TAG
 
-# === Simulation Results ===
-simulation/results/*.json
-
-# === IDE ===
-.idea/
+# IDE
 .vscode/
+.idea/
 *.swp
 *.swo
 
-# === OS ===
+# OS
 .DS_Store
 Thumbs.db
 
-# === Tauri ===
-src-tauri/gen/
-src-tauri/target/
-icons/
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
 
-# === Build Artifacts ===
-*.apk
-*.ipa
-*.exe
-*.dmg
-*.AppImage
-
-# === Docker Volumes ===
-*.vol
-
-# === Debug ===
-*.log
+# Simulation outputs
+simulation/results/*.json
+simulation/results/*.png
+simulation/results/*.csv
