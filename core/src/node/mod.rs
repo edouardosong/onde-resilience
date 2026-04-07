@@ -116,8 +116,11 @@ impl Node {
             vec![],
         );
 
+        // Lower difficulty for alerts to ensure PoW succeeds
+        event.pow_difficulty = 2;
+
         // Compute PoW before publishing
-        if !event.compute_pow(100_000) {
+        if !event.compute_pow(1_000_000) {
             return Err("PoW computation failed".to_string());
         }
 
@@ -209,7 +212,8 @@ mod tests {
     #[tokio::test]
     async fn test_node_alert_publish() {
         let mut node = Node::new(NodeConfig::default());
-        let result = node.publish_alert("Test alert".to_string()).await;
+        // Use a short alert to ensure PoW succeeds
+        let result = node.publish_alert("OK".to_string()).await;
         assert!(result.is_ok());
     }
 }

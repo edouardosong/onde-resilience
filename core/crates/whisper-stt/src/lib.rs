@@ -93,9 +93,6 @@ impl Default for WhisperConfig {
 
 /// Speech-to-Text engine
 pub struct WhisperEngine {
-    /// Whisper context (wraps whisper.cpp)
-    #[cfg(not(feature = "mock"))]
-    ctx: Option<whisper_rs::WhisperContext>,
     /// Engine configuration
     pub config: WhisperConfig,
     /// Model loaded flag
@@ -118,8 +115,6 @@ impl WhisperEngine {
         }
 
         Ok(Self {
-            #[cfg(not(feature = "mock"))]
-            ctx: None,
             config,
             loaded: false,
         })

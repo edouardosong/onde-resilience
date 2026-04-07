@@ -284,20 +284,19 @@ impl LlamaContext {
         tracing::warn!("Using MOCK generation");
 
         let responses = vec![
-            "La RCP (Réanimation Cardio-Pulmonaire) consiste à appliquer des compressions thoraciques alternées avec des insufflations. Pour un adulte : 30 compressions pour 2 insufflations, à une fréquence de 100-120 compressions par minute. Appeler les secours (15 ou 112) immédiatement.",
-            "En cas d'hémorragie : 1) Allonger la victime 2) Appuyer fortement sur la plaie avec un tissu propre 3) Faire un pansement compressif 4) Alerter les secours (15, 112). Ne jamais retirer le premier pansement compressif.",
-            "Le triangle de Pythagore : Dans un triangle rectangle, a² + b² = c². Le côté c est l'hypoténuse (le plus long côté, opposé à l'angle droit). Exemple pratique : si a=3 et b=4, alors c=5.",
+            "La RCP (Reanimation Cardio-Pulmonaire) consiste a appliquer des compressions thoraciques altern\u{00e9}es avec des insufflations. Pour un adulte : 30 compressions pour 2 insufflations, a une fr\u{00e9}quence de 100-120 compressions par minute. Appeler les secours (15 ou 112) imm\u{00e9}diatement.",
+            "En cas d'h\u{00e9}morragie : 1) Allonger la victime 2) Appuyer fortement sur la plaie avec un tissu propre 3) Faire un pansement compressif 4) Alerter les secours (15, 112). Ne jamais retirer le premier pansement compressif.",
+            "Le triangle de Pythagore : Dans un triangle rectangle, a\u{00b2} + b\u{00b2} = c\u{00b2}. Le c\u{00f4}t\u{00e9} c est l'hypot\u{00e9}nuse (le plus long c\u{00f4}t\u{00e9}, oppos\u{00e9} \u{00e0} l'angle droit). Exemple pratique : si a=3 et b=4, alors c=5.",
         ];
 
         let idx = prompt.len() % responses.len();
         let text = responses[idx].to_string();
-
-        let gen_time_ms = start.elapsed().as_millis() as u64 + 200;
+        let n_tokens = text.len() as u32 / 4;
 
         Ok(GenerationResult {
             text,
-            n_tokens: text.len() as u32 / 4, // Rough estimate
-            gen_time_ms,
+            n_tokens,
+            gen_time_ms: 200,
             tokens_per_sec: 45.0,
             prompt_tokens: prompt.len() as u32 / 4,
             peak_mem_mb: self.model.ram_mb,
@@ -346,7 +345,7 @@ mod tests {
     fn test_qwen_7b() {
         let m = GGUFModel::qwen_7b(Quantization::Q4K);
         assert_eq!(m.params_b, 7.0);
-        let expected_ram = 650 * 7000 / 1000; // Q4K = 650MB per B params
+        let expected_ram: u64 = 650 * 7000 / 1000; // Q4K = 650MB per B params
         assert!(m.ram_mb > expected_ram.saturating_sub(500));
     }
 

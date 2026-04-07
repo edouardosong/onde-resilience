@@ -6,6 +6,15 @@ authors = ["ONDE Project"]
 description = "Core network engine for ONDE citizen resilience mesh network"
 license = "MIT"
 
+[workspace]
+members = [
+    "crates/llm-inference",
+    "crates/dtn-router",
+    "crates/whisper-stt",
+    "crates/zim-parser",
+    "crates/llama-bind",
+]
+
 [lib]
 name = "onde_core"
 path = "src/lib.rs"
