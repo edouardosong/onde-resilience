@@ -200,6 +200,11 @@ impl GossipProtocol {
     pub fn known_count(&self) -> usize {
         self.known_events.len()
     }
+
+    /// Get pending broadcasts
+    pub fn get_pending_broadcasts(&self) -> Vec<&MeshEvent> {
+        self.pending_broadcasts.iter().collect()
+    }
 }
 
 /*
