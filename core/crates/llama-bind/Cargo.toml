@@ -1,0 +1,29 @@
+[package]
+name = "llama-bind"
+version = "0.2.0"
+edition = "2021"
+description = "llama.cpp GGML/llama bindings for ONDE AI inference"
+
+[lib]
+name = "llama_bind"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+thiserror = "1"
+
+# In production: use llama-cpp-sys or build llama.cpp from source
+# For now: FFI declarations with mock fallback
+
+[build-dependencies]
+# Bindgen for generating FFI bindings from C headers
+
+[features]
+default = ["mock"]
+llama-cpp = []  # Enable real llama.cpp FFI
+mock = []       # Mock inference for testing
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "macros"] }
