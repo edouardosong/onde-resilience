@@ -1,7 +1,5 @@
-[build]
-# Default target for this build
-target = "aarch64-linux-android"
-
+# Android / cross targets are only used when passed explicitly, e.g.:
+# cargo build --target aarch64-linux-android
 [target.aarch64-linux-android]
 linker = "/opt/android-sdk/ndk/26.2.11394342/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
 ar = "/opt/android-sdk/ndk/26.2.11394342/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
