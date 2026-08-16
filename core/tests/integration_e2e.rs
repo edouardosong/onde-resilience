@@ -52,7 +52,10 @@ async fn test_alert_gossip_reception() {
     // PoW nonce can be 0 if hash("id:0") already has required leading zeros
 
     // Node B receives event via gossip
-    node_b.gossip.add_event(event.clone());
+    assert!(
+        node_b.gossip.add_event(event.clone()).is_ok(),
+        "Valid signed + PoW alert must be accepted by gossip"
+    );
 
     // Verify gossip state
     assert_eq!(node_b.gossip.known_count(), 1);
@@ -115,9 +118,11 @@ async fn test_zk_transaction_flow() {
 async fn test_voice_memo_transcription() {
     use whisper_stt::{WhisperEngine, WhisperConfig};
 
-    // Create voice memo event (simulated)
-    let mut voice_event = MeshEvent::new(
-        "voice_sender_pubkey",
+    // Create voice memo event (simulated) — signed by a real identity so that
+    // gossip validation (signature + PoW) accepts it
+    let voice_sender = Identity::generate();
+    let mut voice_event = MeshEvent::new_signed(
+        &voice_sender,
         OndeMessageType::VoiceMemo,
         "base64_encoded_opus_data_placeholder".to_string(),
         vec!["duration:5s".to_string()],
@@ -133,7 +138,10 @@ async fn test_voice_memo_transcription() {
         storage_gb: 64,
         ..Default::default()
     });
-    node_b.gossip.add_event(voice_event.clone());
+    assert!(
+        node_b.gossip.add_event(voice_event.clone()).is_ok(),
+        "Signed voice memo must be accepted by gossip"
+    );
 
     // Verify voice memo stored
     assert_eq!(node_b.gossip.known_count(), 1);
@@ -304,7 +312,11 @@ async fn test_multi_node_gossip() {
 
     // Propagate through gossip network (simulate flooding)
     for i in 1..5 {
-        nodes[i].gossip.add_event(alert.clone());
+        assert!(
+            nodes[i].gossip.add_event(alert.clone()).is_ok(),
+            "Node {} should accept the signed alert",
+            i
+        );
     }
 
     // Verify all nodes received the alert

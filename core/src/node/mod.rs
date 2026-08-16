@@ -109,8 +109,8 @@ impl Node {
             return Err("Alert must be <= 280 characters".to_string());
         }
 
-        let mut event = MeshEvent::new(
-            &self.identity.pubkey_hex(),
+        let mut event = MeshEvent::new_signed(
+            &self.identity,
             OndeMessageType::Alert,
             content,
             vec![],
@@ -124,14 +124,14 @@ impl Node {
             return Err("PoW computation failed".to_string());
         }
 
-        self.gossip.add_event(event.clone());
+        self.gossip.add_event(event.clone())?;
         Ok(event)
     }
 
     /// Publish a mutual aid request
     pub async fn publish_mutual_aid(&mut self, content: String) -> Result<MeshEvent, String> {
-        let mut event = MeshEvent::new(
-            &self.identity.pubkey_hex(),
+        let mut event = MeshEvent::new_signed(
+            &self.identity,
             OndeMessageType::MutualAid,
             content,
             vec![],
@@ -141,7 +141,7 @@ impl Node {
             return Err("PoW computation failed".to_string());
         }
 
-        self.gossip.add_event(event.clone());
+        self.gossip.add_event(event.clone())?;
         Ok(event)
     }
 
@@ -151,7 +151,7 @@ impl Node {
         receiver: &str,
         amount_micro: u64,
     ) -> Result<ZkTransaction, String> {
-        let nonce = self.tx_pool.pending_count() as u64;
+        let nonce = self.tx_pool.next_expected_nonce(&self.identity.pubkey_hex());
         let tx = ZkTransaction::new(&self.identity.pubkey_hex(), receiver, amount_micro, nonce);
 
         self.tx_pool.submit(tx.clone())?;
