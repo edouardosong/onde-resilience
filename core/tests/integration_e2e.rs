@@ -218,10 +218,11 @@ async fn test_dtn_store_and_forward() {
         hop_count: 0,
         timestamp_ms: 0,
         priority: 1,
+        delivered_to: vec![],
     };
 
     // Store message in DTN buffer (Node D is offline)
-    router.store("node_a", msg).await;
+    assert!(router.store("node_a", msg).await, "Message should be stored");
 
     // Verify message is buffered
     assert_eq!(router.buffer_size("node_a").await, 1);
@@ -464,9 +465,10 @@ async fn test_dtn_ttl_expiration() {
         hop_count: 0,
         timestamp_ms: 0,
         priority: 5,
+        delivered_to: vec![],
     };
 
-    router.store("node_x", msg).await;
+    assert!(router.store("node_x", msg).await, "Message should be stored");
     assert_eq!(router.buffer_size("node_x").await, 1);
 
     // First tick: TTL becomes 1
@@ -504,8 +506,9 @@ async fn test_dtn_buffer_overflow() {
             hop_count: 0,
             timestamp_ms: 0,
             priority: i as u8, // Increasing priority number = lower priority
+            delivered_to: vec![],
         };
-        router.store("node_a", msg).await;
+        assert!(router.store("node_a", msg).await);
     }
 
     assert_eq!(router.buffer_size("node_a").await, 3);
@@ -521,8 +524,9 @@ async fn test_dtn_buffer_overflow() {
         hop_count: 0,
         timestamp_ms: 0,
         priority: 0, // Highest priority
+        delivered_to: vec![],
     };
-    router.store("node_a", msg4).await;
+    assert!(router.store("node_a", msg4).await, "More urgent message must be stored");
 
     // Buffer should still be at max (3), but one was dropped
     assert_eq!(router.buffer_size("node_a").await, 3);
