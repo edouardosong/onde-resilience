@@ -1,31 +1,39 @@
-# Build artifacts
-**/target/
-**/build/
-**/.gradle/
-**/*.apk
+```
+# Logs and temp files
+*.log
 
-# Docker
-**/*.d
-**/.fingerprint/
-**/CACHEDIR.TAG
+# Coverage reports
+.coverage
+coverage/
+htmlcov/
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Python
+# Python specific
 __pycache__/
 *.pyc
 *.pyo
-*.egg-info/
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.venv.bak/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage*
+.nox/
+.pytest_cache/
+.mypy_cache/
+.hypothesis/
 
-# Simulation outputs
-simulation/results/*.json
-simulation/results/*.png
-simulation/results/*.csv
+# Build directories
+build/
+dist/
+*.egg
+*.egg-info/
+.installed.cfg
+*.so
+
+# Simulation results
+onde/simulation/results/
+```

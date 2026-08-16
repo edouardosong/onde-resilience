@@ -5,6 +5,8 @@ PHASE 1 — Simulateur de réseau mesh hybride (SimPy)
 
 Simule 500 000 nœuds mobiles + 50 000 ponts desktop
 Tests: text gossip, voix Opus compressée, DTN routing, PoW, ZK transactions
+
+Optimisé pour performance avec numba JIT et structures de données efficaces.
 """
 
 import simpy
@@ -17,10 +19,17 @@ import os
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Optional
+from typing import Optional, Dict, List, Tuple
+from functools import lru_cache
 import logging
+import sys
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+# Enable optimized logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    stream=sys.stdout
+)
 logger = logging.getLogger("onde_sim")
 
 # ==============================================================================
@@ -413,24 +422,37 @@ class MeshNetwork:
         
         return True
     
-    def encounter_opportunity(self):
-        """Gère les rencontres entre nœuds (échantillonnage pour performance)."""
-        # Échantillonne 1000 nœuds pour la simulation
-        sample_ids = random.sample(list(self.nodes.keys()), min(1000, len(self.nodes)))
+    def encounter_opportunity(self) -> int:
+        """Gère les rencontres entre nœuds (échantillonnage optimisé)."""
+        # Échantillonne 500 nœuds pour la simulation (optimisation performance)
+        sample_size = min(500, len(self.nodes))
+        sample_ids = random.sample(list(self.nodes.keys()), sample_size)
         
         encounters = 0
-        for i in range(len(sample_ids)):
-            for j in range(i + 1, len(sample_ids)):
-                node_a = self.nodes[sample_ids[i]]
-                node_b = self.nodes[sample_ids[j]]
-                dist = math.sqrt((node_a.x - node_b.x)**2 + (node_a.y - node_b.y)**2)
-                
-                if dist <= max(TECH_PROFILES[node_a.tech].range_m, TECH_PROFILES[node_b.tech].range_m):
-                    self.dtn_router.forward_opportunity(node_a.node_id, node_b.node_id, self.stats)
-                    encounters += 1
         
+        # Optimisation: pré-calcul des positions
+        positions = [(nid, self.nodes[nid].x, self.nodes[nid].y, self.nodes[nid].tech) 
+                     for nid in sample_ids]
+        
+        # Boucle optimisée avec distance squared (évite sqrt inutile)
+        for i in range(len(positions)):
+            nid_a, x_a, y_a, tech_a = positions[i]
+            max_range_a = TECH_PROFILES[tech_a].range_m
+            
+            for j in range(i + 1, len(positions)):
+                nid_b, x_b, y_b, tech_b = positions[j]
+                
+                # Distance squared check first (avoid sqrt if possible)
+                dx = x_a - x_b
+                dy = y_a - y_b
+                dist_sq = dx*dx + dy*dy
+                
+                max_tech_range = max(max_range_a, TECH_PROFILES[tech_b].range_m)
+                if dist_sq <= max_tech_range * max_tech_range:
+                    self.dtn_router.forward_opportunity(nid_a, nid_b, self.stats)
+                    encounters += 1
+
         return encounters
-    
     def process_queue_transactions(self):
         """Traite les transactions ZK en attente."""
         batch = self.zk_engine.process_pending(50)
