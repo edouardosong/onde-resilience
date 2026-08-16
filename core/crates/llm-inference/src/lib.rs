@@ -9,11 +9,11 @@ use serde::{Deserialize, Serialize};
 /// Available model sizes (quantized)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ModelSize {
-    Qwen0_8B,  // ~500MB Q4_K_M
-    Qwen1_8B,  // ~1.1GB
-    Qwen4B,    // ~2.5GB
-    Qwen9B,    // ~5.5GB
-    Llama70B,  // ~40GB Q4_K_M (desktop oracle)
+    Qwen0_8B, // ~500MB Q4_K_M
+    Qwen1_8B, // ~1.1GB
+    Qwen4B,   // ~2.5GB
+    Qwen9B,   // ~5.5GB
+    Llama70B, // ~40GB Q4_K_M (desktop oracle)
 }
 
 impl ModelSize {
@@ -92,11 +92,13 @@ impl OracleRpcServer {
             &req.prompt.chars().take(50).collect::<String>()
         );
 
+        let latency_ms = start.elapsed().as_millis().max(1) as u64;
+
         InferenceResponse {
             request_id: req.id,
             text: response,
             tokens_generated: req.max_tokens.min(256),
-            latency_ms: start.elapsed().as_millis() as u64,
+            latency_ms,
             model_used: req.model,
             error: None,
         }
@@ -145,11 +147,13 @@ impl PocketPalEngine {
             &prompt.chars().take(50).collect::<String>()
         );
 
+        let latency_ms = start.elapsed().as_millis().max(1) as u64;
+
         InferenceResponse {
             request_id: format!("local-{}", start.elapsed().as_nanos()),
             text: response,
             tokens_generated: max_tokens.min(128),
-            latency_ms: start.elapsed().as_millis() as u64,
+            latency_ms,
             model_used: model,
             error: None,
         }
@@ -161,7 +165,10 @@ impl PocketPalEngine {
 
     pub fn can_offload_to_oracle(&self) -> bool {
         // Mobile can always try to offload complex queries
-        self.current_model.as_ref().map(|m| m.ram_mb() < 6000).unwrap_or(true)
+        self.current_model
+            .as_ref()
+            .map(|m| m.ram_mb() < 6000)
+            .unwrap_or(true)
     }
 }
 
@@ -208,5 +215,6 @@ mod tests {
         let engine = PocketPalEngine::new(4096);
         let resp = engine.infer("Hello world", 50).await;
         assert_ne!(resp.text.len(), 0);
+        assert!(resp.latency_ms > 0);
     }
 }
