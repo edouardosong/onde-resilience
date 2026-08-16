@@ -47,7 +47,7 @@ impl Default for BundleId {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Priority {
     Low,
     Normal,
@@ -159,10 +159,16 @@ impl DtnRouter {
         let queue = self.queues.entry(dest.clone()).or_insert_with(VecDeque::new);
 
         if queue.len() >= MAX_QUEUE_LENGTH {
-            // Remove oldest low priority bundle if queue is full
-            if let Some(pos) = queue.iter().position(|b| matches!(b.priority, Priority::Low)) {
+            // Make room only for a higher-priority bundle.
+            if let Some(pos) = queue
+                .iter()
+                .enumerate()
+                .filter(|(_, queued)| queued.priority < bundle.priority)
+                .min_by_key(|(_, queued)| queued.priority)
+                .map(|(pos, _)| pos)
+            {
                 queue.remove(pos);
-                debug!("Removed low priority bundle to make room");
+                debug!("Removed lower-priority bundle to make room");
             } else {
                 return Err(DtnError::QueueFull(dest));
             }
@@ -351,34 +357,29 @@ mod tests {
     fn test_priority_queue_management() {
         let mut router = DtnRouter::new("router1".to_string());
 
-        // Fill queue with normal priority bundles
+        // Fill queue with one low-priority and otherwise normal bundles.
         for i in 0..MAX_QUEUE_LENGTH {
-            let bundle = Bundle::new(
+            let mut bundle = Bundle::new(
                 "node1".to_string(),
                 "node2".to_string(),
                 vec![i as u8],
             ).unwrap();
+            if i == 0 {
+                bundle.priority = Priority::Low;
+            }
             router.enqueue_bundle(bundle).unwrap();
         }
 
-        // Try to add another normal priority bundle (should fail)
-        let bundle = Bundle::new(
+        // A low-priority bundle cannot displace an equal-priority bundle.
+        let mut bundle = Bundle::new(
             "node1".to_string(),
             "node2".to_string(),
             vec![99],
         ).unwrap();
+        bundle.priority = Priority::Low;
         assert!(matches!(router.enqueue_bundle(bundle), Err(DtnError::QueueFull(_))));
 
-        // Add low priority bundle
-        let mut low_bundle = Bundle::new(
-            "node1".to_string(),
-            "node2".to_string(),
-            vec![100],
-        ).unwrap();
-        low_bundle.priority = Priority::Low;
-        router.enqueue_bundle(low_bundle).unwrap();
-
-        // Now try to add high priority bundle (should succeed by evicting low priority)
+        // A high-priority bundle displaces the queued low-priority bundle.
         let mut high_bundle = Bundle::new(
             "node1".to_string(),
             "node2".to_string(),
