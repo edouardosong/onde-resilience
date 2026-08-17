@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+# Least-privilege token: the CI only reads the repo (no PR write, no packages).
+permissions:
+  contents: read
+
 jobs:
   core-tests:
     name: Rust core — build + test

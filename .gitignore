@@ -43,6 +43,7 @@ nohup.out
 # Tauri / ui artifacts
 ui/dist/
 ui/src-tauri/target/
+ui/src-tauri/gen/schemas/
 
 # IDE / OS
 .idea/
