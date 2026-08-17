@@ -1,5 +1,4 @@
 /// AI Module — PocketPal integration & Oracle RPC bridge
-
 pub use llm_inference::{
     InferenceRequest,
     InferenceResponse,
@@ -29,9 +28,11 @@ impl AiEngine {
         let resp = self.local_engine.infer(prompt, max_tokens).await;
 
         // If local model is small and prompt is complex, prefer oracle
-        if self.local_engine.can_offload_to_oracle() && self.oracle_address.is_some() {
-            // In production: send to oracle via RPC
-            tracing::debug!("Could offload to oracle: {}", self.oracle_address.as_ref().unwrap());
+        if self.local_engine.can_offload_to_oracle() {
+            if let Some(addr) = &self.oracle_address {
+                // In production: send to oracle via RPC
+                tracing::debug!("Could offload to oracle: {addr}");
+            }
         }
 
         resp

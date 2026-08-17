@@ -23,6 +23,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     let mut node_type = NodeType::Mobile;
     let mut name = format!("onde-node-{}", rand::random::<u16>());
+    let mut sqlite_path: Option<String> = None;
+    let mut battery_saver = false;
+    let mut geohash = String::from("u09tunq"); // position par défaut (démo Paris)
 
     let mut i = 1;
     while i < args.len() {
@@ -46,6 +49,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     i += 1;
                 }
             }
+            "--db" => {
+                if i + 1 < args.len() {
+                    sqlite_path = Some(args[i + 1].clone());
+                    i += 1;
+                }
+            }
+            "--battery-saver" => {
+                battery_saver = true;
+            }
+            "--geohash" => {
+                if i + 1 < args.len() {
+                    geohash = args[i + 1].clone();
+                    i += 1;
+                }
+            }
             "--help" | "-h" => {
                 println!("ONDE Node — Réseau de Résilience Citoyen");
                 println!();
@@ -54,6 +72,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("Options:");
                 println!("  --type <mobile|desktop>  Node type (default: mobile)");
                 println!("  --name <name>            Node display name");
+                println!("  --db <path>              SQLite database path (persistence)");
+                println!("  --battery-saver          Enable battery saver mode (throttled background work)");
+                println!("  --geohash <geohash>       Node geohash position (7 chars, default: u09tunq)");
                 println!("  --help, -h               Show this help");
                 return Ok(());
             }
@@ -73,6 +94,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             None
         },
         max_peer_connections: if node_type == NodeType::DesktopBridge { 100 } else { 20 },
+        sqlite_path,
+        battery_saver,
+        my_geohash: geohash,
+        identity_seed: None,
     };
 
     tracing::info!("ONDE Node v0.1.0 starting...");

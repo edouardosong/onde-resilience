@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ONDE — Politique de sécurité réseau Android
+
+  - `cleartextTrafficPermitted="false"` : interdit tout trafic HTTP en clair
+    (défense en profondeur, en plus de `usesCleartextTraffic="false"`).
+  - `trust-anchors` = système uniquement : les certificats ajoutés par
+    l'utilisateur (user CAs) ne sont PAS approuvés, ce qui empêche
+    l'interception par un certificat racine installé par un attaquant
+    (correctif du finding "Improper SSL certificate validation").
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

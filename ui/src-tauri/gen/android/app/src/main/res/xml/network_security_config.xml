@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ONDE — Politique de sécurité réseau Android (projet Tauri)
+
+  - `cleartextTrafficPermitted="false"` : interdit tout trafic HTTP en clair.
+  - `trust-anchors` = système uniquement : les user CAs ne sont pas
+    approuvés (anti-interception / "Improper SSL certificate validation").
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

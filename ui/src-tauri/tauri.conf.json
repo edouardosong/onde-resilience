@@ -9,7 +9,7 @@
   "app": {
     "windows": [
       {
-        "title": "ONDE — Réseau de Résilience Citoyen",
+        "title": "ONDE \u2014 R\u00e9seau de R\u00e9silience Citoyen",
         "width": 480,
         "height": 900,
         "resizable": true,
@@ -27,9 +27,7 @@
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
-      "icons/128x128@2x.png",
-      "icons/icon.icns",
-      "icons/icon.ico"
+      "icons/128x128@2x.png"
     ]
   }
 }

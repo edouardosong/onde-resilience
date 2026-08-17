@@ -3,13 +3,15 @@
 /// Honest-storage principle (prototype): a missing file fails loudly with an
 /// `Err`. Demo data is only ever loaded through EXPLICIT methods
 /// (`load_demo` / `register_demo_seeds`), never silently by default.
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::fs;
 use serde::{Deserialize, Serialize};
 
 use base64::Engine as _;
+
+/// Persistance SQLite (Audit #14 — résilience aux crashs)
+pub mod persistence;
 
 /*
  * ZIM Archive Reader — Wikipedia Offline
@@ -110,6 +112,12 @@ impl ZimReader {
 
     pub fn total_articles(&self) -> u64 {
         self.total_articles
+    }
+}
+
+impl Default for ZimReader {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -253,6 +261,12 @@ impl MBTilesRenderer {
     }
 }
 
+impl Default for MBTilesRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Decode the demo tile payload: a transparent 1x1 PNG (base64), decoded once.
 fn decode_demo_png() -> Vec<u8> {
     const DEMO_PNG_B64: &str =
@@ -373,6 +387,283 @@ impl IpfsSeeder {
     }
 }
 
+/*
+ * Tiered Message Store — Hierarchical storage (Audit #8)
+ *
+ * Messages are classified in retention tiers instead of keeping everything
+ * forever:
+ *
+ *   Critical  → 7 jours   (alertes civiques, urgences)
+ *   Important → 2 jours   (informations vérifiées)
+ *   Normal    → 6 heures  (discussions courantes)
+ *   Low       → 1 heure   (flux non critiques)
+ *
+ * Payloads are compressed (flate2/Deflate — pur Rust, aucun binaire natif)
+ * to save storage and bandwidth. Geohash sharding decides whether a message
+ * is stored locally or only routed onward, so mobile nodes keep only the
+ * slices of the mesh they actually care about.
+ */
+
+use flate2::read::DeflateDecoder;
+use flate2::write::DeflateEncoder;
+use flate2::Compression;
+use std::io::{Read, Write};
+
+/// Niveau de rétention d'un message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MessageTier {
+    Critical,
+    Important,
+    Normal,
+    Low,
+}
+
+impl MessageTier {
+    /// Durée de rétention en secondes.
+    pub fn retention_secs(self) -> u64 {
+        match self {
+            MessageTier::Critical => 7 * 24 * 3600,
+            MessageTier::Important => 2 * 24 * 3600,
+            MessageTier::Normal => 6 * 3600,
+            MessageTier::Low => 3600,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            MessageTier::Critical => "critical",
+            MessageTier::Important => "important",
+            MessageTier::Normal => "normal",
+            MessageTier::Low => "low",
+        }
+    }
+}
+
+/// Un message stocké : métadonnées + payload compressé.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TieredMessage {
+    pub id: String,
+    pub tier: MessageTier,
+    /// Horodatage de réception (unix secs)
+    pub created_at: u64,
+    /// Payload compressé (Deflate)
+    pub payload: Vec<u8>,
+    /// Taille originale du payload (pour stats / décompression)
+    pub original_size: usize,
+    /// Geohash (7 chars) de la zone émettrice — utilisé pour le sharding
+    pub geohash: String,
+}
+
+/// Profil de stockage selon le type de nœud.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StoragePolicy {
+    /// Téléphone — budget serré
+    Mobile,
+    /// Ordinateur / nœud fixe
+    Desktop,
+    /// Passerelle mesh avec beaucoup d'espace
+    Gateway,
+}
+
+impl StoragePolicy {
+    pub fn max_bytes(self) -> u64 {
+        match self {
+            StoragePolicy::Mobile => 64 * 1024 * 1024,      // 64 MB
+            StoragePolicy::Desktop => 2 * 1024 * 1024 * 1024, // 2 GB
+            StoragePolicy::Gateway => 16 * 1024 * 1024 * 1024, // 16 GB
+        }
+    }
+}
+
+/// Magasin hiérarchique de messages.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TieredMessageStore {
+    messages: Vec<TieredMessage>,
+    policy: StoragePolicy,
+    /// Seuil de délégué : au-delà de cette taille, un message mobile est
+    /// délégué à un nœud desktop plutôt que stocké localement.
+    delegate_threshold_bytes: usize,
+    /// Geohash (7 caractères) du nœud local — utilisé par le **sharding
+    /// géographique** appliqué dans [`TieredMessageStore::store`] : on ne
+    /// retient localement que les messages de notre voisinage (ou les
+    /// alertes critiques). Les autres sont simplement routés (non stockés).
+    my_geohash: String,
+}
+
+impl TieredMessageStore {
+    pub fn new(policy: StoragePolicy) -> Self {
+        Self::with_geohash(policy, "u09tunq") // position démo (Paris) par défaut
+    }
+
+    /// Constructeur complet : politique + geohash local du nœud.
+    pub fn with_geohash(policy: StoragePolicy, my_geohash: &str) -> Self {
+        Self {
+            messages: Vec::new(),
+            policy,
+            delegate_threshold_bytes: match policy {
+                StoragePolicy::Mobile => 64 * 1024,
+                StoragePolicy::Desktop => 1024 * 1024,
+                StoragePolicy::Gateway => 16 * 1024 * 1024,
+            },
+            my_geohash: my_geohash.to_string(),
+        }
+    }
+
+    /// Changer la position locale (après un fix GPS, par exemple).
+    pub fn set_my_geohash(&mut self, geohash: &str) {
+        self.my_geohash = geohash.to_string();
+    }
+
+    /// Longueur de préfixe commun exigée pour le stockage local, selon le
+    /// profil : un mobile ne garde que son district (~5 km), un desktop sa
+    /// région (~39 km), une passerelle un espace large (~156 km).
+    /// Les alertes Critical sont toujours stockées, quel que soit le préfixe.
+    fn shard_prefix_len(&self) -> usize {
+        match self.policy {
+            StoragePolicy::Mobile => 5,
+            StoragePolicy::Desktop => 4,
+            StoragePolicy::Gateway => 3,
+        }
+    }
+
+    /// Compresser un payload (Deflate).
+    fn compress(data: &[u8]) -> Vec<u8> {
+        let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(data).expect("in-memory write cannot fail");
+        encoder.finish().expect("in-memory finish cannot fail")
+    }
+
+    /// Décompresser un payload.
+    fn decompress(data: &[u8]) -> Result<Vec<u8>, String> {
+        let mut decoder = DeflateDecoder::new(data);
+        let mut out = Vec::new();
+        decoder.read_to_end(&mut out).map_err(|e| e.to_string())?;
+        Ok(out)
+    }
+
+    /// Stocker un message dans le tiers approprié (payload compressé).
+    ///
+    /// Le budget est vérifié sur la taille **brute** (ce que le nœud doit
+    /// logiquement retenir) : la compression réduit l'empreinte disque, elle
+    /// ne permet pas de dépasser le budget de la politique. Le **sharding
+    /// géographique** est appliqué ici : un message hors de notre voisinage
+    /// (et non critique) n'est pas stocké localement (`Ok(false)`) — il est
+    /// seulement routé. Retourne `Ok(false)` si le budget est dépassé ou si
+    /// le sharding exclut le message.
+    pub fn store(
+        &mut self,
+        id: &str,
+        tier: MessageTier,
+        payload: &[u8],
+        created_at: u64,
+        geohash: &str,
+    ) -> Result<bool, String> {
+        if self.used_raw_bytes() + payload.len() as u64 > self.policy.max_bytes() {
+            return Ok(false);
+        }
+        if !Self::should_store_locally(geohash, &self.my_geohash, tier, self.shard_prefix_len()) {
+            return Ok(false);
+        }
+        let compressed = Self::compress(payload);
+        self.messages.push(TieredMessage {
+            id: id.to_string(),
+            tier,
+            created_at,
+            original_size: payload.len(),
+            payload: compressed,
+            geohash: geohash.to_string(),
+        });
+        Ok(true)
+    }
+
+    /// Récupérer le payload décompressé d'un message.
+    pub fn get(&self, id: &str) -> Option<Result<Vec<u8>, String>> {
+        self.messages.iter().find(|m| m.id == id).map(|m| Self::decompress(&m.payload))
+    }
+
+    /// Accès aux messages stockés (pour la persistance SQLite).
+    pub fn all_messages(&self) -> &[TieredMessage] {
+        &self.messages
+    }
+
+    /// Restaurer un message préalablement persisté (au démarrage, après un
+    /// crash). Le payload est déjà compressé — on ne le re-compresse pas.
+    /// Respecte le budget et dédoublonne par id.
+    pub fn restore(&mut self, msg: TieredMessage) -> Result<bool, String> {
+        if self.messages.iter().any(|m| m.id == msg.id) {
+            return Ok(false);
+        }
+        if self.used_raw_bytes() + msg.original_size as u64 > self.policy.max_bytes() {
+            return Ok(false);
+        }
+        self.messages.push(msg);
+        Ok(true)
+    }
+
+    /// Supprimer les messages expirés (selon leur tier). Retourne le nombre
+    /// de messages purgés.
+    pub fn sweep_expired(&mut self, now: u64) -> usize {
+        let before = self.messages.len();
+        self.messages.retain(|m| now.saturating_sub(m.created_at) < m.tier.retention_secs());
+        before - self.messages.len()
+    }
+
+    /// Décider si un message doit être stocké localement selon le sharding
+    /// Geohash : on garde ce qui est dans notre voisinage (préfixe commun
+    /// >= `prefix_len`) ou les alertes critiques.
+    pub fn should_store_locally(geohash: &str, my_geohash: &str, tier: MessageTier, prefix_len: usize) -> bool {
+        if tier == MessageTier::Critical {
+            return true;
+        }
+        if prefix_len == 0 {
+            return false;
+        }
+        let common = geohash
+            .chars()
+            .zip(my_geohash.chars())
+            .take_while(|(a, b)| a == b)
+            .count();
+        common >= prefix_len
+    }
+
+    /// Un gros payload doit-il être délégué à un nœud desktop ?
+    pub fn should_delegate(&self, payload_size: usize) -> bool {
+        payload_size > self.delegate_threshold_bytes
+    }
+
+    /// Octets stockés (payload compressés) — empreinte disque réelle.
+    pub fn used_bytes(&self) -> u64 {
+        self.messages.iter().map(|m| m.payload.len() as u64).sum()
+    }
+
+    /// Octets bruts logiques (somme des `original_size`) — utilisé pour le
+    /// contrôle du budget (la compression est un bonus, pas un contournement).
+    pub fn used_raw_bytes(&self) -> u64 {
+        self.messages.iter().map(|m| m.original_size as u64).sum()
+    }
+
+    /// Nombre de messages par tier (stats).
+    pub fn count_by_tier(&self) -> [(MessageTier, usize); 4] {
+        [
+            (MessageTier::Critical, self.messages.iter().filter(|m| m.tier == MessageTier::Critical).count()),
+            (MessageTier::Important, self.messages.iter().filter(|m| m.tier == MessageTier::Important).count()),
+            (MessageTier::Normal, self.messages.iter().filter(|m| m.tier == MessageTier::Normal).count()),
+            (MessageTier::Low, self.messages.iter().filter(|m| m.tier == MessageTier::Low).count()),
+        ]
+    }
+
+    pub fn total_count(&self) -> usize {
+        self.messages.len()
+    }
+
+    /// Taux de compression moyen (stats / rapport d'audit).
+    pub fn compression_stats(&self) -> (usize, usize) {
+        let raw: usize = self.messages.iter().map(|m| m.original_size).sum();
+        let stored: usize = self.messages.iter().map(|m| m.payload.len()).sum();
+        (raw, stored)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -402,7 +693,7 @@ mod tests {
         buf[0..2].copy_from_slice(&5u16.to_le_bytes());   // major version
         buf[14..22].copy_from_slice(&12345u64.to_le_bytes()); // article count
         let path = std::env::temp_dir().join(format!("onde-zim-{}.zim", std::process::id()));
-        std::fs::write(&path, &buf).unwrap();
+        std::fs::write(&path, buf).unwrap();
 
         let mut reader = ZimReader::new();
         let count = reader.load_archive(path.to_str().unwrap()).unwrap();
@@ -419,7 +710,7 @@ mod tests {
         buf[0..2].copy_from_slice(&3u16.to_le_bytes());   // major version 3
         buf[14..22].copy_from_slice(&100u64.to_le_bytes());
         let path = std::env::temp_dir().join(format!("onde-zim-old-{}.zim", std::process::id()));
-        std::fs::write(&path, &buf).unwrap();
+        std::fs::write(&path, buf).unwrap();
 
         let mut reader = ZimReader::new();
         let err = reader.load_archive(path.to_str().unwrap()).unwrap_err();
@@ -434,7 +725,7 @@ mod tests {
         // A file shorter than the 70-byte header must fail loudly (not read full archive)
         let buf = [0u8; 10];
         let path = std::env::temp_dir().join(format!("onde-zim-trunc-{}.zim", std::process::id()));
-        std::fs::write(&path, &buf).unwrap();
+        std::fs::write(&path, buf).unwrap();
 
         let mut reader = ZimReader::new();
         assert!(
@@ -589,7 +880,7 @@ mod tests {
         assert!(!ids.contains(&"QmWikipedia"), "90 GB seed must be skipped");
 
         // Saturating arithmetic: available never underflows
-        let total = 1 * 1024 * 1024 * 1024;
+        let total = 1024u64 * 1024 * 1024;
         let expected_used = 45_000_000u64 + 530_000_000u64;
         assert_eq!(seeder.available_storage(), total - expected_used);
 
@@ -601,5 +892,109 @@ mod tests {
         let seeder = IpfsSeeder::disabled(100);
         assert!(seeder.list_seeds().is_empty());
         assert_eq!(seeder.available_storage(), 100 * 1024 * 1024 * 1024);
+    }
+
+    // ---------- Tiered store ----------
+
+    #[test]
+    fn test_tier_retention() {
+        assert_eq!(MessageTier::Critical.retention_secs(), 7 * 24 * 3600);
+        assert_eq!(MessageTier::Important.retention_secs(), 2 * 24 * 3600);
+        assert_eq!(MessageTier::Normal.retention_secs(), 6 * 3600);
+        assert_eq!(MessageTier::Low.retention_secs(), 3600);
+    }
+
+    #[test]
+    fn test_store_compress_roundtrip() {
+        let mut store = TieredMessageStore::new(StoragePolicy::Mobile);
+        let payload = b"alerte civique : coupure d'eau secteur nord, reservoir 3 rempli".repeat(10);
+
+        let stored = store.store("evt-1", MessageTier::Critical, &payload, 1_800_000_000, "u09tunq")
+            .expect("store must accept within budget");
+        assert!(stored);
+
+        // Compression effective (payload répétitif)
+        let (raw, compressed) = store.compression_stats();
+        assert!(compressed < raw, "compression must reduce size");
+
+        // Round-trip
+        let got = store.get("evt-1").expect("message must exist").expect("decompress ok");
+        assert_eq!(got, payload);
+    }
+
+    #[test]
+    fn test_sweep_expired_by_tier() {
+        let mut store = TieredMessageStore::new(StoragePolicy::Desktop);
+        let now = 2_000_000_000u64;
+        // Messages locaux (geohash du nœud) — le sharding géographique les
+        // retient ; seuls des messages distants non critiques seraient écartés.
+        store.store("crit", MessageTier::Critical, b"c", now - 2 * 24 * 3600, "u09tunq").unwrap();
+        store.store("norm", MessageTier::Normal, b"n", now - 7 * 3600, "u09tunq").unwrap();
+        store.store("low", MessageTier::Low, b"l", now - 7200, "u09tunq").unwrap();
+
+        assert_eq!(store.total_count(), 3);
+        let purged = store.sweep_expired(now);
+        assert_eq!(purged, 2, "Normal (7h > 6h) and Low (2h > 1h) must expire");
+        assert_eq!(store.total_count(), 1);
+        assert!(store.get("crit").is_some());
+        assert!(store.get("norm").is_none());
+        assert!(store.get("low").is_none());
+    }
+
+    #[test]
+    fn test_geohash_sharding() {
+        let my = "u09tunq"; // Paris (Eiffel Tower)
+        // Même voisinage (préfixe >= 5) → stockage local
+        assert!(TieredMessageStore::should_store_locally("u09tunx", my, MessageTier::Normal, 5));
+        // Zone éloignée → non stocké (sauf alerte critique)
+        assert!(!TieredMessageStore::should_store_locally("sp05abc", my, MessageTier::Normal, 5));
+        assert!(TieredMessageStore::should_store_locally("sp05abc", my, MessageTier::Critical, 5));
+        // prefix_len = 0 → rien n'est stocké localement
+        assert!(!TieredMessageStore::should_store_locally("u09tunq", my, MessageTier::Normal, 0));
+    }
+
+    #[test]
+    fn test_store_applies_geohash_sharding() {
+        // Le sharding doit être câblé dans le flux de stockage réel (store),
+        // pas seulement exposé comme fonction utilitaire.
+        let mut store = TieredMessageStore::with_geohash(StoragePolicy::Mobile, "u09tunq");
+        let payload = b"message de test";
+
+        // 1. Même geohash (message local) → stocké
+        assert!(store.store("local", MessageTier::Normal, payload, 1_000, "u09tunq").unwrap());
+        // 2. Voisinage proche (préfixe 5 commun : u09tu) → stocké
+        assert!(store.store("near", MessageTier::Normal, payload, 1_000, "u09tuxx").unwrap());
+        // 3. Zone éloignée en tier Normal → NON stocké (routé seulement)
+        assert!(!store.store("far", MessageTier::Normal, payload, 1_000, "sp05abc").unwrap());
+        // 4. Zone éloignée mais Critical → toujours stocké (urgence)
+        assert!(store.store("far-crit", MessageTier::Critical, payload, 1_000, "sp05abc").unwrap());
+
+        assert_eq!(store.total_count(), 3);
+        assert!(store.get("local").is_some());
+        assert!(store.get("near").is_some());
+        assert!(store.get("far").is_none(), "far Normal message must not be stored locally");
+        assert!(store.get("far-crit").is_some(), "critical alerts are always kept");
+    }
+
+    #[test]
+    fn test_delegate_threshold() {
+        let mobile = TieredMessageStore::new(StoragePolicy::Mobile);
+        assert!(mobile.should_delegate(70_000), "mobile delegates payloads > 64 KB");
+        assert!(!mobile.should_delegate(1_000));
+
+        let gateway = TieredMessageStore::new(StoragePolicy::Gateway);
+        assert!(!gateway.should_delegate(70_000), "gateway keeps larger payloads locally");
+    }
+
+    #[test]
+    fn test_store_respects_budget() {
+        let mut store = TieredMessageStore::new(StoragePolicy::Mobile); // 64 MB
+        let big = vec![0x55u8; 40 * 1024 * 1024];
+        store.store("a", MessageTier::Important, &big, 1_000, "u09tunq").unwrap();
+        // Deuxième message de 40 Mo : 40+40 = 80 Mo > budget mobile 64 Mo
+        // → refusé localement (le budget compte la taille brute, pas compressée)
+        let second = store.store("b", MessageTier::Important, &big, 1_001, "u09tunq").unwrap();
+        assert!(!second, "second 40 MB message must exceed the 64 MB mobile budget");
+        assert_eq!(store.total_count(), 1);
     }
 }

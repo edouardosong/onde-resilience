@@ -88,9 +88,6 @@ onde-resilience/
 │   ├── bin/node.rs              # onde_node — binaire du nœud
 │   └── crates/                  # dtn-router, zim-parser, llm-inference,
 │                                # llama-bind, whisper-stt
-├── 🗑️ rust-core/                # STUB / legacy (placeholder Cargo, non utilisé)
-│   ├── Cargo.toml               # Workspace placeholder
-│   └── src/main.rs              # "Hello, world!" (3 lignes) — à supprimer ou fusionner
 ├── 🎨 ui/                       # PHASE 3 — Interface utilisateur
 │   ├── src/
 │   │   └── index.html           # UI AMOLED Black standalone (40KB)
@@ -272,11 +269,16 @@ ctx.generate("Premiers secours ?").await?;
 - 🔄 STT Whisper **mock** (transcription réelle non implémentée)
 - ✅ Tests unitaires
 
-### 🗑️ rust-core/ (stub legacy)
+### 🗑️ rust-core/ — supprimé (audit 2026-08)
 
-`rust-core/` est un **stub** : workspace Cargo placeholder + `src/main.rs` de 3 lignes (`println!("Hello, world!")`). Aucun code métier. À supprimer ou fusionner dans `core/`.
+`rust-core/` (workspace legacy) a été **audité puis supprimé**. Contrairement à ce que documentait ce README (« stub de 3 lignes »), il contenait en réalité :
+- un `crypto-module` avec de la **cryptographie placeholder dangereuse** : `KeyPair::generate()` dérivait une clé publique aléatoire sans lien avec la clé privée, `SignedMessage::verify()` acceptait toute signature non nulle, `ZkProof::verify()` retournait toujours `true` — un tel code ne doit jamais être pris pour une implémentation réelle ;
+- un `dtn-router` legacy, dupliqué et obsolète par rapport à `core/crates/dtn-router` ;
+- un `llm-inference` stub (« Hello, world! ») sans équivalent dans `core/crates/llm-inference`.
 
-> ⚠️ **Note** : `core/` est le moteur actif. `rust-core/` est un stub legacy (3 lignes) à supprimer ou fusionner dans `core/`.
+Le workspace n'était référencé ni par la CI, ni par `core/` (qui possède ses propres crates), ni par le Dockerfile. Les implémentations réelles et auditées vivent dans `core/src/crypto/` (Ed25519 dalek, EncryptedEnvelope X25519+HKDF, verify_apk_signature), `core/src/` et `core/crates/`.
+
+> ⚠️ **Note** : `core/` est le moteur actif. `rust-core/` a été supprimé — toute référence restante doit être ignorée ou nettoyée.
 
 ---
 
@@ -338,25 +340,34 @@ cargo tauri ios build
 
 | Couche | Mécanisme |
 |--------|-----------|
-| Identité | Ed25519 keypair par nœud |
-| Chiffrement | ChaCha20-Poly1305 |
-| Anti-spam | PoW CPU adaptatif (difficulty 2-8) |
+| Identité | Ed25519 keypair par nœud, rotation 6 h (forward secrecy) |
+| Chiffrement | ChaCha20-Poly1305, ECDH X25519 + HKDF-SHA256 |
+| Anti-spam | PoW CPU adaptatif + Web of Trust (réputation) |
 | Transactions | ZK-Proofs asynchrones (commit différé) |
 | DNS | TLD Handshake incensurables |
+| Distribution APK | `core/src/update/` — annonce + manifeste signés Ed25519 (racine épinglée), transfert par chunks, `verify_apk_signature()` de bout en bout |
+| Économie batterie | Mode throttling adaptatif (`--battery-saver`), intervalle de sweep différé, publication espacée (`--battery-saver` ×6) |
+| Anti-spam publication | Throttling adaptatif : 10 s (pair de confiance) / 120 s (non approuvé), multiplié par 6 en mode batterie |
+| Résilience stockage | Base **SQLite** par nœud : persistance des événements reçus/publications, restauration complète au démarrage |
+| Sharding géo-scopé | Stockage local filtré par **Geohash** (`my_geohash`, préfixe selon profil : Mobile 5 / Desktop 4 / Gateway 3) — les événements hors zone ne sont pas stockés |
+
+### Distribution sécurisée des mises à jour (`core/src/update/`)
+
+Protocole de mise à jour d'APK par le mesh (Audit #12/#13) : l'annonceur signe une `UpdateAnnouncement` (version + SHA-256) puis un manifeste canonique (`ApkManifest`, 80 octets) avec la clé racine épinglée ; le receveur vérifie chaque signature, télécharge l'APK par chunks (16 Kio), puis exécute `verify_apk_signature()` (racine épinglée + SHA-256 du fichier entier) avant toute installation. Un APK falsifié, une version non supérieure, un manifeste non lié à l'annonce ou une racine inconnue sont rejetés. Voir la doc du module pour le diagramme de flux complet.
 
 ---
 
 ## 🧪 Tests
 
-### Suite du moteur (`core/`) — 79 tests, 0 échec
+### Suite du moteur (`core/`) — 135 tests, 0 échec
 
 ```bash
 # Tous les tests (workspace core/)
 cd core && cargo test --workspace
 
-# Résultats : 79 tests, 0 échec
-# onde-core        : 46 tests ✅ Crypto, Network, Protocol, Storage, Node, AI
-# dtn-router       :  6 tests ✅ Store-and-forward, broadcast, priorités, TTL
+# Résultats : 135 tests, 0 échec
+# onde-core        : 101 tests ✅ Crypto, Network, Protocol, Storage, Update, Node, AI, Reputation
+# dtn-router       :  7 tests ✅ Store-and-forward, broadcast, priorités, TTL
 # llama-bind       :  5 tests ✅ Sélection de modèle, génération mock, quantification
 # whisper-stt      :  4 tests ✅ Création d'engine, transcription mock
 # zim-parser       :  3 tests ✅ Extraction HTML, catégories, URL ZIM
@@ -364,17 +375,21 @@ cd core && cargo test --workspace
 # integration_e2e  : 12 tests ✅ Scénarios end-to-end complets
 ```
 
-### rust-core/ (stub)
+Les 2 tests ajoutés au dernier audit couvrent : l'application du sharding Geohash au stockage local (`test_store_applies_geohash_sharding`) et le throttling adaptatif de publication (`test_node_publish_throttle`).
 
-`rust-core/` ne contient aucun test métier (placeholder `src/main.rs` de 3 lignes).
+Les tests du protocole de mise à jour (`core/src/update/`) couvrent : flux complet annonce → manifeste → chunks → vérification → installation, rejet des APK falsifiés, rejet des signatures de racine inconnue, rejet des versions non supérieures, rejet des manifestes non liés à l'annonce, bornes des chunks, et non-contournabilité par les métadonnées non signées.
+
+### rust-core/ — supprimé
+
+`rust-core/` a été supprimé lors de l'audit de sécurité (crypto placeholder dangereuse + code legacy dupliqué, voir section dédiée plus haut).
 
 ### Exécution du Nœud
 
 ```bash
 # Nœud ONDE (daemon, arrêt par Ctrl+C)
 cd core
-cargo run --bin onde_node -- --type mobile --name "MyNode"
-# Options : --type <mobile|desktop> | --name <nom> | --help
+cargo run --bin onde_node -- --type mobile --name "MyNode" --geohash u09tunq
+# Options : --type <mobile|desktop|gateway> | --name <nom> | --geohash <geohash> | --battery-saver | --help
 ```
 
 ---
@@ -435,9 +450,11 @@ cargo tauri ios build
 - ✅ Workspace Cargo actif : onde_core + onde_node + 5 crates (dtn-router, zim-parser, llm-inference, llama-bind, whisper-stt)
 - ✅ Chiffrement de bout en bout réel (X25519 + HKDF + ChaCha20-Poly1305), événements signés, PoW antispam
 - ✅ Routage DTN store-and-forward (buffers priorisés, broadcast avec déduplication, TTL)
-- ✅ 79 tests unitaires + intégration, 0 échec
+- ✅ 135 tests unitaires + intégration, 0 échec
 - ✅ Simulation réseau 11k nœuds validée (v0.2.5)
 - ✅ UI HTML AMOLED Black standalone
+- ✅ Bridge Tauri fonctionnel : l'UI appelle le noyau (démarrage nœud, publication alerte/entraide, flux) via les commandes Tauri ; fallback démo navigateur hors Tauri
+- ✅ Persistance SQLite des événements (restauration au démarrage) + sharding géo-scopé Geohash
 
 **Manques avant toute production :**
 - [ ] Audit de sécurité professionnel et fuzzing tests

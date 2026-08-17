@@ -2,6 +2,9 @@
 # ONDE — Réseau de Résilience Citoyen
 # Dockerfile.dev — Environnement de développement complet
 # Cible: Build cross-platform Android, Windows, Linux, macOS (via Tauri)
+#
+# Sécurité : le conteneur s'exécute avec un utilisateur NON-ROOT (`onde`)
+# au lieu de root par défaut (recommandation Aikido/Snyk).
 ##############################################################################
 
 FROM ubuntu:22.04
@@ -9,6 +12,11 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
+
+# Utilisateur applicatif non-root (uid 1000, comme le premier utilisateur hôte)
+RUN useradd --create-home --shell /bin/bash --uid 1000 onde \
+    && mkdir -p /workspace \
+    && chown onde:onde /workspace
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 1. SYSTEM DEPENDENCIES
@@ -39,24 +47,29 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     locales \
     file \
+    sudo \
     && locale-gen en_US.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 2. RUST TOOLCHAIN
+# 2. RUST TOOLCHAIN (installé pour l'utilisateur non-root)
 # ──────────────────────────────────────────────────────────────────────────────
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH="/root/.cargo/bin:${PATH}"
+ENV RUSTUP_HOME=/home/onde/.rustup
+ENV CARGO_HOME=/home/onde/.cargo
+ENV PATH="${CARGO_HOME}/bin:${PATH}"
+
+RUN su - onde -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y" \
+    && chown -R onde:onde ${RUSTUP_HOME} ${CARGO_HOME}
 
 # Install Rust stable + nightly + cross-compilation targets
-RUN rustup default stable && \
+RUN su - onde -c "rustup default stable && \
     rustup component add rustfmt clippy && \
     rustup target add \
         aarch64-linux-android \
         armv7-linux-androideabi \
         x86_64-linux-android \
         aarch64-unknown-linux-gnu \
-        x86_64-unknown-linux-gnu
+        x86_64-unknown-linux-gnu"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 3. ANDROID SDK/NDK (auto-accept licences)
@@ -89,6 +102,13 @@ RUN curl -sL https://services.gradle.org/distributions/gradle-8.2-bin.zip -o /tm
 ENV PATH="${PATH}:/opt/gradle-8.2/bin"
 
 # ──────────────────────────────────────────────────────────────────────────────
+# 3c. Permissions : l'utilisateur non-root doit pouvoir écrire dans les
+#     répertoires SDK/Gradle (licences, caches, .gradle)
+# ──────────────────────────────────────────────────────────────────────────────
+RUN chown -R onde:onde ${ANDROID_HOME} /opt/gradle-8.2 \
+    && mkdir -p /home/onde/.gradle && chown -R onde:onde /home/onde/.gradle
+
+# ──────────────────────────────────────────────────────────────────────────────
 # 4. PYTHON ENVIRONMENT
 # ──────────────────────────────────────────────────────────────────────────────
 RUN pip3 install \
@@ -111,6 +131,7 @@ RUN pip3 install \
 WORKDIR /workspace
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 7. ENTRY POINT
+# 7. ENTRY POINT (non-root par défaut)
 # ──────────────────────────────────────────────────────────────────────────────
+USER onde
 CMD ["/bin/bash"]

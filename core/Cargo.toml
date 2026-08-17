@@ -42,10 +42,21 @@ sha2 = "0.10"
 rand = "0.8"
 chacha20poly1305 = "0.10"
 hex = "0.4"
-# ECDH key exchange (X25519) for end-to-end message encryption
-x25519-dalek = { version = "2", features = ["static_secrets"] }
+# ECDH key exchange (X25519) for end-to-end message encryption.
+# `zeroize` : les secrets X25519 sont effacés en mémoire à la libération.
+x25519-dalek = { version = "2", features = ["static_secrets", "zeroize"] }
 # HKDF key derivation (RFC 5869) for the encryption protocol
 hkdf = "0.12"
+# Zeroization des buffers intermédiaires de dérivation de clé (Audit m6)
+zeroize = "1"
+
+# Compression for tiered storage (Audit #8) — pur Rust, déjà dans l'arbre
+flate2 = "1.0"
+
+# Persistance SQLite (Audit #14 / plan P0 — résilience aux crashs).
+# `bundled` compile SQLite en Rust-free C amalgamation : aucune dépendance
+# système, fonctionne sur Android, desktop et dans les tests.
+rusqlite = { version = "0.37", features = ["bundled"] }
 
 # Logging
 tracing = "0.1"

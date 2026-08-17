@@ -177,6 +177,12 @@ pub struct VoiceTranscriber {
     _model_size_mb: u32,
 }
 
+impl Default for VoiceTranscriber {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VoiceTranscriber {
     pub fn new() -> Self {
         // Whisper tiny = ~75MB

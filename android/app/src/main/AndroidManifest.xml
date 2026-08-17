@@ -12,11 +12,16 @@
 
     <application
         android:allowBackup="false"
+        android:fullBackupContent="false"
         android:icon="@drawable/ic_launcher_foreground"
         android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/Theme.ONDE"
         android:usesCleartextTraffic="false">
 
+        <!-- exported="true" est REQUIS pour l'activité lanceur
+             (intent-filter MAIN/LAUNCHER). Aucune autre activité/service
+             n'est exporté. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"

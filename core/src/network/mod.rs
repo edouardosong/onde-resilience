@@ -1,5 +1,4 @@
 /// Network layer — Wi-Fi Aware, BLE, LoRa, Ethernet abstraction
-
 /// Transport technology types
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TransportType {
@@ -83,6 +82,12 @@ impl MultiTransport {
 
     pub fn transports(&self) -> &[Box<dyn MeshTransport>] {
         &self.active_transports
+    }
+}
+
+impl Default for MultiTransport {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

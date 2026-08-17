@@ -7,10 +7,9 @@
 //! - AI Query → Oracle Response
 //! - DTN Store-and-Forward
 
-use onde_core::crypto::{Identity, TxPool};
-use onde_core::protocol::{MeshEvent, OndeMessageType, GossipProtocol};
+use onde_core::crypto::Identity;
+use onde_core::protocol::{MeshEvent, OndeMessageType};
 use onde_core::node::{Node, NodeConfig, NodeType};
-use onde_core::ai::AiEngine;
 use onde_core::storage::{ZimReader, MBTilesRenderer, IpfsSeeder};
 use dtn_router::{DtnRouter, DtnMessage, MessageType};
 
@@ -39,7 +38,7 @@ async fn test_alert_gossip_reception() {
         ..Default::default()
     });
 
-    // Node A publishes alert
+    // Node A publishes alert (self-trusted → PoW adaptatif = 0)
     let alert_content = "Urgence: inondation secteur 3";
     let event = node_a.publish_alert(alert_content.to_string()).await;
     assert!(event.is_ok(), "Alert publish should succeed");
@@ -51,9 +50,18 @@ async fn test_alert_gossip_reception() {
     assert!(!event.id.is_empty());
     // PoW nonce can be 0 if hash("id:0") already has required leading zeros
 
-    // Node B receives event via gossip
+    // Node B connaît A comme pair de confiance (Web of Trust) — c'est ce qui
+    // lui permet d'accepter un événement à difficulté 0 sans se faire spammer.
+    node_b
+        .reputation
+        .bootstrap(&[node_a.identity.pubkey_hex()]);
+
+    // Node B receives event via gossip (validation adaptative par réputation)
     assert!(
-        node_b.gossip.add_event(event.clone()).is_ok(),
+        node_b
+            .gossip
+            .add_event_with_reputation(event.clone(), &node_b.reputation)
+            .is_ok(),
         "Valid signed + PoW alert must be accepted by gossip"
     );
 
@@ -169,7 +177,7 @@ async fn test_voice_memo_transcription() {
 #[tokio::test]
 async fn test_ai_query_response() {
     // Create mobile node with AI engine
-    let mut node = Node::new(NodeConfig {
+    let node = Node::new(NodeConfig {
         node_type: NodeType::Mobile,
         display_name: "MobileUser".to_string(),
         available_ram_mb: 2048,
@@ -308,27 +316,34 @@ async fn test_multi_node_gossip() {
         })
         .collect();
 
-    // Node 0 publishes alert
+    // Node 0 publishes alert (self-trusted → PoW adaptatif = 0)
     let alert = nodes[0].publish_alert("Alerte reseau: tremblement de terre".to_string()).await.unwrap();
 
-    // Propagate through gossip network (simulate flooding)
-    for i in 1..5 {
+    // Propagation par gossip (simulation de flooding).
+    // Chaque nœud connaît Node 0 comme pair de confiance (WoT), sinon un
+    // événement à difficulté 0 serait (correctement) rejeté comme spam.
+    let publisher_pubkey = nodes[0].identity.pubkey_hex();
+    for (i, node) in nodes.iter_mut().enumerate().skip(1) {
+        node.reputation.bootstrap(std::slice::from_ref(&publisher_pubkey));
+        // Clone de la réputation : emprunt disjoint via index impossible sinon
+        let rep = node.reputation.clone();
         assert!(
-            nodes[i].gossip.add_event(alert.clone()).is_ok(),
+            node.gossip
+                .add_event_with_reputation(alert.clone(), &rep)
+                .is_ok(),
             "Node {} should accept the signed alert",
             i
         );
     }
 
     // Verify all nodes received the alert
-    for i in 1..5 {
+    for node in nodes.iter().skip(1) {
         assert_eq!(
-            nodes[i].gossip.known_count(),
+            node.gossip.known_count(),
             1,
-            "Node {} should have received the alert",
-            i
+            "every node should have received the alert"
         );
-        let pending = nodes[i].gossip.get_pending_broadcasts();
+        let pending = node.gossip.get_pending_broadcasts();
         assert_eq!(pending[0].content, "Alerte reseau: tremblement de terre");
     }
 }
@@ -419,8 +434,8 @@ async fn test_pow_antispam() {
 #[tokio::test]
 async fn test_crypto_sign_verify_chain() {
     let node_a = Identity::generate();
-    let node_b = Identity::generate();
-    let node_c = Identity::generate();
+    let _node_b = Identity::generate();
+    let _node_c = Identity::generate();
 
     // Node A signs message
     let message = b"Message important a verifier";

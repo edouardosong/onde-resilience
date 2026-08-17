@@ -157,7 +157,7 @@ impl GGUFModel {
         format!(
             "https://huggingface.co/{}/resolve/main/{}.gguf",
             self.model_id,
-            self.model_id.split('/').last().unwrap_or("model"),
+            self.model_id.split('/').next_back().unwrap_or("model"),
         )
     }
 }
@@ -245,7 +245,7 @@ impl LlamaContext {
         {
             tracing::warn!("Using MOCK llama.cpp context for model: {}", model_path);
             self.loaded = true;
-            return Ok(());
+            Ok(())
         }
 
         #[cfg(not(feature = "mock"))]
@@ -269,7 +269,7 @@ impl LlamaContext {
 
         #[cfg(feature = "mock")]
         {
-            return self.mock_generate(prompt);
+            self.mock_generate(prompt)
         }
 
         #[cfg(not(feature = "mock"))]
@@ -283,11 +283,9 @@ impl LlamaContext {
     fn mock_generate(&self, prompt: &str) -> Result<GenerationResult, String> {
         tracing::warn!("Using MOCK generation");
 
-        let responses = vec![
-            "La RCP (Reanimation Cardio-Pulmonaire) consiste a appliquer des compressions thoraciques altern\u{00e9}es avec des insufflations. Pour un adulte : 30 compressions pour 2 insufflations, a une fr\u{00e9}quence de 100-120 compressions par minute. Appeler les secours (15 ou 112) imm\u{00e9}diatement.",
+        let responses = ["La RCP (Reanimation Cardio-Pulmonaire) consiste a appliquer des compressions thoraciques altern\u{00e9}es avec des insufflations. Pour un adulte : 30 compressions pour 2 insufflations, a une fr\u{00e9}quence de 100-120 compressions par minute. Appeler les secours (15 ou 112) imm\u{00e9}diatement.",
             "En cas d'h\u{00e9}morragie : 1) Allonger la victime 2) Appuyer fortement sur la plaie avec un tissu propre 3) Faire un pansement compressif 4) Alerter les secours (15, 112). Ne jamais retirer le premier pansement compressif.",
-            "Le triangle de Pythagore : Dans un triangle rectangle, a\u{00b2} + b\u{00b2} = c\u{00b2}. Le c\u{00f4}t\u{00e9} c est l'hypot\u{00e9}nuse (le plus long c\u{00f4}t\u{00e9}, oppos\u{00e9} \u{00e0} l'angle droit). Exemple pratique : si a=3 et b=4, alors c=5.",
-        ];
+            "Le triangle de Pythagore : Dans un triangle rectangle, a\u{00b2} + b\u{00b2} = c\u{00b2}. Le c\u{00f4}t\u{00e9} c est l'hypot\u{00e9}nuse (le plus long c\u{00f4}t\u{00e9}, oppos\u{00e9} \u{00e0} l'angle droit). Exemple pratique : si a=3 et b=4, alors c=5."];
 
         let idx = prompt.len() % responses.len();
         let text = responses[idx].to_string();

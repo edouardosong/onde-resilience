@@ -7,7 +7,9 @@
 pub mod network;
 pub mod protocol;
 pub mod crypto;
+pub mod reputation;
 pub mod storage;
+pub mod update;
 pub mod ai;
 pub mod node;
 

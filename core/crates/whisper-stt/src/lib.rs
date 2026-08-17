@@ -126,7 +126,7 @@ impl WhisperEngine {
         {
             tracing::warn!("Using MOCK STT engine");
             self.loaded = true;
-            return Ok(());
+            Ok(())
         }
 
         #[cfg(not(feature = "mock"))]
@@ -172,7 +172,7 @@ impl WhisperEngine {
 
         #[cfg(feature = "mock")]
         {
-            return self.transcribe_mock(audio_data, sample_rate);
+            self.transcribe_mock(audio_data, sample_rate)
         }
 
         #[cfg(not(feature = "mock"))]

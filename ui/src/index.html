@@ -6,6 +6,8 @@
     <meta name="theme-color" content="#000000">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <!-- Content-Security-Policy : cohérente avec tauri.conf.json (CSP Tauri) -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' http://localhost:1420; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>ONDE — Réseau de Résilience Citoyen</title>
     <style>
         /* ===== AMOLED BLACK PUR THEME ===== */
@@ -647,6 +649,7 @@
             <div class="mesh-badge" id="mesh-badge">Mesh Actif</div>
             <div class="status-dot" id="status-dot"></div>
         </div>
+        <div id="status-msg" style="display:none;padding:8px 16px;font-size:12px;background:var(--surface-elevated);border-bottom:1px solid var(--border);color:var(--text-secondary);"></div>
 
         <!-- CONTENT AREA -->
         <div class="content">
@@ -885,6 +888,83 @@
             }[c]));
         }
 
+        // ===== Tauri bridge =====
+        // Détection du runtime Tauri (v2 : window.__TAURI__.core.invoke).
+        // Hors Tauri (navigation directe du fichier / serveur statique), le
+        // prototype reste utilisable avec le mock local.
+        const isTauri = !!(window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke);
+        async function tauriInvoke(cmd, args) {
+            if (!isTauri) throw new Error('Tauri non disponible');
+            return window.__TAURI__.core.invoke(cmd, args || {});
+        }
+
+        // Mode de publication courant : 'alert' (onglet Alerte) ou 'aid' (Entraide)
+        let feedMode = 'alert';
+        let currentNodePubkey = null;
+
+        function setStatusMsg(text, isError) {
+            const el = document.getElementById('status-msg');
+            if (!el) return;
+            el.textContent = text;
+            el.style.display = text ? 'block' : 'none';
+            el.style.color = isError ? 'var(--danger)' : 'var(--text-secondary)';
+            if (text) setTimeout(() => { el.style.display = 'none'; }, 6000);
+        }
+
+        // Rendre les événements réels du nœud (FeedEventView → cartes).
+        function renderFeed(events) {
+            const feed = document.getElementById('feed-container');
+            if (!feed) return;
+            feed.innerHTML = '';
+            if (!events || events.length === 0) {
+                feed.innerHTML = '<div class="empty-state"><div class="icon">⧫</div><div class="label">Aucun message reçu — le nœud écoute le mesh…</div></div>';
+                return;
+            }
+            events.slice().reverse().forEach(ev => {
+                const isAlert = ev.kind === 'Alert';
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.innerHTML = `
+                    <div class="card-header">
+                        <div class="avatar" style="background:${isAlert ? 'var(--danger)' : 'var(--info)'};">${esc((ev.pubkey || '?').slice(0, 2).toUpperCase())}</div>
+                        <div class="meta">
+                            <div class="name">${esc(ev.pubkey.slice(0, 12))}…</div>
+                            <div class="time">${new Date(ev.created_at * 1000).toLocaleTimeString('fr-FR')}</div>
+                        </div>
+                        <span class="card-type ${isAlert ? 'alert' : 'aid'}">${isAlert ? 'ALERTE' : 'ENTRAIDE'}</span>
+                    </div>
+                    <div class="content">${esc(ev.content)}</div>
+                    <div class="pow-badge">✓ Signature vérifiée · ${esc(ev.id.slice(0, 8))}</div>
+                `;
+                feed.appendChild(card);
+            });
+        }
+
+        // Rafraîchir le flux depuis le nœud (commande get_feed_events).
+        async function refreshFeed() {
+            if (!isTauri || !currentNodePubkey) return;
+            try {
+                const events = await tauriInvoke('get_feed_events');
+                renderFeed(events);
+            } catch (e) { /* le nœud peut être en cours d'arrêt */ }
+        }
+
+        // Démarrer le nœud au chargement : node_start ouvre la base SQLite
+        // (app_data_dir) et restaure les messages persistés (résilience crash).
+        async function initTauriNode() {
+            if (!isTauri) return;
+            try {
+                const pubkey = await tauriInvoke('node_start', { displayName: 'ONDE-Mobile' });
+                currentNodePubkey = pubkey;
+                document.getElementById('mesh-badge').textContent = 'Nœud actif';
+                document.getElementById('status-dot').style.background = 'var(--accent)';
+                await refreshFeed();
+                setInterval(refreshFeed, 5000);
+            } catch (e) {
+                setStatusMsg('Démarrage du nœud impossible : ' + e, true);
+            }
+        }
+
         // ===== NAVIGATION =====
         document.querySelectorAll('.nav-tabs .tab').forEach(tab => {
             tab.addEventListener('click', () => {
@@ -900,32 +980,49 @@
         });
 
         // ===== COMPOSE =====
-        document.getElementById('compose-send').addEventListener('click', () => {
+        document.getElementById('compose-send').addEventListener('click', async () => {
             const input = document.getElementById('compose-input');
-            if (input.value && input.value.trim()) {
-                // Simulate PoW + publish
-                const feed = document.getElementById('feed-container');
-                const card = document.createElement('div');
-                card.className = 'card';
-                card.innerHTML = `
-                    <div class="card-header">
-                        <div class="avatar">MO</div>
-                        <div class="meta">
-                            <div class="name">Moi</div>
-                            <div class="time">À l'instant</div>
-                        </div>
-                        <span class="card-type alert">ALERTE</span>
-                    </div>
-                    <div class="content">${esc(input.value)}</div>
-                    <div class="pow-badge">✓ PoW calculé · 0 hops · diffusion en cours...</div>
-                `;
-                feed.insertBefore(card, feed.firstChild);
-                input.value = '';
+            if (!input.value || !input.value.trim()) return;
+
+            // Mode Tauri : publication réelle via le noyau ONDE.
+            if (isTauri && currentNodePubkey) {
+                const text = input.value.trim();
+                try {
+                    const cmd = feedMode === 'alert' ? 'publish_alert' : 'publish_mutual_aid';
+                    await tauriInvoke(cmd, { content: text });
+                    input.value = '';
+                    await refreshFeed();
+                    setStatusMsg('Message publié sur le mesh (PoW + signature).', false);
+                } catch (e) {
+                    // Ex: throttling adaptatif ("Rate limited: wait Ns…")
+                    setStatusMsg(String(e), true);
+                }
+                return;
             }
+
+            // Mode démo (hors Tauri) : simule PoW + publication
+            const feed = document.getElementById('feed-container');
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.innerHTML = `
+                <div class="card-header">
+                    <div class="avatar">MO</div>
+                    <div class="meta">
+                        <div class="name">Moi</div>
+                        <div class="time">À l'instant</div>
+                    </div>
+                    <span class="card-type alert">ALERTE</span>
+                </div>
+                <div class="content">${esc(input.value)}</div>
+                <div class="pow-badge">✓ PoW calculé · 0 hops · diffusion en cours...</div>
+            `;
+            feed.insertBefore(card, feed.firstChild);
+            input.value = '';
         });
 
         // ===== FEED TABS =====
         document.getElementById('btn-alerts').addEventListener('click', function() {
+            feedMode = 'alert';
             this.style.borderColor = 'var(--accent)';
             this.style.background = 'var(--accent)';
             this.style.color = 'var(--black)';
@@ -936,6 +1033,7 @@
         });
 
         document.getElementById('btn-aid').addEventListener('click', function() {
+            feedMode = 'aid';
             this.style.borderColor = 'var(--accent)';
             this.style.background = 'var(--accent)';
             this.style.color = 'var(--black)';
@@ -1038,21 +1136,25 @@
         });
 
         // ===== LIVE CLOCK & STATUS =====
-        setInterval(() => {
-            const dot = document.getElementById('status-dot');
-            if (dot) {
-                const meshBadge = document.getElementById('mesh-badge');
-                if (Math.random() > 0.95) {
-                    dot.style.background = 'var(--warning)';
-                    if (meshBadge) meshBadge.textContent = 'Mesh faible';
-                } else {
-                    dot.style.background = 'var(--accent)';
-                    if (meshBadge) meshBadge.textContent = 'Mesh Actif';
+        // En mode Tauri, l'état réel du nœud pilote le voyant ; le mode démo
+        // (navigateur seul) conserve le statut simulé.
+        if (!isTauri) {
+            setInterval(() => {
+                const dot = document.getElementById('status-dot');
+                if (dot) {
+                    const meshBadge = document.getElementById('mesh-badge');
+                    if (Math.random() > 0.95) {
+                        dot.style.background = 'var(--warning)';
+                        if (meshBadge) meshBadge.textContent = 'Mesh faible';
+                    } else {
+                        dot.style.background = 'var(--accent)';
+                        if (meshBadge) meshBadge.textContent = 'Mesh Actif';
+                    }
                 }
-            }
-        }, 5000);
+            }, 5000);
+        }
 
-        // ===== SIMULATED FEED UPDATES =====
+        // ===== SIMULATED FEED UPDATES (démo hors Tauri uniquement) =====
         const feedData = [
             { name: 'David R.', type: 'alert', content: '⚠️ Route bloquée km 12. Évacuation par le sentier forestier. 5 blessés légers signalés.' },
             { name: 'Emma L.', type: 'aid', content: 'Besoin de médicaments anti-diarrhéiques. Famille de 4, réfugiés au gymnase. Contactez-nous via le mesh.' },
@@ -1060,29 +1162,34 @@
         ];
 
         let feedIdx = 0;
-        setInterval(() => {
-            if (feedIdx >= feedData.length) return;
-            const post = feedData[feedIdx++];
-            const feed = document.getElementById('feed-container');
-            const card = document.createElement('div');
-            card.className = 'card';
-            const typeClass = post.type === 'alert' ? 'alert' : 'aid';
-            const typeLabel = post.type === 'alert' ? 'ALERTE' : 'ENTRAIDE';
-            const bgColor = post.type === 'alert' ? 'var(--danger)' : 'var(--info)';
-            card.innerHTML = `
-                <div class="card-header">
-                    <div class="avatar" style="background:${bgColor};">${post.name[0]}</div>
-                    <div class="meta">
-                        <div class="name">${post.name}</div>
-                        <div class="time">À l'instant</div>
+        if (!isTauri) {
+            setInterval(() => {
+                if (feedIdx >= feedData.length) return;
+                const post = feedData[feedIdx++];
+                const feed = document.getElementById('feed-container');
+                const card = document.createElement('div');
+                card.className = 'card';
+                const typeClass = post.type === 'alert' ? 'alert' : 'aid';
+                const typeLabel = post.type === 'alert' ? 'ALERTE' : 'ENTRAIDE';
+                const bgColor = post.type === 'alert' ? 'var(--danger)' : 'var(--info)';
+                card.innerHTML = `
+                    <div class="card-header">
+                        <div class="avatar" style="background:${bgColor};">${post.name[0]}</div>
+                        <div class="meta">
+                            <div class="name">${post.name}</div>
+                            <div class="time">À l'instant</div>
+                        </div>
+                        <span class="card-type ${typeClass}">${typeLabel}</span>
                     </div>
-                    <span class="card-type ${typeClass}">${typeLabel}</span>
-                </div>
-                <div class="content">${post.content}</div>
-                <div class="pow-badge">✓ PoW vérifié · ${Math.floor(Math.random() * 5)} hops · DTN store-and-forward</div>
-            `;
-            if (feed) feed.insertBefore(card, feed.firstChild);
-        }, 30000);
+                    <div class="content">${post.content}</div>
+                    <div class="pow-badge">✓ PoW vérifié · ${Math.floor(Math.random() * 5)} hops · DTN store-and-forward</div>
+                `;
+                if (feed) feed.insertBefore(card, feed.firstChild);
+            }, 30000);
+        }
+
+        // Démarrage du nœud réel au chargement (mode Tauri uniquement)
+        initTauriNode();
     </script>
 </body>
 </html>

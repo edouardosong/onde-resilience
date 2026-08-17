@@ -16,11 +16,25 @@ public class MainActivity extends AppCompatActivity {
 
         webView = findViewById(R.id.webview);
         WebSettings webSettings = webView.getSettings();
+
+        // Sécurité (Audit M6) : l'UI legacy (`assets/index.html`) est une
+        // application monolithique en JavaScript vanilla inline, avec CSP
+        // `connect-src 'none'` (aucune ressource externe). JavaScript est donc
+        // REQUIS pour la navigation entre pages, la composition et les
+        // interactions locales de cette page.
+        //
+        // En revanche, l'accès général aux fichiers (`file://`) et aux
+        // ContentProviders (`content://`) est explicitement DÉSACTIVÉ : ces
+        // deux flags permettraient à une page compromise de lire des fichiers
+        // locaux ou des données d'autres applications. La page chargée via
+        // `file:///android_asset/index.html` reste accessible sans eux — les
+        // assets de l'APK sont toujours lisibles par la WebView qui les
+        // charge, seul l'accès *arbitraire* aux autres fichiers est coupé.
         webSettings.setJavaScriptEnabled(true);
         webSettings.setDomStorageEnabled(true);
         webSettings.setDatabaseEnabled(true);
-        webSettings.setAllowFileAccess(true);
-        webSettings.setAllowContentAccess(true);
+        webSettings.setAllowFileAccess(false);
+        webSettings.setAllowContentAccess(false);
         webSettings.setUseWideViewPort(true);
         webSettings.setLoadWithOverviewMode(true);
         webSettings.setSupportZoom(true);

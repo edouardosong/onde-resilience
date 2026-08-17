@@ -6,6 +6,9 @@
     <meta name="theme-color" content="#000000">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <!-- Content-Security-Policy : aucune ressource externe, pas de connect-src,
+         pas d'objets/iframes. Les scripts/styles sont inline (app monolithique). -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
     <title>ONDE — Réseau de Résilience Citoyen</title>
     <style>
         /* ===== AMOLED BLACK PUR THEME ===== */
@@ -878,6 +881,13 @@
     </div>
 
     <script>
+        // Escape user-controlled text before insertion into innerHTML (XSS prevention)
+        function esc(s) {
+            return String(s).replace(/[&<>"'`]/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;'
+            }[c]));
+        }
+
         // ===== NAVIGATION =====
         document.querySelectorAll('.nav-tabs .tab').forEach(tab => {
             tab.addEventListener('click', () => {
@@ -909,7 +919,7 @@
                         </div>
                         <span class="card-type alert">ALERTE</span>
                     </div>
-                    <div class="content">${input.value}</div>
+                    <div class="content">${esc(input.value)}</div>
                     <div class="pow-badge">✓ PoW calculé · 0 hops · diffusion en cours...</div>
                 `;
                 feed.insertBefore(card, feed.firstChild);
@@ -1019,11 +1029,11 @@
             if (input.value && results) {
                 results.innerHTML = `
                     <div class="article-card">
-                        <h3>Résultats pour "${input.value}"</h3>
+                        <h3>Résultats pour "${esc(input.value)}"</h3>
                         <p>Recherche effectuée dans l'archive ZIM locale. 12 articles trouvés.</p>
                     </div>
                     <div class="article-card">
-                        <h3>${input.value} — Guide pratique</h3>
+                        <h3>${esc(input.value)} — Guide pratique</h3>
                         <p>Contenus hors-ligne disponibles depuis le cache IPFS local du nœud.</p>
                     </div>
                 `;

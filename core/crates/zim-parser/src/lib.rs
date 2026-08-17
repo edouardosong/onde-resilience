@@ -101,10 +101,9 @@ impl ZimReader {
     }
 
     pub fn get_article(&self, url: &str) -> Option<ZimArticle> {
-        self.title_index.get(url).and_then(|idx| {
-            Some(ZimArticle {
+        self.title_index.get(url).map(|idx| ZimArticle {
                 url: url.to_string(),
-                title: url.replace('_', " ").replace('-', " ").to_string(),
+                title: url.replace(['_', '-'], " ").to_string(),
                 mime_type: "text/html".to_string(),
                 content: Vec::new(),
                 content_size: 0,
@@ -112,7 +111,6 @@ impl ZimReader {
                 namespace: 'A',
                 index: *idx,
             })
-        })
     }
 
     pub fn search(&self, query: &str, max_results: usize) -> Vec<SearchResult> {
@@ -121,7 +119,7 @@ impl ZimReader {
             .filter(|url| url.to_lowercase().contains(&query_lower))
             .take(max_results)
             .map(|url| SearchResult {
-                title: url.replace('_', " ").replace('-', " ").to_string(),
+                title: url.replace(['_', '-'], " ").to_string(),
                 url: url.clone(),
                 snippet: None,
                 score: 0.8,

@@ -8,8 +8,8 @@ services:
     container_name: onde-dev
     volumes:
       - .:/workspace
-      - cargo-registry:/root/.cargo/registry
-      - cargo-git:/root/.cargo/git
+      - cargo-registry:/home/onde/.cargo/registry
+      - cargo-git:/home/onde/.cargo/git
       - cargo-target:/workspace/core/target
     environment:
       - RUST_BACKTRACE=1

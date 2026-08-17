@@ -1,5 +1,4 @@
 /// Protocol layer — Nostr events, PoW antispam, message formats
-
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -14,11 +13,15 @@ pub const MAX_VOICE_DURATION: u32 = 120;
 /// Maximum acceptable clock skew for event timestamps (5 minutes)
 pub const MAX_CLOCK_SKEW_SECS: u64 = 300;
 
-/// Current UNIX timestamp in seconds
+/// Current UNIX timestamp in seconds.
+///
+/// ⚠️ Fallback sûr (Audit m6) : si l'horloge système est antérieure à
+/// l'époque UNIX (horloge non réglée), renvoie 0 plutôt que de paniquer.
+/// Un timestamp 0 sera rejeté comme "trop vieux" par les validateurs.
 fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_secs()
 }
 
@@ -83,7 +86,9 @@ impl MeshEvent {
         content: String,
         tags: Vec<String>,
     ) -> Self {
-        let created_at = now_secs();
+        // Horodatage flou ±30 s (Audit #14) : brouille le moment exact
+        // d'émission aux observateurs du mesh.
+        let created_at = crate::crypto::fuzzy_timestamp_secs();
         let id = Self::compute_id(pubkey, created_at, &kind, &tags, &content);
         Self {
             id,
@@ -108,7 +113,8 @@ impl MeshEvent {
         tags: Vec<String>,
     ) -> Self {
         let pubkey = sender.pubkey_hex();
-        let created_at = now_secs();
+        // Horodatage flou ±30 s (Audit #14)
+        let created_at = crate::crypto::fuzzy_timestamp_secs();
         let id = Self::compute_id(&pubkey, created_at, &kind, &tags, &content);
         let sig = hex::encode(sender.sign(id.as_bytes()));
         Self {
@@ -123,6 +129,12 @@ impl MeshEvent {
             pow_difficulty: 4,
             ttl: 5,
         }
+    }
+
+    /// Builder : fixer la difficulté PoW d'un événement signé.
+    pub fn with_pow_difficulty(mut self, difficulty: u8) -> Self {
+        self.pow_difficulty = difficulty;
+        self
     }
 
     /// Canonical SHA-256 event ID over the immutable fields:
@@ -173,11 +185,35 @@ impl MeshEvent {
     pub const MIN_POW_DIFFICULTY: u8 = 1;
 
     /// Verify content validity: size limit, timestamp sanity, canonical ID,
-    /// Ed25519 signature and PoW.
+    /// Ed25519 signature and PoW (plancher réseau fixe).
     pub fn validate(&self) -> Result<(), String> {
-        // Alert size limit
+        self.validate_with_pow_min(Self::MIN_POW_DIFFICULTY)
+    }
+
+    /// Verify content validity avec un plancher PoW **adaptatif** basé sur la
+    /// réputation de l'expéditeur (Audit #11).
+    ///
+    /// - Nœud de confiance (score >= TRUSTED_THRESHOLD) : aucun PoW requis
+    ///   (difficulté 0 autorisée).
+    /// - Nœud inconnu : `MAX_POW_DIFFICULTY` requis (coût CPU significatif).
+    /// - Nœud intermédiaire : difficulté linéaire selon sa réputation.
+    ///
+    /// Remplace le coût CPU fixe ~65k SHA-256/message par un coût concentré
+    /// sur les nœuds qui n'ont pas encore prouvé leur fiabilité.
+    pub fn validate_with_reputation(
+        &self,
+        reputation: &crate::reputation::ReputationSystem,
+    ) -> Result<(), String> {
+        let required = reputation.required_pow_difficulty(&self.pubkey);
+        self.validate_with_pow_min(required)
+    }
+
+    /// Contrôles communs + plancher de difficulté PoW paramétrable.
+    fn validate_with_pow_min(&self, min_difficulty: u8) -> Result<(), String> {
+        // Alert size limit — compté en caractères (pas en octets) pour
+        // éviter de tronquer les caractères multioctets (Audit m1).
         if let OndeMessageType::Alert = &self.kind {
-            if self.content.len() > MAX_ALERT_SIZE {
+            if self.content.chars().count() > MAX_ALERT_SIZE {
                 return Err(format!(
                     "Alert exceeds {} character limit",
                     MAX_ALERT_SIZE
@@ -215,20 +251,22 @@ impl MeshEvent {
             return Err("Invalid signature".to_string());
         }
 
-        // Enforce the network minimum PoW difficulty BEFORE the hash check.
+        // Enforce the required PoW difficulty floor BEFORE the hash check.
         // Without this, `pow_difficulty = 0` → prefix `""` → `starts_with("")`
         // is always true → a malicious sender can flood the mesh for free.
         // The difficulty is NOT part of the canonical ID (not signed), so an
         // attacker can freely set it to 0 without breaking the signature.
-        if self.pow_difficulty < Self::MIN_POW_DIFFICULTY {
+        if self.pow_difficulty < min_difficulty {
             return Err(format!(
-                "PoW difficulty {diff} is below network minimum {min}",
+                "PoW difficulty {diff} is below network minimum (required {min})",
                 diff = self.pow_difficulty,
-                min = Self::MIN_POW_DIFFICULTY
+                min = min_difficulty
             ));
         }
 
-        // Verify PoW (the ID is stable — PoW is checked against hash(id:nonce))
+        // Verify PoW (the ID is stable — PoW is checked against hash(id:nonce)).
+        // Note: difficulty 0 → prefix "" → toujours vrai (cas des nœuds de
+        // confiance, qui n'ont pas de coût PoW).
         if !Self::verify_pow(&self.id, self.pow_nonce, self.pow_difficulty) {
             return Err("Invalid PoW".to_string());
         }
@@ -300,19 +338,37 @@ fn decode_hex_64(s: &str) -> Result<[u8; 64], ()> {
  * Gossip Protocol for Public Feed
  */
 
-/// Gossip protocol state
+/// Nombre maximal d'événements connus conservés en mémoire (Audit M3).
+/// Au-delà, les plus anciens sont évincés — les pairs qui les redemanderont
+/// devront les re-récupérer ailleurs, mais la mémoire du nœud reste bornée.
+pub const MAX_KNOWN_EVENTS: usize = 10_000;
+
+/// Taille maximale de la file de diffusion (outbox) du gossip (Audit M3).
+pub const MAX_PENDING_BROADCASTS: usize = 1_000;
+
+/// Nombre maximal d'IDs d'événements mémorisés **par pair** pour éviter de
+/// lui renvoyer des événements déjà livrés (Audit M3).
+pub const MAX_DELIVERED_PER_PEER: usize = 2_000;
+
+/// Gossip protocol state.
+///
+/// **Corrigé (Audit M3)** : `get_pending_for_peer` ne vide plus la file
+/// globale — chaque pair reçoit uniquement les événements qui ne lui ont pas
+/// encore été livrés, et la mémoire est bornée (`MAX_KNOWN_EVENTS`,
+/// `MAX_PENDING_BROADCASTS`, `MAX_DELIVERED_PER_PEER`).
 pub struct GossipProtocol {
     known_events: std::collections::HashSet<String>,
-    pending_broadcasts: Vec<MeshEvent>,
-    _peer_cache: std::collections::HashMap<String, Vec<String>>,
+    pending_broadcasts: std::collections::VecDeque<MeshEvent>,
+    /// peer_id → IDs des événements déjà envoyés à ce pair
+    delivered: std::collections::HashMap<String, std::collections::VecDeque<String>>,
 }
 
 impl GossipProtocol {
     pub fn new() -> Self {
         Self {
             known_events: std::collections::HashSet::new(),
-            pending_broadcasts: Vec::new(),
-            _peer_cache: std::collections::HashMap::new(),
+            pending_broadcasts: std::collections::VecDeque::new(),
+            delivered: std::collections::HashMap::new(),
         }
     }
 
@@ -323,12 +379,19 @@ impl GossipProtocol {
     /// `Err(reason)` if the event is invalid.
     pub fn add_event(&mut self, event: MeshEvent) -> Result<bool, String> {
         event.validate()?;
-        if self.known_events.insert(event.id.clone()) {
-            self.pending_broadcasts.push(event);
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+        self.insert_new(event)
+    }
+
+    /// Add an event validated avec le plancher PoW **adaptatif** de la
+    /// réputation (Audit #11) — permet aux nœuds de confiance de poster
+    /// avec une difficulté 0 sans être rejetés par le plancher réseau fixe.
+    pub fn add_event_with_reputation(
+        &mut self,
+        event: MeshEvent,
+        reputation: &crate::reputation::ReputationSystem,
+    ) -> Result<bool, String> {
+        event.validate_with_reputation(reputation)?;
+        self.insert_new(event)
     }
 
     /// Process event received from peer
@@ -338,26 +401,101 @@ impl GossipProtocol {
         }
 
         if event.validate().is_ok() {
-            self.known_events.insert(event.id.clone());
-            self.pending_broadcasts.push(event);
-            true
+            self.insert_new(event).unwrap_or(false)
         } else {
             false
         }
     }
 
-    /// Get events to broadcast to peer
-    pub fn get_pending_for_peer(&mut self, _peer_id: &str) -> Vec<MeshEvent> {
-        self.pending_broadcasts.drain(..).collect()
+    /// Enregistre un événement connu et le place dans l'outbox, avec bornes.
+    fn insert_new(&mut self, event: MeshEvent) -> Result<bool, String> {
+        if !self.known_events.insert(event.id.clone()) {
+            return Ok(false); // Déjà connu
+        }
+        // Borne mémoire : évince le plus ancien événement en attente
+        if self.pending_broadcasts.len() >= MAX_PENDING_BROADCASTS {
+            self.pending_broadcasts.pop_front();
+        }
+        self.pending_broadcasts.push_back(event);
+        // Borne mémoire sur les événements connus (FIFO)
+        if self.known_events.len() > MAX_KNOWN_EVENTS {
+            self.expire_old_known();
+        }
+        Ok(true)
+    }
+
+    /// Get events to broadcast to a specific peer — sans vider l'outbox
+    /// globale (Audit M3).
+    ///
+    /// Ne renvoie que les événements qui n'ont **pas encore** été envoyés à
+    /// ce pair (suivi par-pair `delivered`), puis les marque comme livrés.
+    /// Un événement reste dans l'outbox jusqu'à éviction (bornée) afin que
+    /// les autres pairs puissent aussi le recevoir.
+    pub fn get_pending_for_peer(&mut self, peer_id: &str) -> Vec<MeshEvent> {
+        let delivered_set = self
+            .delivered
+            .entry(peer_id.to_string())
+            .or_default();
+
+        let mut to_send = Vec::new();
+        for event in self.pending_broadcasts.iter() {
+            if !delivered_set.iter().any(|id| id == &event.id) {
+                to_send.push(event.clone());
+            }
+        }
+
+        // Marque les événements envoyés comme livrés à ce pair (borné)
+        for event in &to_send {
+            if delivered_set.len() >= MAX_DELIVERED_PER_PEER {
+                delivered_set.pop_front();
+            }
+            delivered_set.push_back(event.id.clone());
+        }
+
+        to_send
     }
 
     pub fn known_count(&self) -> usize {
         self.known_events.len()
     }
 
-    /// Get pending broadcasts
+    /// Get pending broadcasts (outbox, tous événements confondus)
     pub fn get_pending_broadcasts(&self) -> Vec<&MeshEvent> {
         self.pending_broadcasts.iter().collect()
+    }
+
+    /// Évince les événements connus les plus anciens au-delà de la borne.
+    fn expire_old_known(&mut self) {
+        // Réinsère les événements connus les plus récents (l'ordre d'insertion
+        // dans la HashSet n'est pas garanti : on repart de l'outbox qui est FIFO).
+        if self.known_events.len() <= MAX_KNOWN_EVENTS {
+            return;
+        }
+        // Construit un ensemble de référence à partir de l'outbox (les plus
+        // récents), puis évince les autres connus jusqu'à la borne.
+        let keep: std::collections::HashSet<String> = self
+            .pending_broadcasts
+            .iter()
+            .map(|e| e.id.clone())
+            .collect();
+        let overflow = self.known_events.len() - MAX_KNOWN_EVENTS;
+        let mut evicted = 0usize;
+        let ids: Vec<String> = self.known_events.iter().cloned().collect();
+        for id in ids {
+            if evicted >= overflow {
+                break;
+            }
+            if !keep.contains(&id) {
+                self.known_events.remove(&id);
+                evicted += 1;
+            }
+        }
+    }
+}
+
+impl Default for GossipProtocol {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -618,6 +756,162 @@ mod tests {
         assert!(
             gossip.add_event(bad).is_err(),
             "Invalid event must be refused by add_event"
+        );
+    }
+
+    #[test]
+    fn test_gossip_per_peer_delivery_no_global_drain() {
+        // Audit M3 : l'ancien `drain(..)` vidait l'outbox globale au premier
+        // pair → les pairs suivants ne recevaient RIEN. Le suivi par-pair
+        // doit donner à chaque pair tous les événements, sans doublons.
+        let mut gossip = GossipProtocol::new();
+        let identity = Identity::generate();
+
+        let make_event = |content: &str| {
+            let mut e = MeshEvent::new_signed(
+                &identity,
+                OndeMessageType::Alert,
+                content.to_string(),
+                vec![],
+            );
+            e.pow_difficulty = 2;
+            assert!(e.compute_pow(1_000_000));
+            e
+        };
+
+        let e1 = make_event("événement un");
+        let e2 = make_event("événement deux");
+        assert!(gossip.add_event(e1).is_ok());
+        assert!(gossip.add_event(e2).is_ok());
+        assert_eq!(gossip.get_pending_broadcasts().len(), 2);
+
+        // Pair A reçoit les deux événements
+        let to_a = gossip.get_pending_for_peer("peer-a");
+        assert_eq!(to_a.len(), 2);
+
+        // Pair B reçoit AUSSI les deux événements (pas de drain global)
+        let to_b = gossip.get_pending_for_peer("peer-b");
+        assert_eq!(to_b.len(), 2, "peer B must not be starved by peer A");
+
+        // Un nouvel événement arrive
+        let e3 = make_event("événement trois");
+        assert!(gossip.add_event(e3).is_ok());
+
+        // Pair A : seulement le NOUVEAU (pas de re-livraison des anciens)
+        let to_a2 = gossip.get_pending_for_peer("peer-a");
+        assert_eq!(to_a2.len(), 1);
+        assert_eq!(to_a2[0].content, "événement trois");
+
+        // Pair B : lui aussi reçoit le nouveau
+        let to_b2 = gossip.get_pending_for_peer("peer-b");
+        assert_eq!(to_b2.len(), 1);
+        assert_eq!(to_b2[0].content, "événement trois");
+
+        // Personne ne reçoit de doublon
+        assert!(gossip.get_pending_for_peer("peer-a").is_empty());
+        assert!(gossip.get_pending_for_peer("peer-b").is_empty());
+    }
+
+    #[test]
+    fn test_gossip_bounds_are_enforced() {
+        // Audit M3 : la mémoire du gossip doit rester bornée, même avec un
+        // flot continu d'événements et beaucoup de pairs.
+        let mut gossip = GossipProtocol::new();
+        let identity = Identity::generate();
+
+        // Remplit l'outbox au-delà de la borne
+        for i in 0..(MAX_PENDING_BROADCASTS + 100) {
+            let mut e = MeshEvent::new_signed(
+                &identity,
+                OndeMessageType::Alert,
+                format!("event-{i}"),
+                vec![],
+            );
+            e.pow_difficulty = 2;
+            assert!(e.compute_pow(1_000_000));
+            gossip.add_event(e).unwrap();
+        }
+        assert!(
+            gossip.get_pending_broadcasts().len() <= MAX_PENDING_BROADCASTS,
+            "pending broadcasts must be bounded"
+        );
+        assert!(gossip.known_count() <= MAX_KNOWN_EVENTS);
+
+        // Le suivi par-pair est borné
+        let peer = "peer-heavy";
+        for _ in 0..5 {
+            gossip.get_pending_for_peer(peer);
+        }
+        let delivered_len = gossip
+            .delivered
+            .get(peer)
+            .map(|d| d.len())
+            .unwrap_or(0);
+        assert!(
+            delivered_len <= MAX_DELIVERED_PER_PEER,
+            "delivered tracking per peer must be bounded"
+        );
+    }
+
+    #[test]
+    fn test_reputation_adaptive_pow_trusted_no_pow() {
+        use crate::reputation::ReputationSystem;
+
+        // Un nœud de confiance (genesis) peut poster SANS PoW
+        let identity = Identity::generate();
+        let mut rep = ReputationSystem::new();
+        rep.bootstrap(&[identity.pubkey_hex()]);
+
+        let event = MeshEvent::new_signed(&identity, OndeMessageType::Alert, "alerte".into(), vec![])
+            .with_pow_difficulty(0);
+
+        // validate() standard (plancher réseau) le rejette…
+        assert!(event.validate().is_err());
+        // …mais validate_with_reputation l'accepte (nœud de confiance)
+        assert!(
+            event.validate_with_reputation(&rep).is_ok(),
+            "trusted node must be allowed to post without PoW"
+        );
+    }
+
+    #[test]
+    fn test_reputation_adaptive_pow_unknown_requires_high() {
+        use crate::reputation::ReputationSystem;
+
+        // Un nœud INCONNU doit payer un PoW élevé (MAX_POW_DIFFICULTY)
+        let rep = ReputationSystem::new();
+        let identity = Identity::generate();
+
+        // Difficulté 1 (plancher réseau) : insuffisante pour un inconnu
+        let mut weak = MeshEvent::new_signed(&identity, OndeMessageType::Alert, "spam".into(), vec![])
+            .with_pow_difficulty(1);
+        assert!(weak.compute_pow(1_000_000));
+        assert!(weak.validate().is_ok(), "standard validate accepts difficulty 1");
+        assert!(
+            weak.validate_with_reputation(&rep).is_err(),
+            "unknown node with difficulty 1 must be rejected by reputation"
+        );
+
+        // Difficulté MAX : acceptable
+        let mut strong = MeshEvent::new_signed(&identity, OndeMessageType::Alert, "spam".into(), vec![])
+            .with_pow_difficulty(crate::reputation::MAX_POW_DIFFICULTY);
+        assert!(strong.compute_pow(10_000_000));
+        assert!(
+            strong.validate_with_reputation(&rep).is_ok(),
+            "unknown node paying MAX PoW must be accepted"
+        );
+    }
+
+    #[test]
+    fn test_signed_event_uses_fuzzy_timestamp() {
+        // L'horodatage flou (±30 s) reste dans la fenêtre de tolérance
+        // MAX_CLOCK_SKEW_SECS → les événements signés restent valides.
+        let identity = Identity::generate();
+        let event = MeshEvent::new_signed(&identity, OndeMessageType::Alert, "hi".into(), vec![]);
+        let now = now_secs();
+        assert!(
+            event.created_at.abs_diff(now) <= 30,
+            "fuzzy timestamp must stay within ±30 s"
         );
     }
 }
