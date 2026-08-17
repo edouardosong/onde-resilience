@@ -3,8 +3,8 @@
 use ed25519_dalek::{SigningKey, VerifyingKey, Verifier, Signer};
 use ed25519_dalek::Signature as EdSignature;
 use chacha20poly1305::{
+    aead::AeadInPlace,
     ChaCha20Poly1305, Key, Nonce, KeyInit,
-    aead::Aead,
 };
 use rand::rngs::OsRng as RandOsRng;
 use rand::RngCore;
@@ -28,8 +28,9 @@ impl Identity {
     pub fn generate() -> Self {
         let signing_key = SigningKey::generate(&mut RandOsRng);
         let verifying_key = signing_key.verifying_key();
-        let x25519_secret = X25519StaticSecret::random_from_rng(&mut RandOsRng);
-        let x25519_public = X25519PublicKey::from(&x25519_secret);
+        // Derive the X25519 ECDH key deterministically from the Ed25519 seed
+        // so `from_bytes` (restore) reproduces the exact same keypair.
+        let (x25519_secret, x25519_public) = Self::derive_x25519(signing_key.as_bytes());
         Self {
             signing_key,
             verifying_key,
@@ -38,17 +39,41 @@ impl Identity {
         }
     }
 
+    /// Restore an identity from the 32-byte Ed25519 seed.
+    ///
+    /// The X25519 ECDH key is derived DETERMINISTICALLY from the Ed25519
+    /// signing key (HKDF-SHA256), so every node that holds the same secret
+    /// reproduces the exact same X25519 keypair. Peers that cached the public
+    /// X25519 key (for encrypted replies) keep working across restarts.
     pub fn from_bytes(bytes: &[u8; 32]) -> Self {
         let signing_key = SigningKey::from_bytes(bytes);
         let verifying_key = signing_key.verifying_key();
-        let x25519_secret = X25519StaticSecret::random_from_rng(&mut RandOsRng);
-        let x25519_public = X25519PublicKey::from(&x25519_secret);
+        let (x25519_secret, x25519_public) = Self::derive_x25519(signing_key.as_bytes());
         Self {
             signing_key,
             verifying_key,
             x25519_secret,
             x25519_public,
         }
+    }
+
+    /// Derive a stable X25519 keypair from an Ed25519 secret key
+    /// (HKDF-SHA256, info = "onde-x25519-v1"). Deterministic for a given seed.
+    fn derive_x25519(seed: &[u8]) -> (X25519StaticSecret, X25519PublicKey) {
+        let hk = hkdf::Hkdf::<Sha256>::new(None, seed);
+        let mut x25519_material = [0u8; 32];
+        hk.expand(b"onde-x25519-v1", &mut x25519_material)
+            .expect("HKDF expand of a 32-byte seed cannot fail");
+        // Clamp the derived scalar to a valid X25519 secret key
+        let clamped: [u8; 32] = {
+            let mut m = x25519_material;
+            m[0] &= 0xF8;
+            m[31] = (m[31] & 0x7F) | 0x40;
+            m
+        };
+        let x25519_secret = X25519StaticSecret::from(clamped);
+        let x25519_public = X25519PublicKey::from(&x25519_secret);
+        (x25519_secret, x25519_public)
     }
 
     pub fn signing_key_bytes(&self) -> [u8; 32] {
@@ -140,54 +165,58 @@ impl EncryptedEnvelope {
     }
 
     /// Encrypt a message for a recipient using the recipient's X25519 public key.
+    ///
+    /// The sender's X25519 public key is bound into the ciphertext via AEAD
+    /// associated data, so a relay that replaces `sender_pubkey` is detected
+    /// at decryption time (tag mismatch).
     pub fn encrypt(
         message: &[u8],
         sender: &Identity,
         recipient_pub_x25519: &[u8; 32],
     ) -> Result<Self, String> {
-        // 1. Ephemeral X25519 keypair
         let eph_secret = X25519StaticSecret::random_from_rng(&mut RandOsRng);
         let eph_public = X25519PublicKey::from(&eph_secret);
-
-        // 2. ECDH: shared_secret = eph_priv * recipient_pub
         let recipient_public = X25519PublicKey::from(*recipient_pub_x25519);
         let shared_secret = eph_secret.diffie_hellman(&recipient_public);
-
-        // 3. HKDF-SHA256 key derivation
         let key_bytes = Self::derive_key(shared_secret.as_bytes())?;
         let key = Key::from_slice(&key_bytes);
         let cipher = ChaCha20Poly1305::new(key);
 
-        // 4. Random 96-bit nonce + encrypt
         let mut nonce_bytes = [0u8; 12];
         RandOsRng.fill_bytes(&mut nonce_bytes);
         let nonce = Nonce::from_slice(&nonce_bytes);
 
-        let ciphertext = cipher.encrypt(nonce, message).map_err(|e| e.to_string())?;
+        let sender_pubkey = sender.x25519_public_key_bytes();
+        let mut buf = message.to_vec();
+        cipher
+            .encrypt_in_place(nonce, &sender_pubkey, &mut buf)
+            .map_err(|e| e.to_string())?;
 
         Ok(Self {
-            ciphertext,
+            ciphertext: buf,
             nonce: nonce_bytes,
-            sender_pubkey: sender.x25519_public_key_bytes(),
+            sender_pubkey,
             eph_public_key: eph_public.to_bytes(),
         })
     }
 
     /// Decrypt an envelope as the recipient, using the recipient's X25519 secret key.
+    ///
+    /// `sender_pubkey` is part of the AEAD tag: a tampered or relay-substituted
+    /// sender key causes an authentication failure.
     pub fn decrypt(envelope: &Self, recipient: &Identity) -> Result<Vec<u8>, String> {
-        // ECDH: shared_secret = recipient_priv * envelope.eph_public
         let eph_public = X25519PublicKey::from(envelope.eph_public_key);
         let shared_secret = recipient.x25519_secret_key().diffie_hellman(&eph_public);
-
-        // Same HKDF key derivation as encryption
         let key_bytes = Self::derive_key(shared_secret.as_bytes())?;
         let key = Key::from_slice(&key_bytes);
         let nonce = Nonce::from_slice(&envelope.nonce);
         let cipher = ChaCha20Poly1305::new(key);
 
+        let mut buf = envelope.ciphertext.to_vec();
         cipher
-            .decrypt(nonce, envelope.ciphertext.as_ref())
-            .map_err(|e: chacha20poly1305::Error| e.to_string())
+            .decrypt_in_place(nonce, &envelope.sender_pubkey, &mut buf)
+            .map_err(|e| format!("Decryption failed (sender_pubkey tampered?): {e}"))?;
+        Ok(buf)
     }
 }
 
@@ -437,6 +466,57 @@ mod tests {
         // Flip a bit in the ciphertext — authentication must fail
         envelope.ciphertext[0] ^= 0x01;
         assert!(EncryptedEnvelope::decrypt(&envelope, &bob).is_err());
+    }
+
+    #[test]
+    fn test_sender_pubkey_swap_detected() {
+        // A malicious relay replaces the advertised sender X25519 key with its
+        // own. Because `sender_pubkey` is bound into the AEAD tag, the
+        // recipient's authentication must fail (the tag was computed with the
+        // original sender key).
+        let alice = Identity::generate();
+        let bob = Identity::generate();
+        let eve = Identity::generate();
+
+        let mut envelope =
+            EncryptedEnvelope::encrypt(b"to bob", &alice, &bob.x25519_public_key_bytes())
+                .unwrap();
+
+        // Honest path still works
+        assert_eq!(
+            EncryptedEnvelope::decrypt(&envelope, &bob).unwrap(),
+            b"to bob"
+        );
+
+        // Relay swaps the sender key → tag mismatch → rejected
+        envelope.sender_pubkey = eve.x25519_public_key_bytes();
+        assert!(
+            EncryptedEnvelope::decrypt(&envelope, &bob).is_err(),
+            "a swapped sender_pubkey must be detected via AEAD"
+        );
+    }
+
+    #[test]
+    fn test_from_bytes_deterministic_x25519() {
+        // Restoring the same identity twice must yield the SAME X25519 key
+        // (deterministic derivation from the Ed25519 seed), so peers that
+        // cached the old public key can still decrypt after a restart.
+        let alice = Identity::generate();
+        let seed = alice.signing_key_bytes();
+        let a1 = Identity::from_bytes(&seed);
+        let a2 = Identity::from_bytes(&seed);
+        assert_eq!(a1.x25519_public_key_hex(), a2.x25519_public_key_hex());
+        assert_eq!(a1.x25519_public_key_hex(), alice.x25519_public_key_hex());
+        assert_eq!(a1.pubkey_hex(), alice.pubkey_hex());
+
+        // E2E across a restore must round-trip
+        let bob = Identity::generate();
+        let envelope = EncryptedEnvelope::encrypt(b"after restart", &a1, &bob.x25519_public_key_bytes())
+            .unwrap();
+        assert_eq!(
+            EncryptedEnvelope::decrypt(&envelope, &bob).unwrap(),
+            b"after restart"
+        );
     }
 
     #[test]

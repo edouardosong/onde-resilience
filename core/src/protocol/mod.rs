@@ -162,6 +162,16 @@ impl MeshEvent {
         }
     }
 
+    /// Minimum PoW difficulty accepted by a receiver.
+    ///
+    /// `pow_difficulty = 0` → prefix `""` → `verify_pow` always true → free
+    /// spam. The difficulty field is NOT part of the canonical ID (not
+    /// signed), so a malicious sender can set it to 0 without breaking the
+    /// signature. The receiver therefore enforces a floor: difficulty 1 means
+    /// at least 2 hash attempts on average — trivial for an honest client, a
+    /// real (if small) cost for a spammer. Honest producers already use 2–4.
+    pub const MIN_POW_DIFFICULTY: u8 = 1;
+
     /// Verify content validity: size limit, timestamp sanity, canonical ID,
     /// Ed25519 signature and PoW.
     pub fn validate(&self) -> Result<(), String> {
@@ -203,6 +213,19 @@ impl MeshEvent {
             .map_err(|_| "Invalid signature encoding".to_string())?;
         if !Identity::verify_from_pubkey(&pubkey_bytes, self.id.as_bytes(), &sig_bytes) {
             return Err("Invalid signature".to_string());
+        }
+
+        // Enforce the network minimum PoW difficulty BEFORE the hash check.
+        // Without this, `pow_difficulty = 0` → prefix `""` → `starts_with("")`
+        // is always true → a malicious sender can flood the mesh for free.
+        // The difficulty is NOT part of the canonical ID (not signed), so an
+        // attacker can freely set it to 0 without breaking the signature.
+        if self.pow_difficulty < Self::MIN_POW_DIFFICULTY {
+            return Err(format!(
+                "PoW difficulty {diff} is below network minimum {min}",
+                diff = self.pow_difficulty,
+                min = Self::MIN_POW_DIFFICULTY
+            ));
         }
 
         // Verify PoW (the ID is stable — PoW is checked against hash(id:nonce))
@@ -414,11 +437,47 @@ mod tests {
             "hello".to_string(),
             vec!["test".to_string()],
         );
-        event.pow_difficulty = 0; // PoW trivially satisfied for this unit test
+        event.pow_difficulty = 2; // above the network minimum, PoW still trivial
+        assert!(event.compute_pow(1_000_000), "PoW nonce must be found at difficulty 2");
 
         assert!(event.validate().is_ok(), "Signed event must validate");
         assert_eq!(event.sig.len(), 128); // 64 bytes of hex
         assert_eq!(event.pubkey, identity.pubkey_hex());
+    }
+
+    #[test]
+    fn test_zero_pow_difficulty_rejected() {
+        // The receiver must refuse events below the network minimum difficulty.
+        // An attacker can freely set `pow_difficulty = 0` (it is NOT part of
+        // the canonical ID, so the signature stays valid) and previously the
+        // empty prefix `""` always passed `verify_pow` → free spam.
+        let identity = Identity::generate();
+        let mut event = MeshEvent::new_signed(
+            &identity,
+            OndeMessageType::Alert,
+            "spam".to_string(),
+            vec![],
+        );
+        event.pow_difficulty = 0;
+        assert!(event.validate().is_err(), "difficulty 0 must be rejected");
+        assert!(
+            event.validate().unwrap_err().contains("below network minimum"),
+            "error must mention the network minimum"
+        );
+
+        // The honest floor itself is accepted (PoW trivially satisfiable)
+        let mut event2 = MeshEvent::new_signed(
+            &identity,
+            OndeMessageType::Alert,
+            "ok".to_string(),
+            vec![],
+        );
+        event2.pow_difficulty = 1; // = MeshEvent::MIN_POW_DIFFICULTY (trivially satisfiable)
+        assert!(event2.compute_pow(1_000_000));
+        assert!(
+            event2.validate().is_ok(),
+            "events at the network minimum difficulty must validate"
+        );
     }
 
     #[test]
@@ -430,7 +489,8 @@ mod tests {
             "hello".to_string(),
             vec![],
         );
-        event.pow_difficulty = 0;
+        event.pow_difficulty = 2;
+        assert!(event.compute_pow(1_000_000));
         assert!(event.validate().is_ok());
 
         // Falsify the signature (flip one bit)
@@ -468,7 +528,7 @@ mod tests {
             "hello".to_string(),
             vec![],
         );
-        event.pow_difficulty = 0;
+        event.pow_difficulty = 2;
 
         // Tamper with content — the canonical ID no longer matches
         event.content = "tampered".to_string();
@@ -507,7 +567,7 @@ mod tests {
     fn test_is_expired_no_underflow() {
         let identity = Identity::generate();
         let mut event = MeshEvent::new_signed(&identity, OndeMessageType::Alert, "hi".into(), vec![]);
-        event.pow_difficulty = 0;
+        event.pow_difficulty = 2;
 
         // An event created in the future must not panic (saturating_sub)
         event.created_at = now_secs() + 60;
@@ -522,7 +582,8 @@ mod tests {
     fn test_future_timestamp_rejected() {
         let identity = Identity::generate();
         let mut event = MeshEvent::new_signed(&identity, OndeMessageType::Alert, "hi".into(), vec![]);
-        event.pow_difficulty = 0;
+        event.pow_difficulty = 2;
+        assert!(event.compute_pow(1_000_000));
         assert!(event.validate().is_ok());
 
         // created_at more than 5 minutes in the future → refused
@@ -538,7 +599,8 @@ mod tests {
         let mut gossip = GossipProtocol::new();
         let identity = Identity::generate();
         let mut event = MeshEvent::new_signed(&identity, OndeMessageType::Alert, "hello".into(), vec![]);
-        event.pow_difficulty = 0;
+        event.pow_difficulty = 2;
+        assert!(event.compute_pow(1_000_000));
         let id = event.id.clone();
 
         assert!(gossip.add_event(event.clone()).is_ok());

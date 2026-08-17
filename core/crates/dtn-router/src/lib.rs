@@ -181,12 +181,21 @@ impl DtnRouter {
     }
 }
 
+/// Add `peer` to `list` only if it is not already present (no duplicates).
+fn push_unique(list: &mut Vec<String>, peer: &str) {
+    if !list.iter().any(|p| p == peer) {
+        list.push(peer.to_string());
+    }
+}
+
 /// Collect messages from `from`'s buffer that should be handed to `to`.
 ///
 /// - Unicast (`destination = Some(to)`): delivered, then removed from the buffer.
 /// - Broadcast (`destination = None`): delivered to every peer NOT already in
 ///   `delivered_to`, and KEPT in the buffer so other peers can still receive it.
 ///   It only dies by TTL (`tick`) or hop limit — never after a single delivery.
+///   The previous holder of the buffer is also marked served so the broadcast
+///   is never bounced straight back to it (loopback).
 /// - Messages whose hop count reached their TTL are dropped as expired.
 ///
 /// Returns (forwarded messages, forwarded count, delivered count, expired count).
@@ -217,13 +226,23 @@ fn collect_forwarded(
             if should_deliver {
                 let mut deliverable = msg.clone();
                 deliverable.hop_count += 1;
-                deliverable.delivered_to.push(to.to_string());
+                // Mark both this peer (`to`) and the buffer holder (`from`) as
+                // served so the broadcast is never bounced straight back to the
+                // holder on a later encounter (loopback).
+                push_unique(&mut deliverable.delivered_to, to);
+                if from != to {
+                    push_unique(&mut deliverable.delivered_to, from);
+                }
                 forwarded_count += 1;
                 delivered_count += 1;
                 forwarded.push(deliverable);
                 if msg.destination.is_none() {
-                    // Broadcast: keep in the buffer for other peers, mark this peer served
-                    msg.delivered_to.push(to.to_string());
+                    // Broadcast: keep in the buffer for other peers, mark this peer
+                    // and the holder served
+                    push_unique(&mut msg.delivered_to, to);
+                    if from != to {
+                        push_unique(&mut msg.delivered_to, from);
+                    }
                 } else {
                     // Unicast: delivered, remove from the buffer
                     to_remove.push(idx);
@@ -339,6 +358,38 @@ mod tests {
         }
         assert_eq!(router.buffer_size("A").await, 0, "broadcast must die by TTL");
         assert_eq!(router.stats().await.total_expired, 1);
+    }
+
+    #[tokio::test]
+    async fn test_broadcast_no_loopback_to_holder() {
+        // A originates a broadcast, B receives and stores it, then B encounters
+        // A again. Because the buffer holder (`A`) is marked served in
+        // `delivered_to`, A must NOT receive its own broadcast bounced back.
+        let router = DtnRouter::new(100);
+
+        let broadcast = msg("bcast-loop", None, 0, 0);
+        assert!(router.store("A", broadcast).await);
+
+        // A meets B → B receives the broadcast
+        let (_, to_b) = router.encounter("A", "B").await;
+        assert_eq!(to_b.len(), 1, "B must receive the broadcast");
+        // The delivered copy must mark both the new peer (B) and the holder (A)
+        assert!(to_b[0].delivered_to.iter().any(|p| p == "B"), "B marked served");
+        assert!(to_b[0].delivered_to.iter().any(|p| p == "A"), "holder A marked served");
+
+        // B stores the received copy in its own buffer
+        assert!(router.store("B", to_b[0].clone()).await);
+
+        // B meets A again → A must NOT receive the broadcast back (loopback)
+        let (to_a, _) = router.encounter("B", "A").await;
+        assert_eq!(
+            to_a.len(),
+            0,
+            "A must not receive its own broadcast back from B (loopback)"
+        );
+
+        // A still holds its own original copy
+        assert_eq!(router.buffer_size("A").await, 1, "A keeps its own broadcast copy");
     }
 
     #[tokio::test]

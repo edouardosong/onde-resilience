@@ -48,26 +48,29 @@ impl ZimReader {
         Ok(count)
     }
 
-    /// Read the openZIM header (first 48 bytes of the file):
-    /// - offset 0:  u16 LE major version (must be >= 5),
-    /// - offset 36: u64 LE article count.
+    /// Read the openZIM header (first 70 bytes of the file).
     ///
-    /// Only the header is read — reading article bodies is out of scope for
-    /// this prototype, but the count always comes from the real file.
+    /// Layout (per openZIM 5.x spec, little-endian):
+    ///   offset 0:  u16 major_version (must be >= 5)
+    ///   offset 2:  u16 minor_version
+    ///   offset 4:  u16 flags
+    ///   offset 6:  u64 cluster_count
+    ///   offset 14: u64 article_count
+    ///
+    /// Only the header is read (70 bytes), NOT the full archive.
+    /// Reading article bodies is out of scope for this prototype.
     fn parse_zim_header(&self, path: &PathBuf) -> Result<u64, String> {
-        let bytes = fs::read(path)
-            .map_err(|e| format!("failed to read ZIM archive '{}': {e}", path.display()))?;
-        if bytes.len() < 48 {
-            return Err(format!(
-                "not a valid ZIM (file too small: {} bytes)",
-                bytes.len()
-            ));
-        }
-        let major_version = u16::from_le_bytes([bytes[0], bytes[1]]);
+        use std::io::Read;
+        let mut file = std::fs::File::open(path)
+            .map_err(|e| format!("failed to open ZIM archive '{}': {e}", path.display()))?;
+        let mut header = [0u8; 70];
+        file.read_exact(&mut header)
+            .map_err(|e| format!("failed to read ZIM header of '{}': {e}", path.display()))?;
+        let major_version = u16::from_le_bytes([header[0], header[1]]);
         if major_version < 5 {
             return Err(format!("not a valid ZIM (major version {major_version})"));
         }
-        let article_count = u64::from_le_bytes(bytes[36..44].try_into().unwrap());
+        let article_count = u64::from_le_bytes(header[14..22].try_into().unwrap());
         Ok(article_count)
     }
 
@@ -148,13 +151,16 @@ impl MBTilesRenderer {
 
     /// Load an MBTiles database.
     ///
-    /// Returns `Err` if the file does not exist. No demo tiles are injected
-    /// here — call `load_demo` explicitly if you want the demo tiles.
+    /// Returns `Err` if the file does not exist. Clears any previously cached
+    /// demo tiles so that `get_tile` no longer serves the transparent 1x1 PNGs
+    /// after switching to a real map database.
     pub fn load(&mut self, path: &str) -> Result<(), String> {
         let path_buf = PathBuf::from(path);
         if !path_buf.is_file() {
             return Err(format!("MBTiles database not found: {path}"));
         }
+        // Clear cached demo tiles — the real database is now authoritative
+        self.tile_cache.clear();
         // In production: open SQLite and read tiles
         self.db_path = Some(path_buf);
         Ok(())
@@ -391,12 +397,10 @@ mod tests {
 
     #[test]
     fn test_zim_load_real_header() {
-        // Synthetic openZIM header: 48 bytes, major version 5, articleCount = 12345
-        let mut buf = [0u8; 48];
-        buf[0] = 0x05; // major version, u16 LE
-        buf[1] = 0x00;
-        buf[36..44].copy_from_slice(&12345u64.to_le_bytes());
-
+        // Synthetic openZIM header: >= 70 bytes, major version 5, articleCount = 12345
+        let mut buf = [0u8; 70];
+        buf[0..2].copy_from_slice(&5u16.to_le_bytes());   // major version
+        buf[14..22].copy_from_slice(&12345u64.to_le_bytes()); // article count
         let path = std::env::temp_dir().join(format!("onde-zim-{}.zim", std::process::id()));
         std::fs::write(&path, &buf).unwrap();
 
@@ -410,11 +414,10 @@ mod tests {
 
     #[test]
     fn test_zim_rejects_old_major_version() {
-        let mut buf = [0u8; 48];
-        buf[0] = 0x03; // major version 3 (< 5)
-        buf[1] = 0x00;
-        buf[36..44].copy_from_slice(&100u64.to_le_bytes());
-
+        // >= 70 bytes so the header is fully read, major version 3 (< 5)
+        let mut buf = [0u8; 70];
+        buf[0..2].copy_from_slice(&3u16.to_le_bytes());   // major version 3
+        buf[14..22].copy_from_slice(&100u64.to_le_bytes());
         let path = std::env::temp_dir().join(format!("onde-zim-old-{}.zim", std::process::id()));
         std::fs::write(&path, &buf).unwrap();
 
@@ -422,6 +425,22 @@ mod tests {
         let err = reader.load_archive(path.to_str().unwrap()).unwrap_err();
         assert!(err.contains("not a valid ZIM"), "unexpected error: {err}");
         assert!(err.contains("3"), "error must mention the major version: {err}");
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_zim_rejects_truncated_header() {
+        // A file shorter than the 70-byte header must fail loudly (not read full archive)
+        let buf = [0u8; 10];
+        let path = std::env::temp_dir().join(format!("onde-zim-trunc-{}.zim", std::process::id()));
+        std::fs::write(&path, &buf).unwrap();
+
+        let mut reader = ZimReader::new();
+        assert!(
+            reader.load_archive(path.to_str().unwrap()).is_err(),
+            "a truncated ZIM header must be rejected"
+        );
 
         std::fs::remove_file(&path).ok();
     }
