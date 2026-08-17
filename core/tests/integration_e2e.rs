@@ -52,7 +52,10 @@ async fn test_alert_gossip_reception() {
     // PoW nonce can be 0 if hash("id:0") already has required leading zeros
 
     // Node B receives event via gossip
-    node_b.gossip.add_event(event.clone());
+    assert!(
+        node_b.gossip.add_event(event.clone()).is_ok(),
+        "Valid signed + PoW alert must be accepted by gossip"
+    );
 
     // Verify gossip state
     assert_eq!(node_b.gossip.known_count(), 1);
@@ -115,9 +118,11 @@ async fn test_zk_transaction_flow() {
 async fn test_voice_memo_transcription() {
     use whisper_stt::{WhisperEngine, WhisperConfig};
 
-    // Create voice memo event (simulated)
-    let mut voice_event = MeshEvent::new(
-        "voice_sender_pubkey",
+    // Create voice memo event (simulated) — signed by a real identity so that
+    // gossip validation (signature + PoW) accepts it
+    let voice_sender = Identity::generate();
+    let mut voice_event = MeshEvent::new_signed(
+        &voice_sender,
         OndeMessageType::VoiceMemo,
         "base64_encoded_opus_data_placeholder".to_string(),
         vec!["duration:5s".to_string()],
@@ -133,7 +138,10 @@ async fn test_voice_memo_transcription() {
         storage_gb: 64,
         ..Default::default()
     });
-    node_b.gossip.add_event(voice_event.clone());
+    assert!(
+        node_b.gossip.add_event(voice_event.clone()).is_ok(),
+        "Signed voice memo must be accepted by gossip"
+    );
 
     // Verify voice memo stored
     assert_eq!(node_b.gossip.known_count(), 1);
@@ -210,10 +218,11 @@ async fn test_dtn_store_and_forward() {
         hop_count: 0,
         timestamp_ms: 0,
         priority: 1,
+        delivered_to: vec![],
     };
 
     // Store message in DTN buffer (Node D is offline)
-    router.store("node_a", msg).await;
+    assert!(router.store("node_a", msg).await, "Message should be stored");
 
     // Verify message is buffered
     assert_eq!(router.buffer_size("node_a").await, 1);
@@ -304,7 +313,11 @@ async fn test_multi_node_gossip() {
 
     // Propagate through gossip network (simulate flooding)
     for i in 1..5 {
-        nodes[i].gossip.add_event(alert.clone());
+        assert!(
+            nodes[i].gossip.add_event(alert.clone()).is_ok(),
+            "Node {} should accept the signed alert",
+            i
+        );
     }
 
     // Verify all nodes received the alert
@@ -327,15 +340,16 @@ async fn test_multi_node_gossip() {
  */
 #[tokio::test]
 async fn test_storage_integration() {
-    // ZIM Reader
+    // ZIM Reader — demo mode is explicit (missing files fail loudly)
     let mut zim = ZimReader::new();
-    zim.load_archive("/nonexistent/demo.zim").unwrap();
+    zim.load_demo();
     let results = zim.search("secours");
-    assert!(!results.is_empty() || zim.total_articles() > 0);
+    assert!(!results.is_empty(), "demo mode must expose searchable articles");
+    assert!(zim.total_articles() >= 5);
 
-    // MBTiles Renderer
+    // MBTiles Renderer — demo mode is explicit
     let mut maps = MBTilesRenderer::new();
-    maps.load("/nonexistent/maps.mbtiles").unwrap();
+    maps.load_demo();
 
     // Get tile for Paris at zoom 5 (demo cache has tiles 0..4)
     let tile = maps.get_tile(5, 2, 2);
@@ -345,8 +359,9 @@ async fn test_storage_integration() {
     let geohash = MBTilesRenderer::position_to_geohash(48.8566, 2.3522, 7);
     assert_eq!(geohash.len(), 7);
 
-    // IPFS Seeder
-    let seeder = IpfsSeeder::new("/tmp/onde-ipfs", 100);
+    // IPFS Seeder — demo seeds are registered explicitly
+    let mut seeder = IpfsSeeder::new("/tmp/onde-ipfs", 100).expect("seeder should initialize");
+    seeder.register_demo_seeds();
     let seeds = seeder.list_seeds();
     assert!(seeds.len() >= 5, "Should have demo seeds");
 
@@ -452,9 +467,10 @@ async fn test_dtn_ttl_expiration() {
         hop_count: 0,
         timestamp_ms: 0,
         priority: 5,
+        delivered_to: vec![],
     };
 
-    router.store("node_x", msg).await;
+    assert!(router.store("node_x", msg).await, "Message should be stored");
     assert_eq!(router.buffer_size("node_x").await, 1);
 
     // First tick: TTL becomes 1
@@ -492,8 +508,9 @@ async fn test_dtn_buffer_overflow() {
             hop_count: 0,
             timestamp_ms: 0,
             priority: i as u8, // Increasing priority number = lower priority
+            delivered_to: vec![],
         };
-        router.store("node_a", msg).await;
+        assert!(router.store("node_a", msg).await);
     }
 
     assert_eq!(router.buffer_size("node_a").await, 3);
@@ -509,8 +526,9 @@ async fn test_dtn_buffer_overflow() {
         hop_count: 0,
         timestamp_ms: 0,
         priority: 0, // Highest priority
+        delivered_to: vec![],
     };
-    router.store("node_a", msg4).await;
+    assert!(router.store("node_a", msg4).await, "More urgent message must be stored");
 
     // Buffer should still be at max (3), but one was dropped
     assert_eq!(router.buffer_size("node_a").await, 3);

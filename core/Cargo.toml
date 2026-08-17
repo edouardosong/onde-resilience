@@ -33,6 +33,8 @@ async-trait = "0.1"
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Base64 (demo PNG tile payload)
+base64 = "0.22"
 
 # Cryptography
 ed25519-dalek = { version = "2", features = ["rand_core"] }
@@ -41,6 +43,9 @@ sha2 = "0.10"
 rand = "0.8"
 chacha20poly1305 = "0.10"
 hex = "0.4"
+# ECDH key exchange (X25519) for end-to-end message encryption
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+# HKDF key derivation (RFC 5869) for the encryption protocol
 hkdf = "0.12"
 
 # Logging
@@ -84,7 +89,3 @@ strip = true
 opt-level = 0
 debug = true
 
-# Android NDK cross-compilation
-[target.aarch64-linux-android]
-linker = "/opt/android-sdk/ndk/26.2.11394342/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
-ar = "/opt/android-sdk/ndk/26.2.11394342/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"

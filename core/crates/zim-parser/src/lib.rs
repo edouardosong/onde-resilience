@@ -50,9 +50,9 @@ pub struct SearchResult {
 pub struct ZimReader {
     pub file_path: String,
     pub header: Option<ZimHeader>,
-    cluster_offsets: Vec<u32>,
-    dirents: Vec<u32>,
-    mime_types: Vec<String>,
+    _cluster_offsets: Vec<u32>,
+    _dirents: Vec<u32>,
+    _mime_types: Vec<String>,
     pub article_count: u64,
     title_index: HashMap<String, u32>,
 }
@@ -70,9 +70,9 @@ impl ZimReader {
         Ok(Self {
             file_path: path,
             header: None,
-            cluster_offsets: Vec::new(),
-            dirents: Vec::new(),
-            mime_types: Vec::new(),
+            _cluster_offsets: Vec::new(),
+            _dirents: Vec::new(),
+            _mime_types: Vec::new(),
             article_count: 0,
             title_index: HashMap::new(),
         })
@@ -211,9 +211,9 @@ mod tests {
         let reader = ZimReader {
             file_path: "".to_string(),
             header: None,
-            cluster_offsets: Vec::new(),
-            dirents: Vec::new(),
-            mime_types: Vec::new(),
+            _cluster_offsets: Vec::new(),
+            _dirents: Vec::new(),
+            _mime_types: Vec::new(),
             article_count: 0,
             title_index: HashMap::new(),
         };

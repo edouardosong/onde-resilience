@@ -265,7 +265,7 @@ impl LlamaContext {
             return Err("Model not loaded.".to_string());
         }
 
-        let start = std::time::Instant::now();
+        let _start = std::time::Instant::now();
 
         #[cfg(feature = "mock")]
         {

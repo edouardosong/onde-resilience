@@ -1,7 +1,6 @@
 /// Node Management — Core ONDE node with all subsystems
 
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::crypto::{Identity, ZkTransaction, TxPool};
@@ -68,7 +67,15 @@ impl Node {
         let mesh_address = YggdrasilAddress::new(&pubkey);
 
         let ai_engine = AiEngine::new(config.available_ram_mb);
-        let ipfs_seeder = IpfsSeeder::new("/tmp/onde-ipfs", config.storage_gb);
+        // The seed directory may be unavailable (e.g. read-only filesystem):
+        // log a clear warning and continue with an empty, disabled seeder.
+        let ipfs_seeder = match IpfsSeeder::new("/tmp/onde-ipfs", config.storage_gb) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("IPFS seeder disabled: {e}");
+                IpfsSeeder::disabled(config.storage_gb)
+            }
+        };
 
         Self {
             config,
@@ -109,8 +116,8 @@ impl Node {
             return Err("Alert must be <= 280 characters".to_string());
         }
 
-        let mut event = MeshEvent::new(
-            &self.identity.pubkey_hex(),
+        let mut event = MeshEvent::new_signed(
+            &self.identity,
             OndeMessageType::Alert,
             content,
             vec![],
@@ -124,14 +131,14 @@ impl Node {
             return Err("PoW computation failed".to_string());
         }
 
-        self.gossip.add_event(event.clone());
+        self.gossip.add_event(event.clone())?;
         Ok(event)
     }
 
     /// Publish a mutual aid request
     pub async fn publish_mutual_aid(&mut self, content: String) -> Result<MeshEvent, String> {
-        let mut event = MeshEvent::new(
-            &self.identity.pubkey_hex(),
+        let mut event = MeshEvent::new_signed(
+            &self.identity,
             OndeMessageType::MutualAid,
             content,
             vec![],
@@ -141,7 +148,7 @@ impl Node {
             return Err("PoW computation failed".to_string());
         }
 
-        self.gossip.add_event(event.clone());
+        self.gossip.add_event(event.clone())?;
         Ok(event)
     }
 
@@ -151,7 +158,7 @@ impl Node {
         receiver: &str,
         amount_micro: u64,
     ) -> Result<ZkTransaction, String> {
-        let nonce = self.tx_pool.pending_count() as u64;
+        let nonce = self.tx_pool.next_expected_nonce(&self.identity.pubkey_hex());
         let tx = ZkTransaction::new(&self.identity.pubkey_hex(), receiver, amount_micro, nonce);
 
         self.tx_pool.submit(tx.clone())?;

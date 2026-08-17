@@ -12,6 +12,9 @@ tokio = { version = "1", features = ["full"] }
 lzma-rs = "0.3"  # ZIM uses LZMA/XZ compression
 flate2 = "1.0"   # Some ZIM versions use deflate
 
+[features]
+mock = []  # Simulated ZIM parsing for testing without a real ZIM file
+
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "macros"] }
 tempfile = "3"

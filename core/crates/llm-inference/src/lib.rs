@@ -62,14 +62,14 @@ pub struct InferenceResponse {
 /// Oracle RPC service for desktop nodes
 pub struct OracleRpcServer {
     port: u16,
-    loaded_models: Vec<ModelSize>,
+    _loaded_models: Vec<ModelSize>,
 }
 
 impl OracleRpcServer {
     pub fn new(port: u16) -> Self {
         Self {
             port,
-            loaded_models: vec![ModelSize::Llama70B],
+            _loaded_models: vec![ModelSize::Llama70B],
         }
     }
 
@@ -174,13 +174,13 @@ impl PocketPalEngine {
 
 /// Voice transcription (Speech-to-Text)
 pub struct VoiceTranscriber {
-    model_size_mb: u32,
+    _model_size_mb: u32,
 }
 
 impl VoiceTranscriber {
     pub fn new() -> Self {
         // Whisper tiny = ~75MB
-        Self { model_size_mb: 75 }
+        Self { _model_size_mb: 75 }
     }
 
     /// Transcribe Opus audio to text

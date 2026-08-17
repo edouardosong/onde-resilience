@@ -36,5 +36,18 @@ node_modules/
 .installed.cfg
 *.so
 
+# Rust / Cargo
+*.rdb
+nohup.out
+
+# Tauri / ui artifacts
+ui/dist/
+ui/src-tauri/target/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
 # Simulation results
 onde/simulation/results/
