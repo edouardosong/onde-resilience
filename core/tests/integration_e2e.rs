@@ -19,11 +19,19 @@ use base64::Engine as _;
 /// Déplacer les événements en attente du gossip de `from` vers `to`
 /// (validation adaptative par réputation), puis les faire traiter par le
 /// nœud receveur. Retourne le nombre d'événements nouvellement traités.
+///
+/// **Phase 1.3 — padding opérationnel** : la livraison passe désormais par le
+/// format wire (sérialisation padée à l'émission, unpad avant décodage à la
+/// réception) — c'est le point de passage centralisé choisi pour que TOUT
+/// octet émis vers un pair soit padé et TOUT octet reçu soit unpadé avant
+/// traitement.
 fn gossip_sync(from: &mut Node, to: &mut Node) -> Result<usize, String> {
     let peer_id = to.identity.pubkey_hex();
-    let events = from.gossip.get_pending_for_peer(&peer_id);
+    let wire = from.gossip.get_pending_for_peer_wire(&peer_id)?;
     let mut handled = 0;
-    for event in events {
+    for bytes in wire {
+        // Réception : unpad AVANT tout décodage/validation.
+        let event = MeshEvent::from_wire_bytes(&bytes)?;
         let reputation = to.reputation.clone();
         if to
             .gossip
@@ -977,5 +985,74 @@ async fn test_endorsement_propagation_three_nodes() -> Result<(), String> {
         node_c.reputation.score(&b_pubkey) >= TRUSTED_THRESHOLD,
         "B's reputation must rise above the trust threshold"
     );
+    Ok(())
+}
+
+/*
+ * Scenario 16: Traffic Padding — padé sur le fil, contenu intact (Phase 1.3)
+ *
+ * A publie une alerte de 100 octets. La taille observée sur le fil (le format
+ * wire du gossip, émis par `get_pending_for_peer_wire`) est le seau padé de
+ * 256 B — jamais la taille réelle. B reçoit via le helper `gossip_sync` (qui
+ * achemine par le wire : pad à l'émission, unpad avant décodage à la
+ * réception) et retrouve un événement byte-à-byte identique.
+ */
+#[tokio::test]
+async fn test_traffic_padding_wire_two_nodes() -> Result<(), String> {
+    let mut node_a = Node::new(NodeConfig {
+        display_name: "A".to_string(),
+        ..Default::default()
+    });
+    let mut node_b = Node::new(NodeConfig {
+        display_name: "B".to_string(),
+        ..Default::default()
+    });
+
+    // Web of Trust : B connaît A (PoW adaptatif = 0 pour ses événements).
+    let a_pubkey = node_a.identity.pubkey_hex();
+    node_b.reputation.bootstrap(std::slice::from_ref(&a_pubkey));
+
+    // A publie une alerte de 100 octets.
+    let content = "x".repeat(100);
+    let event = node_a
+        .publish_alert(content.clone())
+        .await
+        .map_err(|e| e.to_string())?;
+    assert_eq!(event.content.len(), 100, "the published alert is 100 bytes");
+
+    // 1. Taille observée sur le fil : 256 B (seau minimal), jamais 100 B.
+    let wire = event.to_wire_bytes()?;
+    assert_eq!(
+        wire.len(),
+        256,
+        "the wire size must be the padded 256 B bucket, got {}",
+        wire.len()
+    );
+
+    // 2. Le flux réel (helper `gossip_sync`, qui achemine par le wire padé)
+    //    livre l'événement à B avec un contenu décodé identique.
+    assert_eq!(
+        gossip_sync(&mut node_a, &mut node_b)?,
+        1,
+        "B must receive the alert through the wire path"
+    );
+    assert_eq!(node_b.gossip.known_count(), 1);
+
+    let received = node_b.gossip.get_pending_broadcasts();
+    assert_eq!(received.len(), 1);
+    assert_eq!(
+        received[0].content, content,
+        "decoded content must be identical to the published alert"
+    );
+    assert_eq!(received[0].id, event.id, "decoded event must be the same event");
+    assert_eq!(received[0].pubkey, event.pubkey);
+    assert_eq!(received[0].kind, event.kind);
+    assert_eq!(received[0].sig, event.sig);
+
+    // 3. Le receveur, s'il re-émet, pad lui aussi au seau (bidirectionnel).
+    let re_emit = received[0].to_wire_bytes()?;
+    assert_eq!(re_emit.len(), 256, "re-emission is padded too");
+    assert_eq!(re_emit, wire, "wire bytes are deterministic and identical");
+
     Ok(())
 }

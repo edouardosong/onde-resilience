@@ -505,14 +505,27 @@ impl TrafficPadding {
     }
 
     /// Pad un message à la taille du seau (suffixe `0x00`).
+    ///
+    /// ⚠️ **Pas de troncature (Phase 1.3)** : un message plus gros que le plus
+    /// grand seau (`16_384` B) est transmis tel quel, **jamais tronqué** —
+    /// tronquer serait une perte de données silencieuse. Le seau maximal
+    /// représente la borne au-delà de laquelle le padding n'apporte plus rien
+    /// (la taille réelle est déjà révélée). `unpad(pad(x)) == x` pour TOUT `x`.
     pub fn pad(data: &[u8]) -> Vec<u8> {
         let target = Self::bucket_for(data.len());
         let mut out = data.to_vec();
-        out.resize(target, 0x00);
+        if target > out.len() {
+            out.resize(target, 0x00);
+        }
         out
     }
 
     /// Retirer le padding (tronque les zéros de fin).
+    ///
+    /// **Idempotent** : `unpad(unpad(x)) == unpad(x)` (tous les zéros de fin
+    /// sont retirés en un seul passage). **Tolérant** : un message sans zéro
+    /// de fin (non padé) est retourné identique ; un message vide retourne un
+    /// slice vide (jamais de panique, y compris pour `len == 0`).
     pub fn unpad(data: &[u8]) -> &[u8] {
         let mut end = data.len();
         while end > 0 && data[end - 1] == 0x00 {
@@ -1129,5 +1142,80 @@ mod tests {
         let padded_big = TrafficPadding::pad(&big);
         assert_eq!(padded_big.len(), 4096);
         assert_eq!(TrafficPadding::unpad(&padded_big), big.as_slice());
+    }
+
+    #[test]
+    fn test_traffic_padding_sizes() {
+        // Phase 1.3 : tailles padées aux seaux (jamais la taille réelle).
+        assert_eq!(TrafficPadding::pad(&[0x01; 100]).len(), 256);
+        assert_eq!(TrafficPadding::pad(&[0x02; 2000]).len(), 4096);
+        // 20 000 B → seau maximal 16_384 : le message est transmis TEL QUEL
+        // (jamais tronqué — tronquer serait une perte de données silencieuse).
+        assert_eq!(TrafficPadding::bucket_for(20_000), 16_384);
+        let big = vec![0x03; 20_000];
+        let padded = TrafficPadding::pad(&big);
+        assert_eq!(padded.len(), 20_000, "oversized messages are never truncated");
+        assert_eq!(TrafficPadding::unpad(&padded), big.as_slice());
+    }
+
+    #[test]
+    fn test_traffic_padding_roundtrip_five_sizes() {
+        // Round-trip exact sur 5 tailles représentatives (1 B → > 16 Kio).
+        for size in [1usize, 100, 1000, 5000, 30_000] {
+            let msg = vec![0xA5u8; size];
+            let padded = TrafficPadding::pad(&msg);
+            // Le contenu seau est toujours >= à la taille réelle (jamais moins).
+            assert!(padded.len() >= size, "pad must never shrink the message");
+            assert_eq!(
+                TrafficPadding::unpad(&padded),
+                msg.as_slice(),
+                "round-trip must be exact for {size} B"
+            );
+        }
+    }
+
+    #[test]
+    fn test_traffic_padding_unpad_non_padded_identical() {
+        // Un message sans zéro de fin (non padé) est retourné identique.
+        let msg = b"hello sans padding";
+        assert_eq!(TrafficPadding::unpad(msg), msg);
+
+        // Un message dont le dernier octet n'est pas zéro n'est pas touché.
+        let ends_non_zero = b"payload\x01";
+        assert_eq!(TrafficPadding::unpad(ends_non_zero), ends_non_zero);
+
+        // Un message vide ne panique pas et retourne un slice vide.
+        let empty: &[u8] = &[];
+        assert_eq!(TrafficPadding::unpad(empty), empty);
+    }
+
+    #[test]
+    fn test_traffic_padding_unpad_idempotent() {
+        // unpad(unpad(pad(x))) == unpad(pad(x)) — l'opération est idempotente.
+        for size in [1usize, 100, 1000, 5000] {
+            let msg = vec![0x5Cu8; size];
+            let padded = TrafficPadding::pad(&msg);
+            let once = TrafficPadding::unpad(&padded);
+            let twice = TrafficPadding::unpad(once);
+            assert_eq!(once, msg.as_slice());
+            assert_eq!(twice, once, "unpad must be idempotent");
+        }
+        // Sur un message déjà entièrement de zéros, l'idempotence tient aussi.
+        let zeros = vec![0u8; 256];
+        let once = TrafficPadding::unpad(&zeros);
+        assert_eq!(once, &[][..] as &[u8]);
+        assert_eq!(TrafficPadding::unpad(once), once);
+    }
+
+    #[test]
+    fn test_traffic_padding_empty_message() {
+        // Le seau minimal pour un message vide est 256 B.
+        assert_eq!(TrafficPadding::bucket_for(0), 256);
+        let padded = TrafficPadding::pad(&[]);
+        assert_eq!(padded.len(), 256);
+        assert_eq!(padded, vec![0u8; 256]);
+        assert_eq!(TrafficPadding::unpad(&padded), &[][..] as &[u8]);
+        // `unpad` sur une entrée vide ne panique pas (exigence Phase 1.3).
+        assert_eq!(TrafficPadding::unpad(&[]), &[][..] as &[u8]);
     }
 }

@@ -346,6 +346,7 @@ cargo tauri ios build
 | Transactions | ZK-Proofs asynchrones (commit différé) |
 | DNS | TLD Handshake incensurables |
 | Distribution APK | `core/src/update/` — annonce + manifeste signés Ed25519 (racine épinglée), transfert par chunks, `verify_apk_signature()` de bout en bout, **câblé dans le flux gossip** (Phase 1.1) |
+| Confidentialité | **Padding de trafic** en seaux (256 B / 1 Ko / 4 Ko / 16 Ko) — **opérationnel sur le flux réseau** (Phase 1.3) : tout message émis est padé, tout message reçu est unpadé avant décodage |
 | Économie batterie | Mode throttling adaptatif (`--battery-saver`), intervalle de sweep différé, publication espacée (`--battery-saver` ×6) |
 | Anti-spam publication | Throttling adaptatif : 10 s (pair de confiance) / 120 s (non approuvé), multiplié par 6 en mode batterie |
 | Résilience stockage | Base **SQLite** par nœud : persistance des événements reçus/publications, restauration complète au démarrage |
@@ -361,25 +362,31 @@ Protocole de mise à jour d'APK par le mesh (Audit #12/#13) : l'annonceur signe 
 
 **Phase 1.2 — opérationnel dans le flux réel** : les endossements ne sont plus **locaux** (appel direct `ReputationSystem::endorse`) : ils sont désormais **propagés dans le mesh**. Un `Endorsement` (`endorser`, `endorsed`, `timestamp`) est sérialisé en JSON puis base64 dans `MeshEvent.content` et diffusé sous le type `OndeMessageType::Endorsement` (code 13 — le format wire des types existants reste stable). `Node::endorse(peer_pubkey)` applique l'endossement localement (réutilise la logique qualifiée `endorse` : anti-self, anti-doublon, seuil d'endosseur — sans la dupliquer), signe l'événement avec l'identité du nœud (Ed25519 sur l'ID canonique) et le diffuse dans le gossip avec le PoW adaptatif (endosseur de confiance → difficulté 0). `Node::handle_incoming_endorsement(event)` vérifie la signature de l'endosseur, intègre via `ReputationSystem::apply_remote_endorsement` (mêmes règles que `endorse` : endosseur non de confiance, self ou doublon → rejeté), puis **relaie** l'endossement vers les pairs qui ne l'ont pas encore reçu (tracking « livré par pair » du gossip) — la cascade propage l'endossement à tout le mesh, et chaque receveur intègre les endossements reçus dans sa vue du Web of Trust. Un nœud atteint le statut « de confiance » après `REQUIRED_ENDORSEMENTS` endossements qualifiés de nœuds de confiance, exactement comme en local.
 
+### Confidentialité — padding de trafic (`core/src/crypto/`)
+
+**Phase 1.3 — opérationnel sur le flux réseau** : `TrafficPadding` n'est plus un primitif inutilisé (dead code) — il est câblé au **point de sérialisation** du gossip, le plus centralisé du flux réel (`GossipProtocol` + `Node` ; le trait `MeshTransport` n'est pas encore branché au gossip, envelopper `send` aurait laissé le padding inopérant). Tout `MeshEvent` émis vers un pair est sérialisé en format wire binaire compact puis **padé au seau** (`MeshEvent::to_wire_bytes` : 256 B / 1 Ko / 4 Ko / 16 Ko — la taille observée est toujours un seau, jamais la taille réelle) ; tout octet reçu est **unpadé avant décodage et validation** (`MeshEvent::from_wire_bytes`). Le receveur tolère les messages non padés (aucun zéro de fin → retour identique) et `unpad` est idempotent ; `pad` ne tronque jamais un message plus gros que le seau maximal (16 Ko) — tronquer serait une perte de données silencieuse. Le flux e2e `gossip_sync` achemine désormais par ce wire padé/unpadé.
+
 ---
 
 ## 🧪 Tests
 
-### Suite du moteur (`core/`) — 142 tests, 0 échec
+### Suite du moteur (`core/`) — 153 tests, 0 échec
 
 ```bash
 # Tous les tests (workspace core/)
 cd core && cargo test --workspace
 
-# Résultats : 142 tests, 0 échec
-# onde-core        : 105 tests ✅ Crypto, Network, Protocol, Storage, Update, Node, AI, Reputation
+# Résultats : 153 tests, 0 échec
+# onde-core        : 115 tests ✅ Crypto, Network, Protocol, Storage, Update, Node, AI, Reputation
 # dtn-router       :  7 tests ✅ Store-and-forward, broadcast, priorités, TTL
 # llama-bind       :  5 tests ✅ Sélection de modèle, génération mock, quantification
 # whisper-stt      :  4 tests ✅ Création d'engine, transcription mock
 # zim-parser       :  3 tests ✅ Extraction HTML, catégories, URL ZIM
 # llm-inference    :  3 tests ✅ Inférence locale, auto-sélection de modèle
-# integration_e2e  : 15 tests ✅ Scénarios end-to-end complets
+# integration_e2e  : 16 tests ✅ Scénarios end-to-end complets
 ```
+
+Les tests ajoutés en Phase 1.3 couvrent le **padding de trafic opérationnel** : tailles de seaux (`pad` 100 B → 256 B, 2000 B → 4096 B, seau maximal 16 384 B pour 20 000 B **sans troncature**), round-trip `unpad(pad(x)) == x` sur 5 tailles (1, 100, 1000, 5000, 30000), `unpad` tolérant (message non padé → identique) et idempotent (`unpad(unpad(pad(x))) == unpad(pad(x))`), message vide → 256 B sans panique, format wire `MeshEvent::to_wire_bytes`/`from_wire_bytes` (round-trip champ par champ, entrée vide/tronquée → erreur propre), et le test e2e `test_traffic_padding_wire_two_nodes` (A publie une alerte de 100 B → **256 B observés sur le fil** → B décode un contenu identique via le helper `gossip_sync` qui achemine par le wire padé).
 
 Les 4 tests ajoutés en Phase 1.2 couvrent : la propagation des endossements entre nœuds (`test_endorsement_propagation_three_nodes`), l'application d'un endossement reçu du réseau (`apply_remote_endorsement` : signature, anti-self, anti-doublon, seuil d'endosseur, promotion), le jeu de relai (`pending_endorsements`) et la stabilité du code wire du nouveau type `Endorsement` (code 13, sans renumérotation).
 
@@ -462,7 +469,7 @@ cargo tauri ios build
 - ✅ Workspace Cargo actif : onde_core + onde_node + 5 crates (dtn-router, zim-parser, llm-inference, llama-bind, whisper-stt)
 - ✅ Chiffrement de bout en bout réel (X25519 + HKDF + ChaCha20-Poly1305), événements signés, PoW antispam
 - ✅ Routage DTN store-and-forward (buffers priorisés, broadcast avec déduplication, TTL)
-- ✅ 135 tests unitaires + intégration, 0 échec
+- ✅ 153 tests unitaires + intégration, 0 échec
 - ✅ Simulation réseau 11k nœuds validée (v0.2.5)
 - ✅ UI HTML AMOLED Black standalone
 - ✅ Bridge Tauri fonctionnel : l'UI appelle le noyau (démarrage nœud, publication alerte/entraide, flux) via les commandes Tauri ; fallback démo navigateur hors Tauri

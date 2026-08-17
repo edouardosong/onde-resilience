@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::crypto::Identity;
+use crate::crypto::{Identity, TrafficPadding};
 
 /// Maximum alert message size (characters)
 pub const MAX_ALERT_SIZE: usize = 280;
@@ -344,6 +344,123 @@ impl MeshEvent {
         let now = now_secs();
         now.saturating_sub(self.created_at) > max_age_sec
     }
+
+    /*
+     * Sérialisation wire (Phase 1.3 — TrafficPadding opérationnel sur le flux).
+     *
+     * Choix de câblage (documenté) : le padding est appliqué au point le plus
+     * **centralisé** du flux réseau, la **sérialisation** du `MeshEvent` en
+     * octets, plutôt que dans `MeshTransport::send`/`send_best`. Raison : le
+     * trait `MeshTransport` n'est PAS encore branché au gossip (le flux réel
+     * passe par `GossipProtocol` + `Node`), donc envelopper `send` laisserait
+     * le padding inopérant — c'était précisément l'état initial (dead code).
+     * Ici, TOUT octet émis vers un pair passe par `to_wire_bytes` (pad) et
+     * TOUT octet entrant est traité par `from_wire_bytes` (unpad) AVANT tout
+     * décodage/validation. Le format est binaire compact (voir le schéma) :
+     * un message texte de 100 B tient ainsi dans le seau minimal de 256 B.
+     *
+     * Format wire (petit-boutiste) :
+     *   id (32) || pubkey (32) || created_at (u64) || kind (u8) ||
+     *   tags_count (u32) || [ tag_len (u32) || tag… ]* ||
+     *   content_len (u32) || content (utf8) || sig (64) ||
+     *   pow_nonce (u64) || pow_difficulty (u8) || ttl (u8)
+     * le tout suffixé par `TrafficPadding::pad` (zéros jusqu'au seau).
+     */
+
+    /// Sérialiser l'événement en octets **padés** (format wire compact).
+    ///
+    /// C'est le point d'émission unique du flux réseau : chaque octet sortant
+    /// vers un pair est produit ici, donc padé au seau. Échoue proprement si
+    /// l'événement n'est pas encodable (id/pubkey/sig hex invalides) — jamais
+    /// de panique.
+    pub fn to_wire_bytes(&self) -> Result<Vec<u8>, String> {
+        let id = decode_hex_32(&self.id).map_err(|_| "wire: invalid event id".to_string())?;
+        let pubkey = decode_hex_32(&self.pubkey)
+            .map_err(|_| "wire: invalid pubkey encoding".to_string())?;
+        let sig = decode_hex_64(&self.sig).map_err(|_| "wire: invalid signature".to_string())?;
+
+        let mut out = Vec::with_capacity(32 + 32 + 8 + 1 + 4 + 4 + self.content.len() + 64 + 8 + 2);
+        out.extend_from_slice(&id);
+        out.extend_from_slice(&pubkey);
+        out.extend_from_slice(&self.created_at.to_le_bytes());
+        out.push(Self::kind_code(&self.kind));
+        out.extend_from_slice(&(self.tags.len() as u32).to_le_bytes());
+        for tag in &self.tags {
+            out.extend_from_slice(&(tag.len() as u32).to_le_bytes());
+            out.extend_from_slice(tag.as_bytes());
+        }
+        out.extend_from_slice(&(self.content.len() as u32).to_le_bytes());
+        out.extend_from_slice(self.content.as_bytes());
+        out.extend_from_slice(&sig);
+        out.extend_from_slice(&self.pow_nonce.to_le_bytes());
+        out.push(self.pow_difficulty);
+        out.push(self.ttl);
+
+        Ok(TrafficPadding::pad(&out))
+    }
+
+    /// Désérialiser un événement depuis des octets wire **padés ou non**.
+    ///
+    /// C'est le point de réception unique : le padding est retiré AVANT tout
+    /// décodage. `unpad` est tolérant (message non padé → identique) et
+    /// idempotent ; une entrée vide ou tronquée retourne une erreur, jamais
+    /// une panique.
+    pub fn from_wire_bytes(data: &[u8]) -> Result<Self, String> {
+        let unpadded = TrafficPadding::unpad(data);
+        let mut r = WireReader::new(unpadded);
+
+        let id = hex::encode(r.take_array::<32>()?);
+        let pubkey = hex::encode(r.take_array::<32>()?);
+        let created_at = r.take_u64()?;
+        let kind = Self::kind_from_code(r.take_u8()?)?;
+        let tags_len = r.take_u32()?;
+        if tags_len > 10_000 {
+            return Err(format!("wire: too many tags ({tags_len})"));
+        }
+        let mut tags = Vec::with_capacity(tags_len as usize);
+        for _ in 0..tags_len {
+            tags.push(r.take_string()?);
+        }
+        let content = r.take_string()?;
+        let sig = hex::encode(r.take_array::<64>()?);
+        let pow_nonce = r.take_u64()?;
+        let pow_difficulty = r.take_u8()?;
+        let ttl = r.take_u8()?;
+
+        Ok(Self {
+            id,
+            pubkey,
+            created_at,
+            kind,
+            tags,
+            content,
+            sig,
+            pow_nonce,
+            pow_difficulty,
+            ttl,
+        })
+    }
+
+    /// Retrouver le type d'événement depuis son code wire (récepteur).
+    fn kind_from_code(code: u8) -> Result<OndeMessageType, String> {
+        Ok(match code {
+            0 => OndeMessageType::Alert,
+            1 => OndeMessageType::MutualAid,
+            2 => OndeMessageType::VoiceMemo,
+            3 => OndeMessageType::Transcription,
+            4 => OndeMessageType::Transaction,
+            5 => OndeMessageType::AiQuery,
+            6 => OndeMessageType::AiResponse,
+            7 => OndeMessageType::FileShareRequest,
+            8 => OndeMessageType::Heartbeat,
+            9 => OndeMessageType::UpdateAnnounce,
+            10 => OndeMessageType::UpdateManifest,
+            11 => OndeMessageType::UpdateChunk,
+            12 => OndeMessageType::UpdateRequest,
+            13 => OndeMessageType::Endorsement,
+            other => return Err(format!("wire: unknown kind code {other}")),
+        })
+    }
 }
 
 /// Decode a 32-byte hex string
@@ -366,6 +483,57 @@ fn decode_hex_64(s: &str) -> Result<[u8; 64], ()> {
     let mut out = [0u8; 64];
     out.copy_from_slice(&bytes);
     Ok(out)
+}
+
+/// Lecteur d'octets à bornes explicites pour le format wire (Phase 1.3).
+///
+/// Retourne une erreur sur entrée tronquée ou vide au lieu de paniquer —
+/// exigence de robustesse du padding (pas de panique sur entrée vide).
+struct WireReader<'a> {
+    buf: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> WireReader<'a> {
+    fn new(buf: &'a [u8]) -> Self {
+        Self { buf, pos: 0 }
+    }
+
+    fn take(&mut self, n: usize) -> Result<&'a [u8], String> {
+        if self.pos + n > self.buf.len() {
+            return Err(format!(
+                "wire message truncated (need {n} bytes at offset {}, have {})",
+                self.pos,
+                self.buf.len() - self.pos
+            ));
+        }
+        let s = &self.buf[self.pos..self.pos + n];
+        self.pos += n;
+        Ok(s)
+    }
+
+    fn take_array<const N: usize>(&mut self) -> Result<[u8; N], String> {
+        let s = self.take(N)?;
+        s.try_into().map_err(|_| "wire: length mismatch".to_string())
+    }
+
+    fn take_u8(&mut self) -> Result<u8, String> {
+        Ok(self.take(1)?[0])
+    }
+
+    fn take_u32(&mut self) -> Result<u32, String> {
+        Ok(u32::from_le_bytes(self.take_array()?))
+    }
+
+    fn take_u64(&mut self) -> Result<u64, String> {
+        Ok(u64::from_le_bytes(self.take_array()?))
+    }
+
+    fn take_string(&mut self) -> Result<String, String> {
+        let len = self.take_u32()? as usize;
+        let b = self.take(len)?;
+        String::from_utf8(b.to_vec()).map_err(|e| format!("wire content is not valid UTF-8: {e}"))
+    }
 }
 
 /*
@@ -487,6 +655,21 @@ impl GossipProtocol {
         }
 
         to_send
+    }
+
+    /// Même sélection que [`GossipProtocol::get_pending_for_peer`], mais
+    /// chaque événement est **sérialisé et padé** via
+    /// [`MeshEvent::to_wire_bytes`] (Phase 1.3).
+    ///
+    /// C'est le point d'émission centralisé du flux réseau : les octets
+    /// produits ici sont exactement ceux qui sortent vers le pair, donc
+    /// systématiquement padés au seau. Le receveur les traite avec
+    /// [`MeshEvent::from_wire_bytes`] (unpad avant décodage).
+    pub fn get_pending_for_peer_wire(&mut self, peer_id: &str) -> Result<Vec<Vec<u8>>, String> {
+        self.get_pending_for_peer(peer_id)
+            .into_iter()
+            .map(|event| event.to_wire_bytes())
+            .collect()
     }
 
     pub fn known_count(&self) -> usize {
@@ -1028,5 +1211,109 @@ mod tests {
         let id_endorsement =
             MeshEvent::compute_id(pk, 42, &OndeMessageType::Endorsement, &tags, "x");
         assert_ne!(id_alert, id_endorsement);
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 1.3 — TrafficPadding opérationnel sur le flux (format wire)
+    // ------------------------------------------------------------------
+
+    fn make_signed_event(content: &str, tags: Vec<String>) -> MeshEvent {
+        let identity = Identity::generate();
+        let mut event = MeshEvent::new_signed(&identity, OndeMessageType::Alert, content.to_string(), tags);
+        event.pow_difficulty = 2;
+        assert!(event.compute_pow(1_000_000));
+        event
+    }
+
+    #[test]
+    fn test_wire_roundtrip_signed_event() {
+        // Sérialisation padée → désérialisation (unpad) : événement identique,
+        // champ par champ.
+        let event = make_signed_event(
+            "alerte réseau : inondation secteur 3",
+            vec!["geohash=u09tunq".to_string(), "peer=abc".to_string()],
+        );
+        let wire = event.to_wire_bytes().expect("valid event must serialize");
+        // Le wire est padé au seau : jamais la taille réelle du JSON/événement.
+        assert_eq!(wire.len(), TrafficPadding::bucket_for(wire.len()));
+
+        let decoded = MeshEvent::from_wire_bytes(&wire).expect("padded wire must decode");
+        assert_eq!(decoded.id, event.id);
+        assert_eq!(decoded.pubkey, event.pubkey);
+        assert_eq!(decoded.created_at, event.created_at);
+        assert_eq!(decoded.kind, event.kind);
+        assert_eq!(decoded.tags, event.tags);
+        assert_eq!(decoded.content, event.content);
+        assert_eq!(decoded.sig, event.sig);
+        assert_eq!(decoded.pow_nonce, event.pow_nonce);
+        assert_eq!(decoded.pow_difficulty, event.pow_difficulty);
+        assert_eq!(decoded.ttl, event.ttl);
+    }
+
+    #[test]
+    fn test_wire_accepts_non_padded_input() {
+        // Un receveur peut recevoir des octets NON padés (pair legacy ou
+        // message plus gros que le seau maximal) : `unpad` les retourne tels
+        // quels et le décodage réussit.
+        let event = make_signed_event("sans padding", vec![]);
+        let padded = event.to_wire_bytes().unwrap();
+        let unpadded = TrafficPadding::unpad(&padded);
+        assert_ne!(unpadded.len(), padded.len(), "the test must exercise real padding");
+        let decoded = MeshEvent::from_wire_bytes(unpadded).expect("non-padded wire must decode");
+        assert_eq!(decoded.content, event.content);
+        assert_eq!(decoded.id, event.id);
+    }
+
+    #[test]
+    fn test_wire_empty_and_truncated_no_panic() {
+        // Exigence Phase 1.3 : pas de panique sur entrée vide ou tronquée.
+        assert!(MeshEvent::from_wire_bytes(&[]).is_err(), "empty wire must be an error");
+        let event = make_signed_event("tronqué", vec![]);
+        let padded = event.to_wire_bytes().unwrap();
+        let full = TrafficPadding::unpad(&padded);
+
+        // Tronquer DANS le contenu réel (hors padding) → erreur propre. NB :
+        // tronquer uniquement des zéros de padding est toléré (unpad retrouve
+        // le message complet — propriété auto-descriptive du format).
+        assert!(
+            MeshEvent::from_wire_bytes(&full[..full.len() - 5]).is_err(),
+            "truncated wire (into the payload) must be an error"
+        );
+        // Un paquet entièrement de zéros (padding seul) est aussi une erreur.
+        assert!(MeshEvent::from_wire_bytes(&[0u8; 256]).is_err(), "all-zero wire must be an error");
+    }
+
+    #[test]
+    fn test_wire_100b_alert_pads_to_256() {
+        // L'exigence du brief : une alerte de 100 B observée sur le fil fait
+        // exactement 256 B (seau minimal), jamais 100 B.
+        let content = "x".repeat(100);
+        let event = make_signed_event(&content, vec![]);
+        assert_eq!(event.content.len(), 100);
+        let wire = event.to_wire_bytes().unwrap();
+        assert_eq!(wire.len(), 256, "100 B content must be padded to the 256 B bucket");
+        let decoded = MeshEvent::from_wire_bytes(&wire).unwrap();
+        assert_eq!(decoded.content, content);
+    }
+
+    #[test]
+    fn test_gossip_pending_wire_pads() {
+        // L'outbox du gossip émet des octets padés vers chaque pair.
+        let mut gossip = GossipProtocol::new();
+        let event = make_signed_event(&"x".repeat(100), vec![]);
+        assert!(gossip.add_event(event).is_ok());
+
+        let wire = gossip
+            .get_pending_for_peer_wire("peer-b")
+            .expect("valid outbox event must serialize");
+        assert_eq!(wire.len(), 1);
+        assert_eq!(wire[0].len(), 256, "gossip emission is padded to the bucket");
+
+        // Livré une fois → plus rien à émettre (tracking par pair conservé).
+        assert!(gossip.get_pending_for_peer_wire("peer-b").unwrap().is_empty());
+        // Un autre pair reçoit encore l'événement (pas de drain global, Audit M3).
+        let other = gossip.get_pending_for_peer_wire("peer-c").unwrap();
+        assert_eq!(other.len(), 1);
+        assert_eq!(other[0].len(), 256);
     }
 }
