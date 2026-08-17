@@ -345,7 +345,7 @@ cargo tauri ios build
 | Anti-spam | PoW CPU adaptatif + Web of Trust (réputation) |
 | Transactions | ZK-Proofs asynchrones (commit différé) |
 | DNS | TLD Handshake incensurables |
-| Distribution APK | `core/src/update/` — annonce + manifeste signés Ed25519 (racine épinglée), transfert par chunks, `verify_apk_signature()` de bout en bout |
+| Distribution APK | `core/src/update/` — annonce + manifeste signés Ed25519 (racine épinglée), transfert par chunks, `verify_apk_signature()` de bout en bout, **câblé dans le flux gossip** (Phase 1.1) |
 | Économie batterie | Mode throttling adaptatif (`--battery-saver`), intervalle de sweep différé, publication espacée (`--battery-saver` ×6) |
 | Anti-spam publication | Throttling adaptatif : 10 s (pair de confiance) / 120 s (non approuvé), multiplié par 6 en mode batterie |
 | Résilience stockage | Base **SQLite** par nœud : persistance des événements reçus/publications, restauration complète au démarrage |
@@ -353,31 +353,35 @@ cargo tauri ios build
 
 ### Distribution sécurisée des mises à jour (`core/src/update/`)
 
-Protocole de mise à jour d'APK par le mesh (Audit #12/#13) : l'annonceur signe une `UpdateAnnouncement` (version + SHA-256) puis un manifeste canonique (`ApkManifest`, 80 octets) avec la clé racine épinglée ; le receveur vérifie chaque signature, télécharge l'APK par chunks (16 Kio), puis exécute `verify_apk_signature()` (racine épinglée + SHA-256 du fichier entier) avant toute installation. Un APK falsifié, une version non supérieure, un manifeste non lié à l'annonce ou une racine inconnue sont rejetés. Voir la doc du module pour le diagramme de flux complet.
+Protocole de mise à jour d'APK par le mesh (Audit #12/#13) : l'annonceur signe une `UpdateAnnouncement` (version + SHA-256) puis un manifeste canonique (`ApkManifest`, 80 octets) avec la clé racine épinglée ; le receveur vérifie chaque signature, télécharge l'APK par chunks (16 Kio), puis exécute `verify_apk_signature()` (racine épinglée + SHA-256 du fichier entier) avant toute installation. Un APK falsifié, une version non supérieure, un manifeste non lié à l'annonce ou une racine inconnue sont rejetés.
+
+**Phase 1.1 — opérationnel dans le flux réel** : le protocole est câblé dans le gossip (`OndeMessageType::UpdateAnnounce/Manifest/Chunk/Request`, codes 9–12 — le format wire des types existants reste stable). Le blob signé (base64) circule dans `MeshEvent.content`, les métadonnées (`root_sig`, `version`, `peer`, `index`, `total`, `to`) dans `tags` au format `k=v`. `Node::announce_update(version, apk, timestamp)` signe l'annonce **et** le manifeste avec la clé racine de distribution (`NodeConfig::update_root_seed`) et diffuse dans le gossip ; `Node::handle_incoming_update(event)` pilote la machine à états côté receveur (annonce → requête manifeste → manifeste → requêtes chunks → assemblage → vérification → installation) et sert les requêtes côté annonceur (le PoW adaptatif de la réputation est conservé : un émetteur de confiance diffuse avec difficulté 0). Voir la doc du module pour le diagramme de flux complet.
 
 ---
 
 ## 🧪 Tests
 
-### Suite du moteur (`core/`) — 135 tests, 0 échec
+### Suite du moteur (`core/`) — 138 tests, 0 échec
 
 ```bash
 # Tous les tests (workspace core/)
 cd core && cargo test --workspace
 
-# Résultats : 135 tests, 0 échec
-# onde-core        : 101 tests ✅ Crypto, Network, Protocol, Storage, Update, Node, AI, Reputation
+# Résultats : 138 tests, 0 échec
+# onde-core        : 102 tests ✅ Crypto, Network, Protocol, Storage, Update, Node, AI, Reputation
 # dtn-router       :  7 tests ✅ Store-and-forward, broadcast, priorités, TTL
 # llama-bind       :  5 tests ✅ Sélection de modèle, génération mock, quantification
 # whisper-stt      :  4 tests ✅ Création d'engine, transcription mock
 # zim-parser       :  3 tests ✅ Extraction HTML, catégories, URL ZIM
 # llm-inference    :  3 tests ✅ Inférence locale, auto-sélection de modèle
-# integration_e2e  : 12 tests ✅ Scénarios end-to-end complets
+# integration_e2e  : 14 tests ✅ Scénarios end-to-end complets
 ```
 
 Les 2 tests ajoutés au dernier audit couvrent : l'application du sharding Geohash au stockage local (`test_store_applies_geohash_sharding`) et le throttling adaptatif de publication (`test_node_publish_throttle`).
 
 Les tests du protocole de mise à jour (`core/src/update/`) couvrent : flux complet annonce → manifeste → chunks → vérification → installation, rejet des APK falsifiés, rejet des signatures de racine inconnue, rejet des versions non supérieures, rejet des manifestes non liés à l'annonce, bornes des chunks, et non-contournabilité par les métadonnées non signées.
+
+Le câblage gossip de la Phase 1.1 est couvert par les tests e2e `test_update_flow_between_two_nodes` (annonce → requêtes → manifeste → chunks → assemblage → vérification → installation, APK identique byte-à-byte, rejet des versions non supérieures) et `test_update_rejects_tampered_apk` (un APK falsifié est rejeté à l'assemblage et le transfert empoisonné est purgé), sur le modèle `test_multi_node_gossip` (deux `Node` + `add_event` + `get_pending_for_peer`).
 
 ### rust-core/ — supprimé
 

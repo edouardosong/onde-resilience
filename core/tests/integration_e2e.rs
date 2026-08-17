@@ -9,9 +9,31 @@
 
 use onde_core::crypto::Identity;
 use onde_core::protocol::{MeshEvent, OndeMessageType};
-use onde_core::node::{Node, NodeConfig, NodeType};
+use onde_core::node::{Node, NodeConfig, NodeType, UpdateHandlingOutcome};
+use onde_core::update::{UpdateProtocol, Version, DEFAULT_CHUNK_SIZE};
 use onde_core::storage::{ZimReader, MBTilesRenderer, IpfsSeeder};
 use dtn_router::{DtnRouter, DtnMessage, MessageType};
+use base64::Engine as _;
+
+/// Déplacer les événements en attente du gossip de `from` vers `to`
+/// (validation adaptative par réputation), puis les faire traiter par le
+/// nœud receveur. Retourne le nombre d'événements nouvellement traités.
+fn gossip_sync(from: &mut Node, to: &mut Node) -> Result<usize, String> {
+    let peer_id = to.identity.pubkey_hex();
+    let events = from.gossip.get_pending_for_peer(&peer_id);
+    let mut handled = 0;
+    for event in events {
+        let reputation = to.reputation.clone();
+        if to
+            .gossip
+            .add_event_with_reputation(event.clone(), &reputation)?
+        {
+            to.handle_incoming_update(&event)?;
+            handled += 1;
+        }
+    }
+    Ok(handled)
+}
 
 /*
  * Scenario 1: Alert → Gossip → Reception
@@ -550,4 +572,262 @@ async fn test_dtn_buffer_overflow() {
 
     let stats = router.stats().await;
     assert_eq!(stats.total_dropped, 1);
+}
+
+/*
+ * Scenario 13: Update APK — Distribution sécurisée entre deux nœuds (Phase 1.1)
+ *
+ * Le nœud A (distribution, détenteur de la clé racine) annonce la version
+ * 2.0.0 ; le nœud B (à jour sur 1.0.0) traverse tout le flux gossip :
+ * annonce → requête manifeste → manifeste → requêtes chunks → chunks →
+ * assemblage → vérification de bout en bout → installation.
+ */
+#[tokio::test]
+async fn test_update_flow_between_two_nodes() -> Result<(), String> {
+    // Clé racine de distribution : A détient la seed, les deux épinglent la
+    // même clé publique (root pinning).
+    let root = Identity::generate();
+    let root_pubkey = root.verifying_key_bytes();
+    let root_seed = root.signing_key_bytes();
+
+    // APK de démonstration (~40 Kio → 3 chunks de 16 Kio).
+    let apk: Vec<u8> = (0..40_000u32).map(|i| (i % 251) as u8).collect();
+
+    let mut node_a = Node::new(NodeConfig {
+        node_type: NodeType::DesktopBridge,
+        display_name: "Distributeur".to_string(),
+        available_ram_mb: 4096,
+        storage_gb: 64,
+        update_root_pubkey: Some(root_pubkey),
+        update_root_seed: Some(root_seed),
+        update_version: "2.0.0".to_string(),
+        ..Default::default()
+    });
+
+    let mut node_b = Node::new(NodeConfig {
+        node_type: NodeType::Mobile,
+        display_name: "Receveur".to_string(),
+        available_ram_mb: 4096,
+        storage_gb: 64,
+        update_root_pubkey: Some(root_pubkey),
+        update_version: "1.0.0".to_string(),
+        ..Default::default()
+    });
+
+    // Web of Trust réciproque : PoW adaptatif = 0 pour les deux sens.
+    let a_pubkey = node_a.identity.pubkey_hex();
+    let b_pubkey = node_b.identity.pubkey_hex();
+    node_b.reputation.bootstrap(std::slice::from_ref(&a_pubkey));
+    node_a.reputation.bootstrap(std::slice::from_ref(&b_pubkey));
+
+    // 1. Le distributeur annonce la version 2.0.0 (signée par la racine).
+    let announced = node_a
+        .announce_update(Version::new(2, 0, 0), &apk, 1_800_000_000)?;
+    assert!(matches!(announced.kind, OndeMessageType::UpdateAnnounce));
+    assert!(!announced.sig.is_empty(), "announcement must be signed");
+
+    // 2. Boucle gossip jusqu'à l'installation côté receveur.
+    let mut iterations = 0;
+    loop {
+        gossip_sync(&mut node_a, &mut node_b)?;
+        gossip_sync(&mut node_b, &mut node_a)?;
+        if node_b.update_protocol.latest_installed().is_some() {
+            break;
+        }
+        iterations += 1;
+        assert!(iterations < 100, "update flow did not complete");
+    }
+
+    // 3. B a installé la version supérieure.
+    assert_eq!(
+        node_b.update_protocol.current_version(),
+        Version::new(2, 0, 0),
+        "receiver must have installed the higher version"
+    );
+    let installed = node_b
+        .update_protocol
+        .latest_installed()
+        .expect("update must be recorded as installed")
+        .clone();
+    assert_eq!(installed.version, Version::new(2, 0, 0));
+
+    // 4. L'APK installé est identique byte-à-byte à l'APK annoncé.
+    let installed_path = installed.apk_path.clone().expect("desktop install path");
+    let installed_bytes = std::fs::read(&installed_path).map_err(|e| e.to_string())?;
+    assert_eq!(
+        installed_bytes, apk,
+        "installed APK must match the announced APK byte-for-byte"
+    );
+    assert_eq!(
+        installed.apk_sha256,
+        UpdateProtocol::build_announcement(Version::new(2, 0, 0), &apk, &root, 0).0.apk_sha256,
+        "installed hash must match the announced hash"
+    );
+
+    // 5. Une version NON supérieure (égale puis downgrade) est rejetée.
+    let equal = node_a.announce_update(Version::new(2, 0, 0), &apk, 1_800_000_001)?;
+    let reputation = node_b.reputation.clone();
+    assert!(
+        node_b.gossip.add_event_with_reputation(equal.clone(), &reputation).unwrap()
+    );
+    match node_b.handle_incoming_update(&equal) {
+        Ok(UpdateHandlingOutcome::Rejected(reason)) => {
+            assert!(reason.contains("not newer"), "equal version must be rejected: {reason}");
+        }
+        other => panic!("equal version must be rejected, got {other:?}"),
+    }
+
+    let downgrade = node_a.announce_update(Version::new(1, 0, 0), &apk, 1_800_000_002)?;
+    let reputation = node_b.reputation.clone();
+    assert!(
+        node_b.gossip.add_event_with_reputation(downgrade.clone(), &reputation).unwrap()
+    );
+    match node_b.handle_incoming_update(&downgrade) {
+        Ok(UpdateHandlingOutcome::Rejected(reason)) => {
+            assert!(reason.contains("not newer"), "downgrade must be rejected: {reason}");
+        }
+        other => panic!("downgrade must be rejected, got {other:?}"),
+    }
+    assert_eq!(
+        node_b.update_protocol.current_version(),
+        Version::new(2, 0, 0),
+        "rejected announcements must not change the installed version"
+    );
+
+    // Nettoyage de l'APK installé de démonstration.
+    let _ = std::fs::remove_file(installed_path);
+    Ok(())
+}
+
+/*
+ * Scenario 14: Update APK — un APK falsifié est rejeté (Phase 1.1)
+ *
+ * Même flux gossip, mais le chunk 0 servi est falsifié : l'assemblage
+ * échoue la vérification de bout en bout, le transfert est purgé et aucune
+ * installation n'a lieu.
+ */
+#[tokio::test]
+async fn test_update_rejects_tampered_apk() -> Result<(), String> {
+    let root = Identity::generate();
+    let root_pubkey = root.verifying_key_bytes();
+    let root_seed = root.signing_key_bytes();
+    let apk: Vec<u8> = (0..40_000u32).map(|i| (i % 251) as u8).collect();
+
+    let mut node_a = Node::new(NodeConfig {
+        display_name: "Distributeur".to_string(),
+        update_root_pubkey: Some(root_pubkey),
+        update_root_seed: Some(root_seed),
+        update_version: "2.0.0".to_string(),
+        ..Default::default()
+    });
+    let mut node_b = Node::new(NodeConfig {
+        display_name: "Receveur".to_string(),
+        update_root_pubkey: Some(root_pubkey),
+        update_version: "1.0.0".to_string(),
+        ..Default::default()
+    });
+
+    let a_pubkey = node_a.identity.pubkey_hex();
+    let b_pubkey = node_b.identity.pubkey_hex();
+    node_b.reputation.bootstrap(std::slice::from_ref(&a_pubkey));
+    node_a.reputation.bootstrap(std::slice::from_ref(&b_pubkey));
+
+    node_a.announce_update(Version::new(2, 0, 0), &apk, 1_800_000_000)?;
+
+    // Livrer l'annonce → B demande le manifeste ; livrer la requête → A sert
+    // le manifeste ; livrer le manifeste → B demande le chunk 0.
+    for ev in node_a.gossip.get_pending_for_peer(&b_pubkey) {
+        let rep = node_b.reputation.clone();
+        if node_b.gossip.add_event_with_reputation(ev.clone(), &rep).unwrap() {
+            node_b.handle_incoming_update(&ev)?;
+        }
+    }
+    for ev in node_b.gossip.get_pending_for_peer(&a_pubkey) {
+        let rep = node_a.reputation.clone();
+        if node_a.gossip.add_event_with_reputation(ev.clone(), &rep).unwrap() {
+            node_a.handle_incoming_update(&ev)?;
+        }
+    }
+    for ev in node_a.gossip.get_pending_for_peer(&b_pubkey) {
+        let rep = node_b.reputation.clone();
+        if node_b.gossip.add_event_with_reputation(ev.clone(), &rep).unwrap() {
+            node_b.handle_incoming_update(&ev)?;
+        }
+    }
+    assert!(node_b.update_protocol.has_pending(), "transfer must be initialized");
+    assert_eq!(node_b.update_protocol.chunks_received(), 0);
+
+    // Le chunk 0 servi par A est FALSIFIÉ (un octet retourné), mais reste
+    // signé par l'identité d'annonceur → il passe la validation gossip.
+    let total = UpdateProtocol::chunk_count(apk.len(), DEFAULT_CHUNK_SIZE as usize);
+    let mut evil_chunk0 = UpdateProtocol::chunk(&apk, 0, DEFAULT_CHUNK_SIZE as usize).unwrap();
+    evil_chunk0[0] ^= 0xFF;
+    let evil_event = MeshEvent::new_signed(
+        &node_a.identity,
+        OndeMessageType::UpdateChunk,
+        base64::engine::general_purpose::STANDARD.encode(&evil_chunk0),
+        vec![
+            "index=0".to_string(),
+            format!("total={total}"),
+            format!("peer={a_pubkey}"),
+        ],
+    )
+    .with_pow_difficulty(0); // annonceur de confiance → PoW adaptatif 0
+    let rep = node_b.reputation.clone();
+    assert!(node_b.gossip.add_event_with_reputation(evil_event.clone(), &rep).is_ok());
+    assert_eq!(
+        node_b.handle_incoming_update(&evil_event)?,
+        UpdateHandlingOutcome::ChunkRequested(1),
+        "tampered chunk 0 is accepted as a chunk, next chunk requested"
+    );
+
+    // Livrer la requête chunk 1 à A → A sert le chunk 1 réel ; livrer à B.
+    for ev in node_b.gossip.get_pending_for_peer(&a_pubkey) {
+        let rep = node_a.reputation.clone();
+        if node_a.gossip.add_event_with_reputation(ev.clone(), &rep).unwrap() {
+            node_a.handle_incoming_update(&ev)?;
+        }
+    }
+    for ev in node_a.gossip.get_pending_for_peer(&b_pubkey) {
+        let rep = node_b.reputation.clone();
+        if node_b.gossip.add_event_with_reputation(ev.clone(), &rep).unwrap() {
+            node_b.handle_incoming_update(&ev)?;
+        }
+    }
+    assert_eq!(node_b.update_protocol.chunks_received(), 2);
+
+    // Livrer la requête chunk 2 à A → A sert le chunk 2 réel ; livrer à B →
+    // assemblage + vérification : l'APK reconstruit ne correspond pas au hash
+    // signé → rejet.
+    for ev in node_b.gossip.get_pending_for_peer(&a_pubkey) {
+        let rep = node_a.reputation.clone();
+        if node_a.gossip.add_event_with_reputation(ev.clone(), &rep).unwrap() {
+            node_a.handle_incoming_update(&ev)?;
+        }
+    }
+    let mut saw_reject = false;
+    for ev in node_a.gossip.get_pending_for_peer(&b_pubkey) {
+        let rep = node_b.reputation.clone();
+        if node_b.gossip.add_event_with_reputation(ev.clone(), &rep).unwrap() {
+            if let Ok(UpdateHandlingOutcome::Rejected(reason)) = node_b.handle_incoming_update(&ev) {
+                assert!(
+                    reason.contains("verification"),
+                    "tampered APK must fail end-to-end verification: {reason}"
+                );
+                saw_reject = true;
+            }
+        }
+    }
+    assert!(saw_reject, "tampered APK must be rejected at assembly");
+    assert!(
+        node_b.update_protocol.latest_installed().is_none(),
+        "no installation must occur for a tampered APK"
+    );
+    assert!(!node_b.update_protocol.has_pending(), "poisoned transfer must be purged");
+    assert_eq!(
+        node_b.update_protocol.current_version(),
+        Version::new(1, 0, 0),
+        "receiver must stay on its previous version"
+    );
+    Ok(())
 }

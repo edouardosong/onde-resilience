@@ -50,6 +50,23 @@ pub enum OndeMessageType {
     FileShareRequest,
     /// Heartbeat / status
     Heartbeat,
+    /// Mise à jour APK — annonce signée (racine) d'une nouvelle version
+    /// (Phase 1.1 : câblage du protocole update dans le gossip).
+    ///
+    /// `content` porte le blob signé (base64) de l'annonce ; `tags` portent
+    /// `root_sig`, `version`, `peer`.
+    UpdateAnnounce,
+    /// Mise à jour APK — manifeste canonique signé (racine) + métadonnées de
+    /// transfert non signées. `content` = base64 du message wire complet.
+    UpdateManifest,
+    /// Mise à jour APK — chunk d'APK (non signé, validé par le hash signé à
+    /// l'assemblage). `content` = base64 des octets du chunk ; `tags` portent
+    /// `index`, `total`, `peer`.
+    UpdateChunk,
+    /// Mise à jour APK — demande de manifeste ou de chunk vers l'annonceur.
+    /// `content` vide ; `tags` portent `req_type` (manifest|chunk), `to`,
+    /// `index` (chunks).
+    UpdateRequest,
 }
 
 /// Nostr-style event for the mesh network
@@ -171,6 +188,12 @@ impl MeshEvent {
             OndeMessageType::AiResponse => 6,
             OndeMessageType::FileShareRequest => 7,
             OndeMessageType::Heartbeat => 8,
+            // Phase 1.1 : codes 9..12 — aucun code existant n'est renuméroté,
+            // le format wire des types antérieurs reste stable.
+            OndeMessageType::UpdateAnnounce => 9,
+            OndeMessageType::UpdateManifest => 10,
+            OndeMessageType::UpdateChunk => 11,
+            OndeMessageType::UpdateRequest => 12,
         }
     }
 
@@ -913,5 +936,47 @@ mod tests {
             event.created_at.abs_diff(now) <= 30,
             "fuzzy timestamp must stay within ±30 s"
         );
+    }
+
+    #[test]
+    fn test_update_kinds_have_stable_distinct_codes() {
+        // Phase 1.1 : les nouveaux types update ont des codes dédiés (9..12)
+        // et les codes des types existants restent stables (0..8).
+        let codes: Vec<u8> = [
+            OndeMessageType::Alert,
+            OndeMessageType::MutualAid,
+            OndeMessageType::VoiceMemo,
+            OndeMessageType::Transcription,
+            OndeMessageType::Transaction,
+            OndeMessageType::AiQuery,
+            OndeMessageType::AiResponse,
+            OndeMessageType::FileShareRequest,
+            OndeMessageType::Heartbeat,
+            OndeMessageType::UpdateAnnounce,
+            OndeMessageType::UpdateManifest,
+            OndeMessageType::UpdateChunk,
+            OndeMessageType::UpdateRequest,
+        ]
+        .iter()
+        .map(MeshEvent::kind_code)
+        .collect();
+        assert_eq!(codes, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+        let mut sorted = codes.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), codes.len(), "all kind codes must be distinct");
+
+        // Des kinds différents produisent des IDs canoniques différents
+        // (même contenu, même timestamp, même auteur).
+        let pk = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+        let tags = vec!["peer=x".to_string()];
+        let id_announce = MeshEvent::compute_id(pk, 42, &OndeMessageType::UpdateAnnounce, &tags, "x");
+        let id_manifest = MeshEvent::compute_id(pk, 42, &OndeMessageType::UpdateManifest, &tags, "x");
+        let id_chunk = MeshEvent::compute_id(pk, 42, &OndeMessageType::UpdateChunk, &tags, "x");
+        let id_request = MeshEvent::compute_id(pk, 42, &OndeMessageType::UpdateRequest, &tags, "x");
+        assert_ne!(id_announce, id_manifest);
+        assert_ne!(id_manifest, id_chunk);
+        assert_ne!(id_chunk, id_request);
+        assert_ne!(id_request, id_announce);
     }
 }

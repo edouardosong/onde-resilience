@@ -98,6 +98,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         battery_saver,
         my_geohash: geohash,
         identity_seed: None,
+        update_root_pubkey: None,
+        update_root_seed: None,
+        update_version: String::from("1.0.0"),
     };
 
     tracing::info!("ONDE Node v0.1.0 starting...");

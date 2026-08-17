@@ -2,6 +2,8 @@
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
+use base64::Engine as _;
+
 use crate::crypto::{Identity, RotatingIdentity, ZkTransaction, TxPool};
 use crate::network::YggdrasilAddress;
 use crate::protocol::{MeshEvent, OndeMessageType, GossipProtocol};
@@ -10,6 +12,9 @@ use crate::ai::AiEngine;
 use crate::storage::{
     ZimReader, MBTilesRenderer, IpfsSeeder, TieredMessageStore, TieredMessage, StoragePolicy,
     MessageTier, persistence::SqliteStore,
+};
+use crate::update::{
+    UpdateProtocol, UpdateAnnouncement, Version, DEFAULT_CHUNK_SIZE,
 };
 
 /// Node type
@@ -52,6 +57,30 @@ pub struct NodeConfig {
     /// JAMAIS loggée ni exposée dans [`NodeStatus`].
     #[serde(default)]
     pub identity_seed: Option<[u8; 32]>,
+    /// Racine de confiance **épinglée** (32 octets) du protocole de mise à
+    /// jour APK (Phase 1.1). `None` = racine par défaut du nœud
+    /// ([`DEFAULT_UPDATE_ROOT_PUBKEY`]) qui n'autorise aucune annonce ni
+    /// vérification — les déploiements réels doivent épingler la vraie clé.
+    #[serde(default)]
+    pub update_root_pubkey: Option<[u8; 32]>,
+    /// Seed Ed25519 (32 octets) de la **clé racine de distribution**.
+    ///
+    /// Seul un nœud de distribution (qui détient la clé de l'équipe) la
+    /// configure : elle permet à ce nœud de signer les annonces et
+    /// manifestes de mise à jour (`Node::announce_update`). `None` = nœud
+    /// receveur uniquement (vérifie et installe, mais n'annonce pas).
+    /// La seed n'est JAMAIS loggée ni exposée dans [`NodeStatus`].
+    #[serde(default)]
+    pub update_root_seed: Option<[u8; 32]>,
+    /// Version actuellement installée (format `"maj.min.patch"`), point de
+    /// départ du protocole de mise à jour. Par défaut [`DEFAULT_UPDATE_VERSION`].
+    #[serde(default = "default_update_version")]
+    pub update_version: String,
+}
+
+/// Version de base d'un nœud frais (avant toute mise à jour installée).
+fn default_update_version() -> String {
+    DEFAULT_UPDATE_VERSION.to_string()
 }
 
 /// Position de démonstration par défaut (Paris, tour Eiffel) — en attendant
@@ -73,6 +102,9 @@ impl Default for NodeConfig {
             my_geohash: default_my_geohash(),
             battery_saver: false,
             identity_seed: None,
+            update_root_pubkey: None,
+            update_root_seed: None,
+            update_version: default_update_version(),
         }
     }
 }
@@ -97,6 +129,51 @@ fn unix_now() -> u64 {
         .unwrap_or(0)
 }
 
+/// Racine de confiance par défaut du protocole de mise à jour (placeholder).
+///
+/// Une clé nulle n'est **jamais** acceptée par Ed25519 : avec cette racine
+/// par défaut, aucune annonce ni vérification n'est possible. Les
+/// déploiements réels DOIVENT épingler la vraie clé racine via
+/// [`NodeConfig::update_root_pubkey`].
+pub const DEFAULT_UPDATE_ROOT_PUBKEY: [u8; 32] = [0u8; 32];
+
+/// Version de base d'un nœud frais (aucune mise à jour installée).
+pub const DEFAULT_UPDATE_VERSION: &str = "1.0.0";
+
+/// Parser la version installée configurée, avec repli sûr sur
+/// [`DEFAULT_UPDATE_VERSION`] (config invalide → base, jamais de panique).
+fn parse_update_version(s: &str) -> Version {
+    Version::parse(s).unwrap_or_else(|_| {
+        tracing::warn!("invalid update_version {s:?} — falling back to {DEFAULT_UPDATE_VERSION}");
+        Version::new(1, 0, 0)
+    })
+}
+
+/*
+ * Tags wire du protocole de mise à jour (format `k=v` dans MeshEvent.tags).
+ * Phase 1.1 : le `content` de `MeshEvent` porte le blob signé (base64) ;
+ * les métadonnées (version, pair, index, taille, signature racine) vivent
+ * dans les tags.
+ */
+const TAG_ROOT_SIG: &str = "root_sig";
+const TAG_PEER: &str = "peer";
+const TAG_TO: &str = "to";
+const TAG_VERSION: &str = "version";
+const TAG_INDEX: &str = "index";
+const TAG_TOTAL: &str = "total";
+const TAG_REQ_TYPE: &str = "req_type";
+
+/// Construire une liste de tags `k=v` dans l'ordre donné.
+fn build_tags(pairs: &[(&str, String)]) -> Vec<String> {
+    pairs.iter().map(|(k, v)| format!("{k}={v}")).collect()
+}
+
+/// Extraire la valeur d'un tag `k=v` (None si absent).
+fn tag_get<'a>(tags: &'a [String], key: &str) -> Option<&'a str> {
+    let prefix = format!("{key}=");
+    tags.iter().find_map(|t| t.strip_prefix(&prefix))
+}
+
 /// Clé de la table `meta` SQLite stockant la seed Ed25519 (Audit B4).
 const IDENTITY_SEED_META_KEY: &str = "identity_seed";
 
@@ -111,6 +188,41 @@ fn load_persisted_identity_seed(persistence: &Option<SqliteStore>) -> Option<[u8
     let bytes = hex::decode(&hex_seed).ok()?;
     let seed: [u8; 32] = bytes.try_into().ok()?;
     Some(seed)
+}
+
+/// Offre de mise à jour détenue par un nœud annonceur (Phase 1.1).
+///
+/// Construite par [`Node::announce_update`] : l'APK est conservé pour servir
+/// les chunks, et le manifeste signé est pré-calculé pour répondre aux
+/// requêtes `manifest` sans re-signer.
+struct UpdateOffer {
+    version: Version,
+    apk: Vec<u8>,
+    manifest_wire: Vec<u8>,
+    manifest_signature: [u8; 64],
+    chunk_size: u32,
+}
+
+/// Résultat du traitement d'un message update entrant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UpdateHandlingOutcome {
+    /// Message non lié à la mise à jour (ignoré).
+    Ignored,
+    /// Annonce acceptée → requête de manifeste émise vers l'annonceur.
+    AnnouncementRequested,
+    /// Manifeste accepté → requête de chunk 0 émise vers l'annonceur.
+    ManifestRequested,
+    /// Chunk accepté → requête du chunk suivant émise.
+    ChunkRequested(u32),
+    /// APK assemblé, vérifié de bout en bout et installé (version installée).
+    Installed(Version),
+    /// L'annonceur a servi le manifeste demandé.
+    ManifestServed,
+    /// L'annonceur a servi le chunk demandé (index).
+    ChunkServed(u32),
+    /// Message update rejeté pour une raison protocolaire (signature
+    /// invalide, version non supérieure, chunk hors bornes, APK falsifié…).
+    Rejected(String),
 }
 
 /// The main ONDE node
@@ -137,6 +249,15 @@ pub struct Node {
     /// **throttling adaptatif** (Phase 3 du plan d'audit, P3). 0 = jamais
     /// publié → la première publication est toujours autorisée.
     last_publish_at: u64,
+    /// Machine à états du protocole de mise à jour APK (racine épinglée).
+    pub update_protocol: UpdateProtocol,
+    /// Identité racine de distribution (seed configurée) — `None` = nœud
+    /// receveur uniquement (vérifie et installe, mais n'annonce pas).
+    update_root_signing: Option<Identity>,
+    /// Dernière annonce acceptée (en attente du manifeste correspondant).
+    pending_announcement: Option<UpdateAnnouncement>,
+    /// Offre de mise à jour détenue par ce nœud (annonceur) — `None` sinon.
+    update_offer: Option<UpdateOffer>,
 }
 
 impl Node {
@@ -205,6 +326,16 @@ impl Node {
             }
         };
 
+        // Protocole de mise à jour APK (Phase 1.1) : la racine épinglée vient
+        // de la config (ou du placeholder inoffensif), la version courante de
+        // `update_version`, et la clé racine de distribution (seed) est
+        // conservée séparément — jamais exposée dans NodeStatus.
+        let update_root_pubkey = config.update_root_pubkey.unwrap_or(DEFAULT_UPDATE_ROOT_PUBKEY);
+        let update_protocol = UpdateProtocol::new(update_root_pubkey, parse_update_version(&config.update_version));
+        let update_root_signing = config
+            .update_root_seed
+            .map(|seed| Identity::from_bytes(&seed));
+
         Self {
             config,
             identity,
@@ -221,6 +352,10 @@ impl Node {
             ipfs_seeder,
             is_running: false,
             last_publish_at: 0,
+            update_protocol,
+            update_root_signing,
+            pending_announcement: None,
+            update_offer: None,
         }
     }
 
@@ -492,6 +627,307 @@ impl Node {
     /// Check if running
     pub fn is_running(&self) -> bool {
         self.is_running
+    }
+
+    // ------------------------------------------------------------------
+    // Protocole de mise à jour APK — câblage dans le gossip (Phase 1.1)
+    // ------------------------------------------------------------------
+
+    /// Annoncer une mise à jour APK (côté **annonceur** — détenteur de la
+    /// clé racine de distribution).
+    ///
+    /// Signe l'annonce **et** le manifeste avec l'identité racine
+    /// (`NodeConfig::update_root_seed`), diffuse l'annonce dans le gossip et
+    /// conserve l'offre (APK + manifeste signé) pour répondre aux requêtes
+    /// `manifest` / `chunk` des receveurs. Retourne l'événement d'annonce
+    /// publié.
+    pub fn announce_update(
+        &mut self,
+        version: Version,
+        apk: &[u8],
+        timestamp: u64,
+    ) -> Result<MeshEvent, String> {
+        let root = self
+            .update_root_signing
+            .as_ref()
+            .ok_or("node is not configured as an update distributor (missing update_root_seed)")?;
+        if apk.len() as u64 > crate::update::MAX_APK_SIZE {
+            return Err(format!(
+                "APK exceeds the {} bytes limit",
+                crate::update::MAX_APK_SIZE
+            ));
+        }
+
+        // Annonce + manifeste signés par la racine, liés par le même APK.
+        let (_ann, ann_sig, ann_bytes) =
+            UpdateProtocol::build_announcement(version, apk, root, timestamp);
+        let (_man, man_sig, man_bytes) = UpdateProtocol::build_manifest(
+            apk,
+            root,
+            root.verifying_key_bytes(),
+            timestamp,
+            DEFAULT_CHUNK_SIZE,
+        );
+
+        let content = base64::engine::general_purpose::STANDARD.encode(&ann_bytes);
+        let tags = build_tags(&[
+            (TAG_ROOT_SIG, hex::encode(ann_sig)),
+            (TAG_VERSION, version.to_string()),
+            (TAG_PEER, self.identity.pubkey_hex()),
+        ]);
+        let event =
+            MeshEvent::new_signed(&self.identity, OndeMessageType::UpdateAnnounce, content, tags);
+        let published = self.publish_update_event(event)?;
+
+        // L'offre sert les requêtes manifeste/chunk des receveurs.
+        self.update_offer = Some(UpdateOffer {
+            version,
+            apk: apk.to_vec(),
+            manifest_wire: man_bytes,
+            manifest_signature: man_sig,
+            chunk_size: DEFAULT_CHUNK_SIZE,
+        });
+        Ok(published)
+    }
+
+    /// Traiter un message update reçu du gossip (côté receveur **et**
+    /// annonceur — les `UpdateRequest` sont servis par l'annonceur).
+    ///
+    /// Branche sur [`OndeMessageType`] : annonce → manifeste demandé,
+    /// manifeste → chunk 0 demandé, chunk → chunk suivant demandé puis
+    /// assemblage + vérification + installation, requête → manifeste/chunk
+    /// servi (si ce nœud est l'annonceur ciblé).
+    pub fn handle_incoming_update(
+        &mut self,
+        event: &MeshEvent,
+    ) -> Result<UpdateHandlingOutcome, String> {
+        match event.kind {
+            OndeMessageType::UpdateAnnounce => self.on_update_announce(event),
+            OndeMessageType::UpdateManifest => self.on_update_manifest(event),
+            OndeMessageType::UpdateChunk => self.on_update_chunk(event),
+            OndeMessageType::UpdateRequest => self.on_update_request(event),
+            _ => Ok(UpdateHandlingOutcome::Ignored),
+        }
+    }
+
+    /// Signer (identité du nœud) et diffuser un événement update dans le
+    /// gossip, avec le PoW adaptatif de la réputation (nœud de confiance →
+    /// difficulté 0).
+    fn publish_update_event(&mut self, mut event: MeshEvent) -> Result<MeshEvent, String> {
+        let difficulty = self
+            .reputation
+            .required_pow_difficulty(&self.identity.pubkey_hex());
+        event = event.with_pow_difficulty(difficulty);
+        if difficulty > 0 && !event.compute_pow(2_000_000) {
+            return Err("PoW computation failed".to_string());
+        }
+        event.validate_with_reputation(&self.reputation)?;
+        self.gossip
+            .add_event_with_reputation(event.clone(), &self.reputation)?;
+        Ok(event)
+    }
+
+    /// Décoder le blob signé (base64 dans `content`) + la signature racine
+    /// (`root_sig` dans les tags) d'un message update.
+    fn decode_update_payload(event: &MeshEvent) -> Result<(Vec<u8>, [u8; 64]), String> {
+        let data = base64::engine::general_purpose::STANDARD
+            .decode(&event.content)
+            .map_err(|_| "update payload is not valid base64".to_string())?;
+        let sig_hex = tag_get(&event.tags, TAG_ROOT_SIG)
+            .ok_or_else(|| "update payload missing root_sig tag".to_string())?;
+        let sig_bytes = hex::decode(sig_hex)
+            .map_err(|_| "root_sig tag is not valid hex".to_string())?;
+        let sig: [u8; 64] = sig_bytes
+            .try_into()
+            .map_err(|_| "root_sig must be 64 bytes".to_string())?;
+        Ok((data, sig))
+    }
+
+    /// Receveur — annonce reçue : vérifie la signature racine + version >
+    /// locale, mémorise l'annonce, puis émet une requête `manifest` vers
+    /// l'annonceur.
+    fn on_update_announce(
+        &mut self,
+        event: &MeshEvent,
+    ) -> Result<UpdateHandlingOutcome, String> {
+        let (data, sig) = Self::decode_update_payload(event)?;
+        match self.update_protocol.handle_announcement(&data, &sig) {
+            Ok(announcement) => {
+                let announcer = event.pubkey.clone();
+                self.pending_announcement = Some(announcement);
+                let request = MeshEvent::new_signed(
+                    &self.identity,
+                    OndeMessageType::UpdateRequest,
+                    String::new(),
+                    build_tags(&[
+                        (TAG_REQ_TYPE, "manifest".to_string()),
+                        (TAG_TO, announcer),
+                    ]),
+                );
+                self.publish_update_event(request)?;
+                Ok(UpdateHandlingOutcome::AnnouncementRequested)
+            }
+            Err(e) => Ok(UpdateHandlingOutcome::Rejected(e.to_string())),
+        }
+    }
+
+    /// Receveur — manifeste reçu : le lie à l'annonce acceptée
+    /// (`handle_manifest`), puis émet une requête `chunk 0` vers l'annonceur.
+    fn on_update_manifest(
+        &mut self,
+        event: &MeshEvent,
+    ) -> Result<UpdateHandlingOutcome, String> {
+        let announcement = self
+            .pending_announcement
+            .clone()
+            .ok_or_else(|| "update manifest received without a prior accepted announcement".to_string())?;
+        let (data, sig) = Self::decode_update_payload(event)?;
+        match self
+            .update_protocol
+            .handle_manifest(&announcement, &data, &sig, &event.pubkey)
+        {
+            Ok(()) => {
+                let announcer = event.pubkey.clone();
+                let request = MeshEvent::new_signed(
+                    &self.identity,
+                    OndeMessageType::UpdateRequest,
+                    String::new(),
+                    build_tags(&[
+                        (TAG_REQ_TYPE, "chunk".to_string()),
+                        (TAG_TO, announcer),
+                        (TAG_INDEX, "0".to_string()),
+                        (TAG_VERSION, announcement.version.to_string()),
+                    ]),
+                );
+                self.publish_update_event(request)?;
+                Ok(UpdateHandlingOutcome::ManifestRequested)
+            }
+            Err(e) => Ok(UpdateHandlingOutcome::Rejected(e.to_string())),
+        }
+    }
+
+    /// Receveur — chunk reçu : valide index/taille, demande le chunk suivant,
+    /// et au dernier chunk assemble + vérifie de bout en bout + installe.
+    fn on_update_chunk(&mut self, event: &MeshEvent) -> Result<UpdateHandlingOutcome, String> {
+        let index: u32 = tag_get(&event.tags, TAG_INDEX)
+            .ok_or_else(|| "update chunk missing index tag".to_string())?
+            .parse()
+            .map_err(|_| "invalid update chunk index tag".to_string())?;
+        let data = base64::engine::general_purpose::STANDARD
+            .decode(&event.content)
+            .map_err(|_| "update chunk is not valid base64".to_string())?;
+
+        if let Err(e) = self.update_protocol.handle_chunk(index, &data) {
+            return Ok(UpdateHandlingOutcome::Rejected(e.to_string()));
+        }
+
+        let received = self.update_protocol.chunks_received();
+        let total = self.update_protocol.total_chunks();
+        if received < total {
+            let next = index + 1;
+            let announcer = event.pubkey.clone();
+            let request = MeshEvent::new_signed(
+                &self.identity,
+                OndeMessageType::UpdateRequest,
+                String::new(),
+                build_tags(&[
+                    (TAG_REQ_TYPE, "chunk".to_string()),
+                    (TAG_TO, announcer),
+                    (TAG_INDEX, next.to_string()),
+                ]),
+            );
+            self.publish_update_event(request)?;
+            return Ok(UpdateHandlingOutcome::ChunkRequested(next));
+        }
+
+        // Dernier chunk : assemblage + vérification de bout en bout (racine
+        // épinglée + SHA-256 du fichier entier). Un APK falsifié est purgé.
+        let apk = match self.update_protocol.assemble_and_verify() {
+            Ok(apk) => apk,
+            Err(e) => {
+                self.pending_announcement = None;
+                return Ok(UpdateHandlingOutcome::Rejected(e.to_string()));
+            }
+        };
+        let dest = self.update_install_path();
+        let installed = self
+            .update_protocol
+            .install_verified(&apk, &dest, unix_now())
+            .map_err(|e| e.to_string())?;
+        self.pending_announcement = None;
+        tracing::info!(
+            "update installed: version {} ({} bytes) at {}",
+            installed.version,
+            apk.len(),
+            dest
+        );
+        Ok(UpdateHandlingOutcome::Installed(installed.version))
+    }
+
+    /// Annonceur — requête reçue (manifeste ou chunk) : répond en signant.
+    /// Seul le nœud ciblé par le tag `to` répond.
+    fn on_update_request(&mut self, event: &MeshEvent) -> Result<UpdateHandlingOutcome, String> {
+        let target = tag_get(&event.tags, TAG_TO).unwrap_or_default();
+        if !target.is_empty() && target != self.identity.pubkey_hex() {
+            return Ok(UpdateHandlingOutcome::Ignored);
+        }
+        let offer = self
+            .update_offer
+            .as_ref()
+            .ok_or_else(|| "update request received but no update offer is held".to_string())?;
+        match tag_get(&event.tags, TAG_REQ_TYPE).unwrap_or_default() {
+            "manifest" => {
+                let content =
+                    base64::engine::general_purpose::STANDARD.encode(&offer.manifest_wire);
+                let tags = build_tags(&[
+                    (TAG_ROOT_SIG, hex::encode(offer.manifest_signature)),
+                    (TAG_VERSION, offer.version.to_string()),
+                    (TAG_PEER, self.identity.pubkey_hex()),
+                ]);
+                let manifest_event = MeshEvent::new_signed(
+                    &self.identity,
+                    OndeMessageType::UpdateManifest,
+                    content,
+                    tags,
+                );
+                self.publish_update_event(manifest_event)?;
+                Ok(UpdateHandlingOutcome::ManifestServed)
+            }
+            "chunk" => {
+                let index: u32 = tag_get(&event.tags, TAG_INDEX)
+                    .ok_or_else(|| "chunk request missing index tag".to_string())?
+                    .parse()
+                    .map_err(|_| "invalid chunk request index".to_string())?;
+                let data = UpdateProtocol::chunk(&offer.apk, index, offer.chunk_size as usize)
+                    .ok_or_else(|| format!("chunk index {index} out of bounds"))?;
+                let total = UpdateProtocol::chunk_count(offer.apk.len(), offer.chunk_size as usize);
+                let content = base64::engine::general_purpose::STANDARD.encode(&data);
+                let tags = build_tags(&[
+                    (TAG_INDEX, index.to_string()),
+                    (TAG_TOTAL, total.to_string()),
+                    (TAG_PEER, self.identity.pubkey_hex()),
+                ]);
+                let chunk_event = MeshEvent::new_signed(
+                    &self.identity,
+                    OndeMessageType::UpdateChunk,
+                    content,
+                    tags,
+                );
+                self.publish_update_event(chunk_event)?;
+                Ok(UpdateHandlingOutcome::ChunkServed(index))
+            }
+            other => Err(format!("unknown update request type: {other}")),
+        }
+    }
+
+    /// Chemin d'installation de l'APK vérifié (unique par nœud — le préfixe
+    /// de la clé publique évite les collisions entre nœuds du même hôte).
+    fn update_install_path(&self) -> String {
+        let prefix = &self.identity.pubkey_hex()[..8];
+        std::env::temp_dir()
+            .join(format!("onde-installed-{prefix}.apk"))
+            .to_string_lossy()
+            .into_owned()
     }
 
     /// Le mode économie batterie est-il actif ?

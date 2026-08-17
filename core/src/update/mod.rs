@@ -55,21 +55,22 @@
 //! Limites de sûreté : taille APK plafonnée à [`MAX_APK_SIZE`], nombre de
 //! chunks plafonné à [`MAX_CHUNKS`] (≈ 6 400 chunks de 16 Kio).
 //!
-//! # Intégration réseau (point d'entrée prévu)
+//! # Intégration réseau (Phase 1.1 — câblée)
 //!
-//! Ce module est **volontairement standalone** : il expose la machine à états
-//! et les messages signés, sans dépendre de la couche transport
-//! ([`crate::network`], gossip, BLE, Wi-Fi Aware…). L'intégration avec les
-//! pairs se fait côté appelant, au moment où une annonce de mise à jour est
-//! reçue sur le réseau. Points d'appel prévus (à câbler dans le gestionnaire
-//! de messages entrants de `GossipProtocol` / `MeshTransport` quand un type
-//! de message "update" sera routé) :
+//! Ce module expose la machine à états et les messages signés, sans dépendre
+//! de la couche transport ([`crate::network`], gossip, BLE, Wi-Fi Aware…).
+//! Le câblage dans le **flux gossip** est réalisé côté `Node`
+//! ([`crate::node`], Phase 1.1) : les blobs signés (base64) circulent dans
+//! `MeshEvent.content` avec des types dédiés
+//! (`OndeMessageType::UpdateAnnounce/Manifest/Chunk/Request`), les
+//! métadonnées et la signature racine dans `tags` (`k=v`). Points d'appel
+//! réalisés :
 //!
 //! ```text
 //! Réception d'une annonce pair (message OndeMessageType::UpdateAnnounce)
 //!   └─ UpdateProtocol::handle_announcement(data, signature)
 //!        • signature racine vérifiée, version > locale exigée
-//!        • si Ok(announcement) → envoyer request_manifest au pair
+//!        • si Ok(announcement) → requête manifeste vers le pair
 //! Réception du manifeste (message OndeMessageType::UpdateManifest)
 //!   └─ UpdateProtocol::handle_manifest(manifest_bytes, peer)
 //!        • hash = hash annoncé, sinon UpdateError::ManifestMismatch
@@ -81,12 +82,10 @@
 //!      ou UpdateProtocol::record_install(...)             (Android/PackageInstaller)
 //! ```
 //!
-//! Le routage des messages "update" dans le gossip est laissé volontairement
-//! pour une passe ultérieure (P2 du plan d'audit) : l'ajout d'un type de
-//! message `OndeMessageType::UpdateAnnounce/Manifest/Chunk` toucherait le
-//! format wire partagé et la validation PoW, au-delà du périmètre sûr de
-//! cette passe. La fonction à appeler à la réception d'une annonce est donc
-//! [`UpdateProtocol::handle_announcement`], documentée ci-dessous.
+//! Le routage des messages "update" dans le gossip (types wire partagés +
+//! validation PoW adaptative) a été réalisé en Phase 1.1 dans
+//! [`crate::node::Node::handle_incoming_update`] / [`crate::node::Node::announce_update`],
+//! sans renuméroter les kind_code existants (nouveaux codes 9..12).
 
 use std::collections::HashMap;
 use std::fmt;
