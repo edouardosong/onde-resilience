@@ -342,7 +342,7 @@ cargo tauri ios build
 |--------|-----------|
 | Identité | Ed25519 keypair par nœud, rotation 6 h (forward secrecy) |
 | Chiffrement | ChaCha20-Poly1305, ECDH X25519 + HKDF-SHA256 |
-| Anti-spam | PoW CPU adaptatif + Web of Trust (réputation) |
+| Anti-spam | PoW CPU adaptatif + Web of Trust (réputation) — endossements **propagés dans le mesh** (Phase 1.2) |
 | Transactions | ZK-Proofs asynchrones (commit différé) |
 | DNS | TLD Handshake incensurables |
 | Distribution APK | `core/src/update/` — annonce + manifeste signés Ed25519 (racine épinglée), transfert par chunks, `verify_apk_signature()` de bout en bout, **câblé dans le flux gossip** (Phase 1.1) |
@@ -357,31 +357,39 @@ Protocole de mise à jour d'APK par le mesh (Audit #12/#13) : l'annonceur signe 
 
 **Phase 1.1 — opérationnel dans le flux réel** : le protocole est câblé dans le gossip (`OndeMessageType::UpdateAnnounce/Manifest/Chunk/Request`, codes 9–12 — le format wire des types existants reste stable). Le blob signé (base64) circule dans `MeshEvent.content`, les métadonnées (`root_sig`, `version`, `peer`, `index`, `total`, `to`) dans `tags` au format `k=v`. `Node::announce_update(version, apk, timestamp)` signe l'annonce **et** le manifeste avec la clé racine de distribution (`NodeConfig::update_root_seed`) et diffuse dans le gossip ; `Node::handle_incoming_update(event)` pilote la machine à états côté receveur (annonce → requête manifeste → manifeste → requêtes chunks → assemblage → vérification → installation) et sert les requêtes côté annonceur (le PoW adaptatif de la réputation est conservé : un émetteur de confiance diffuse avec difficulté 0). Voir la doc du module pour le diagramme de flux complet.
 
+### Web of Trust décentralisé — propagation des endossements (`core/src/reputation/`)
+
+**Phase 1.2 — opérationnel dans le flux réel** : les endossements ne sont plus **locaux** (appel direct `ReputationSystem::endorse`) : ils sont désormais **propagés dans le mesh**. Un `Endorsement` (`endorser`, `endorsed`, `timestamp`) est sérialisé en JSON puis base64 dans `MeshEvent.content` et diffusé sous le type `OndeMessageType::Endorsement` (code 13 — le format wire des types existants reste stable). `Node::endorse(peer_pubkey)` applique l'endossement localement (réutilise la logique qualifiée `endorse` : anti-self, anti-doublon, seuil d'endosseur — sans la dupliquer), signe l'événement avec l'identité du nœud (Ed25519 sur l'ID canonique) et le diffuse dans le gossip avec le PoW adaptatif (endosseur de confiance → difficulté 0). `Node::handle_incoming_endorsement(event)` vérifie la signature de l'endosseur, intègre via `ReputationSystem::apply_remote_endorsement` (mêmes règles que `endorse` : endosseur non de confiance, self ou doublon → rejeté), puis **relaie** l'endossement vers les pairs qui ne l'ont pas encore reçu (tracking « livré par pair » du gossip) — la cascade propage l'endossement à tout le mesh, et chaque receveur intègre les endossements reçus dans sa vue du Web of Trust. Un nœud atteint le statut « de confiance » après `REQUIRED_ENDORSEMENTS` endossements qualifiés de nœuds de confiance, exactement comme en local.
+
 ---
 
 ## 🧪 Tests
 
-### Suite du moteur (`core/`) — 138 tests, 0 échec
+### Suite du moteur (`core/`) — 142 tests, 0 échec
 
 ```bash
 # Tous les tests (workspace core/)
 cd core && cargo test --workspace
 
-# Résultats : 138 tests, 0 échec
-# onde-core        : 102 tests ✅ Crypto, Network, Protocol, Storage, Update, Node, AI, Reputation
+# Résultats : 142 tests, 0 échec
+# onde-core        : 105 tests ✅ Crypto, Network, Protocol, Storage, Update, Node, AI, Reputation
 # dtn-router       :  7 tests ✅ Store-and-forward, broadcast, priorités, TTL
 # llama-bind       :  5 tests ✅ Sélection de modèle, génération mock, quantification
 # whisper-stt      :  4 tests ✅ Création d'engine, transcription mock
 # zim-parser       :  3 tests ✅ Extraction HTML, catégories, URL ZIM
 # llm-inference    :  3 tests ✅ Inférence locale, auto-sélection de modèle
-# integration_e2e  : 14 tests ✅ Scénarios end-to-end complets
+# integration_e2e  : 15 tests ✅ Scénarios end-to-end complets
 ```
+
+Les 4 tests ajoutés en Phase 1.2 couvrent : la propagation des endossements entre nœuds (`test_endorsement_propagation_three_nodes`), l'application d'un endossement reçu du réseau (`apply_remote_endorsement` : signature, anti-self, anti-doublon, seuil d'endosseur, promotion), le jeu de relai (`pending_endorsements`) et la stabilité du code wire du nouveau type `Endorsement` (code 13, sans renumérotation).
 
 Les 2 tests ajoutés au dernier audit couvrent : l'application du sharding Geohash au stockage local (`test_store_applies_geohash_sharding`) et le throttling adaptatif de publication (`test_node_publish_throttle`).
 
 Les tests du protocole de mise à jour (`core/src/update/`) couvrent : flux complet annonce → manifeste → chunks → vérification → installation, rejet des APK falsifiés, rejet des signatures de racine inconnue, rejet des versions non supérieures, rejet des manifestes non liés à l'annonce, bornes des chunks, et non-contournabilité par les métadonnées non signées.
 
 Le câblage gossip de la Phase 1.1 est couvert par les tests e2e `test_update_flow_between_two_nodes` (annonce → requêtes → manifeste → chunks → assemblage → vérification → installation, APK identique byte-à-byte, rejet des versions non supérieures) et `test_update_rejects_tampered_apk` (un APK falsifié est rejeté à l'assemblage et le transfert empoisonné est purgé), sur le modèle `test_multi_node_gossip` (deux `Node` + `add_event` + `get_pending_for_peer`).
+
+La propagation WoT de la Phase 1.2 est couverte par `test_endorsement_propagation_three_nodes` (A endosse B, l'endossement est diffusé puis **relayé** A → B → C, la réputation de B monte chez C, un endossement d'un nœud non de confiance est ignoré, un doublon est ignoré, et après 3 endossements qualifiés C considère B comme de confiance), sur le même modèle gossip que `test_multi_node_gossip`.
 
 ### rust-core/ — supprimé
 

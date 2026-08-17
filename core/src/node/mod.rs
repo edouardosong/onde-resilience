@@ -7,7 +7,7 @@ use base64::Engine as _;
 use crate::crypto::{Identity, RotatingIdentity, ZkTransaction, TxPool};
 use crate::network::YggdrasilAddress;
 use crate::protocol::{MeshEvent, OndeMessageType, GossipProtocol};
-use crate::reputation::ReputationSystem;
+use crate::reputation::{Endorsement, ReputationSystem};
 use crate::ai::AiEngine;
 use crate::storage::{
     ZimReader, MBTilesRenderer, IpfsSeeder, TieredMessageStore, TieredMessage, StoragePolicy,
@@ -222,6 +222,19 @@ pub enum UpdateHandlingOutcome {
     ChunkServed(u32),
     /// Message update rejeté pour une raison protocolaire (signature
     /// invalide, version non supérieure, chunk hors bornes, APK falsifié…).
+    Rejected(String),
+}
+
+/// Résultat du traitement d'un endossement WoT entrant (Phase 1.2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EndorsementHandlingOutcome {
+    /// Message non lié au Web of Trust (ignoré).
+    Ignored,
+    /// Endossement vérifié et intégré à la réputation locale + relai.
+    Applied,
+    /// Endossement rejeté pour une raison protocolaire ou de réputation
+    /// (payload invalide, signature invalide, endosseur non de confiance,
+    /// self, doublon).
     Rejected(String),
 }
 
@@ -677,7 +690,7 @@ impl Node {
         ]);
         let event =
             MeshEvent::new_signed(&self.identity, OndeMessageType::UpdateAnnounce, content, tags);
-        let published = self.publish_update_event(event)?;
+        let published = self.publish_gossip_event(event)?;
 
         // L'offre sert les requêtes manifeste/chunk des receveurs.
         self.update_offer = Some(UpdateOffer {
@@ -710,10 +723,12 @@ impl Node {
         }
     }
 
-    /// Signer (identité du nœud) et diffuser un événement update dans le
-    /// gossip, avec le PoW adaptatif de la réputation (nœud de confiance →
-    /// difficulté 0).
-    fn publish_update_event(&mut self, mut event: MeshEvent) -> Result<MeshEvent, String> {
+    /// Signer (identité du nœud) et diffuser un événement dans le gossip, avec
+    /// le PoW adaptatif de la réputation (nœud de confiance → difficulté 0).
+    ///
+    /// Utilisé par le protocole update (Phase 1.1) ET les endossements WoT
+    /// (Phase 1.2) — la publication est identique quel que soit le kind.
+    fn publish_gossip_event(&mut self, mut event: MeshEvent) -> Result<MeshEvent, String> {
         let difficulty = self
             .reputation
             .required_pow_difficulty(&self.identity.pubkey_hex());
@@ -764,7 +779,7 @@ impl Node {
                         (TAG_TO, announcer),
                     ]),
                 );
-                self.publish_update_event(request)?;
+                self.publish_gossip_event(request)?;
                 Ok(UpdateHandlingOutcome::AnnouncementRequested)
             }
             Err(e) => Ok(UpdateHandlingOutcome::Rejected(e.to_string())),
@@ -799,7 +814,7 @@ impl Node {
                         (TAG_VERSION, announcement.version.to_string()),
                     ]),
                 );
-                self.publish_update_event(request)?;
+                self.publish_gossip_event(request)?;
                 Ok(UpdateHandlingOutcome::ManifestRequested)
             }
             Err(e) => Ok(UpdateHandlingOutcome::Rejected(e.to_string())),
@@ -836,7 +851,7 @@ impl Node {
                     (TAG_INDEX, next.to_string()),
                 ]),
             );
-            self.publish_update_event(request)?;
+            self.publish_gossip_event(request)?;
             return Ok(UpdateHandlingOutcome::ChunkRequested(next));
         }
 
@@ -890,7 +905,7 @@ impl Node {
                     content,
                     tags,
                 );
-                self.publish_update_event(manifest_event)?;
+                self.publish_gossip_event(manifest_event)?;
                 Ok(UpdateHandlingOutcome::ManifestServed)
             }
             "chunk" => {
@@ -913,7 +928,7 @@ impl Node {
                     content,
                     tags,
                 );
-                self.publish_update_event(chunk_event)?;
+                self.publish_gossip_event(chunk_event)?;
                 Ok(UpdateHandlingOutcome::ChunkServed(index))
             }
             other => Err(format!("unknown update request type: {other}")),
@@ -933,6 +948,121 @@ impl Node {
     /// Le mode économie batterie est-il actif ?
     pub fn battery_saver_enabled(&self) -> bool {
         self.config.battery_saver
+    }
+
+    // ------------------------------------------------------------------
+    // Web of Trust — endossements propagés dans le gossip (Phase 1.2)
+    // ------------------------------------------------------------------
+
+    /// Endosser la clé publique d'un pair et diffuser l'endossement signé
+    /// dans le gossip.
+    ///
+    /// L'application **locale** réutilise la logique [`ReputationSystem::endorse`]
+    /// (anti-self, anti-doublon, seuil de l'endosseur) sans la dupliquer :
+    /// un doublon ou un auto-endossement est refusé avant tout broadcast.
+    /// L'`Endorsement` (`endorser`, `endorsed`, `timestamp`) est sérialisé en
+    /// JSON puis base64 dans `content` ; l'événement est signé par l'endosseur
+    /// (identité du nœud) et diffusé avec le PoW adaptatif de la réputation
+    /// (endosseur de confiance → difficulté 0). Les autres nœuds le relaient
+    /// en cascade via le gossip.
+    pub fn endorse(&mut self, peer_pubkey: &str) -> Result<MeshEvent, String> {
+        let timestamp = unix_now();
+        // Application locale : réutilise l'endossement qualifié existant
+        // (anti-self, anti-doublon, seuil d'endosseur) — jamais dupliqué.
+        self.reputation
+            .endorse(&self.identity.pubkey_hex(), peer_pubkey, timestamp)?;
+
+        let endorsement = Endorsement {
+            endorser: self.identity.pubkey_hex(),
+            endorsed: peer_pubkey.to_string(),
+            timestamp,
+        };
+        let payload = serde_json::to_vec(&endorsement).map_err(|e| e.to_string())?;
+        let content = base64::engine::general_purpose::STANDARD.encode(&payload);
+        let event = MeshEvent::new_signed(
+            &self.identity,
+            OndeMessageType::Endorsement,
+            content,
+            vec![],
+        );
+        self.publish_gossip_event(event)
+    }
+
+    /// Traiter un endossement WoT reçu du gossip.
+    ///
+    /// 1. Décodage du payload (`content` = base64 du JSON `Endorsement`).
+    /// 2. Vérification de la signature de l'endosseur (Ed25519 sur l'ID
+    ///    canonique — l'endosseur annoncé doit être l'auteur signé de l'événement).
+    /// 3. Intégration via [`ReputationSystem::apply_remote_endorsement`]
+    ///    (réutilise `endorse` : endosseur non de confiance, self ou doublon
+    ///    → rejeté).
+    /// 4. **Relai** : un endossement intégré est rediffusé vers les pairs qui
+    ///    ne l'ont pas encore reçu (tracking "livré par pair" du gossip).
+    pub fn handle_incoming_endorsement(
+        &mut self,
+        event: &MeshEvent,
+    ) -> EndorsementHandlingOutcome {
+        if event.kind != OndeMessageType::Endorsement {
+            return EndorsementHandlingOutcome::Ignored;
+        }
+
+        // 1. Décodage du payload Endorsement (base64 → JSON).
+        let data = match base64::engine::general_purpose::STANDARD.decode(&event.content) {
+            Ok(d) => d,
+            Err(e) => {
+                return EndorsementHandlingOutcome::Rejected(format!(
+                    "endorsement payload is not valid base64: {e}"
+                ))
+            }
+        };
+        let endorsement: Endorsement = match serde_json::from_slice(&data) {
+            Ok(e) => e,
+            Err(e) => {
+                return EndorsementHandlingOutcome::Rejected(format!(
+                    "endorsement payload is not valid JSON: {e}"
+                ))
+            }
+        };
+
+        // 2. L'endosseur annoncé doit être l'auteur signé de l'événement.
+        if endorsement.endorser != event.pubkey {
+            return EndorsementHandlingOutcome::Rejected(
+                "endorsement endorser does not match the event signer".to_string(),
+            );
+        }
+        let sig_verified = {
+            let pubkey_ok = hex::decode(&event.pubkey).map(|b| b.len() == 32).unwrap_or(false);
+            let sig_ok = hex::decode(&event.sig).map(|b| b.len() == 64).unwrap_or(false);
+            pubkey_ok
+                && sig_ok
+                && {
+                    let mut pk = [0u8; 32];
+                    let mut sig = [0u8; 64];
+                    pk.copy_from_slice(&hex::decode(&event.pubkey).unwrap_or_default());
+                    sig.copy_from_slice(&hex::decode(&event.sig).unwrap_or_default());
+                    Identity::verify_from_pubkey(&pk, event.id.as_bytes(), &sig)
+                }
+        };
+        if !sig_verified {
+            return EndorsementHandlingOutcome::Rejected(
+                "endorsement signature could not be verified".to_string(),
+            );
+        }
+
+        // 3. Intégration : réutilise `apply_remote_endorsement` → `endorse`
+        //    (endosseur non de confiance, self ou doublon → rejeté).
+        match self.reputation.apply_remote_endorsement(&endorsement, true) {
+            Ok(()) => {
+                // 4. Relai : l'événement reste/entre dans l'outbox du gossip
+                //    pour être rediffusé aux pairs qui ne l'ont pas encore reçu
+                //    (idempotent si déjà connu).
+                let _ = self
+                    .gossip
+                    .add_event_with_reputation(event.clone(), &self.reputation);
+                EndorsementHandlingOutcome::Applied
+            }
+            Err(e) => EndorsementHandlingOutcome::Rejected(e),
+        }
     }
 
     /// Activer / désactiver le mode économie batterie (throttling adaptatif).

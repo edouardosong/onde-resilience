@@ -9,7 +9,8 @@
 
 use onde_core::crypto::Identity;
 use onde_core::protocol::{MeshEvent, OndeMessageType};
-use onde_core::node::{Node, NodeConfig, NodeType, UpdateHandlingOutcome};
+use onde_core::node::{Node, NodeConfig, NodeType, UpdateHandlingOutcome, EndorsementHandlingOutcome};
+use onde_core::reputation::{Endorsement, TRUSTED_THRESHOLD};
 use onde_core::update::{UpdateProtocol, Version, DEFAULT_CHUNK_SIZE};
 use onde_core::storage::{ZimReader, MBTilesRenderer, IpfsSeeder};
 use dtn_router::{DtnRouter, DtnMessage, MessageType};
@@ -28,7 +29,16 @@ fn gossip_sync(from: &mut Node, to: &mut Node) -> Result<usize, String> {
             .gossip
             .add_event_with_reputation(event.clone(), &reputation)?
         {
-            to.handle_incoming_update(&event)?;
+            match event.kind {
+                // Phase 1.2 : les endossements WoT sont intégrés (et relayés)
+                // par leur propre handler ; tout le reste passe par l'update.
+                OndeMessageType::Endorsement => {
+                    to.handle_incoming_endorsement(&event);
+                }
+                _ => {
+                    to.handle_incoming_update(&event)?;
+                }
+            }
             handled += 1;
         }
     }
@@ -828,6 +838,144 @@ async fn test_update_rejects_tampered_apk() -> Result<(), String> {
         node_b.update_protocol.current_version(),
         Version::new(1, 0, 0),
         "receiver must stay on its previous version"
+    );
+    Ok(())
+}
+
+/*
+ * Scenario 15: WoT — Propagation des endossements entre nœuds (Phase 1.2)
+ *
+ * A (fondateur de confiance) endosse B. L'endossement signé circule dans le
+ * gossip : B le reçoit d'abord, puis le RELAIE vers C (cascade). Chaque nœud
+ * vérifie la signature de l'endosseur et intègre l'endossement dans sa
+ * réputation locale. Un endossement d'un nœud non de confiance est ignoré
+ * (rejeté au gossip ET à l'application), un doublon est ignoré.
+ *
+ * Promotion : avec `REQUIRED_ENDORSEMENTS = 3` et `ENDORSEMENT_DECAY = 0.5`,
+ * un seul endosseur ne peut pas porter B au-dessus de `TRUSTED_THRESHOLD`
+ * (0.8 × 0.5 = 0.4 < 0.7). Deux fondateurs de confiance supplémentaires
+ * (F1, F2) endossent donc aussi B par le même gossip : après 3 endossements
+ * qualifiés, C considère B comme de confiance — uniquement via les
+ * endossements reçus.
+ */
+#[tokio::test]
+async fn test_endorsement_propagation_three_nodes() -> Result<(), String> {
+    // Le trinôme du brief : A (fondateur de confiance), B (endossé), C (observateur).
+    let mut node_a = Node::new(NodeConfig {
+        display_name: "A".to_string(),
+        ..Default::default()
+    });
+    let mut node_b = Node::new(NodeConfig {
+        display_name: "B".to_string(),
+        ..Default::default()
+    });
+    let mut node_c = Node::new(NodeConfig {
+        display_name: "C".to_string(),
+        ..Default::default()
+    });
+    let a_pubkey = node_a.identity.pubkey_hex();
+    let b_pubkey = node_b.identity.pubkey_hex();
+
+    // WoT : A est le fondateur de confiance ; B et C le connaissent (le PoW
+    // adaptatif d'A est donc 0 chez eux). B n'est PAS encore de confiance.
+    node_b.reputation.bootstrap(std::slice::from_ref(&a_pubkey));
+    node_c.reputation.bootstrap(std::slice::from_ref(&a_pubkey));
+    assert!(!node_c.reputation.is_trusted(&b_pubkey));
+    assert_eq!(node_c.reputation.score(&b_pubkey), 0.0);
+
+    // 1. A endosse B : application locale (anti-self/anti-doublon de `endorse`)
+    //    + événement Endorsement signé diffusé dans le gossip.
+    let event = node_a.endorse(&b_pubkey)?;
+    assert!(matches!(event.kind, OndeMessageType::Endorsement));
+    assert!(!event.sig.is_empty(), "endorsement must be signed");
+    assert_eq!(node_a.reputation.endorsement_count(&b_pubkey), 1);
+
+    // 2. Propagation A → B (direct), puis relai B → C (cascade).
+    assert_eq!(gossip_sync(&mut node_a, &mut node_b)?, 1, "B receives the endorsement");
+    assert_eq!(node_b.reputation.endorsement_count(&b_pubkey), 1, "B integrates it");
+
+    assert_eq!(gossip_sync(&mut node_b, &mut node_c)?, 1, "B relays the endorsement to C");
+    assert_eq!(node_c.reputation.endorsement_count(&b_pubkey), 1, "C integrates it");
+    assert!(
+        node_c.reputation.score(&b_pubkey) > 0.0,
+        "B's reputation must rise above the unknown threshold (0.0)"
+    );
+    assert!(
+        node_c
+            .reputation
+            .pending_endorsements()
+            .iter()
+            .any(|e| e.endorser == a_pubkey && e.endorsed == b_pubkey),
+        "integrated endorsement must be relayable"
+    );
+
+    // 3. Un doublon est ignoré : redélivraison du même événement → déduplication.
+    assert_eq!(gossip_sync(&mut node_b, &mut node_c)?, 0, "duplicate event is deduplicated");
+    // Et au niveau application : la ré-application du même endossement est rejetée
+    // par la logique `endorse` (anti-doublon).
+    match node_c.handle_incoming_endorsement(&event) {
+        EndorsementHandlingOutcome::Rejected(reason) => {
+            assert!(reason.contains("Duplicate"), "duplicate must be rejected: {reason}")
+        }
+        other => panic!("duplicate endorsement must be rejected, got {other:?}"),
+    }
+    assert_eq!(node_c.reputation.endorsement_count(&b_pubkey), 1, "no double counting");
+
+    // 4. Un endossement d'un nœud NON de confiance est ignoré.
+    let attacker = Identity::generate();
+    let evil = Endorsement {
+        endorser: attacker.pubkey_hex(),
+        endorsed: b_pubkey.clone(),
+        timestamp: 1_800_000_000,
+    };
+    let evil_content = base64::engine::general_purpose::STANDARD
+        .encode(serde_json::to_vec(&evil).map_err(|e| e.to_string())?);
+    let evil_event =
+        MeshEvent::new_signed(&attacker, OndeMessageType::Endorsement, evil_content, vec![]);
+    // Au niveau gossip : l'inconnu n'a pas payé le PoW adaptatif requis → rejeté.
+    let rep = node_c.reputation.clone();
+    assert!(
+        node_c.gossip.add_event_with_reputation(evil_event.clone(), &rep).is_err(),
+        "unknown endorser without PoW must be refused at the gossip layer"
+    );
+    // Au niveau application : l'endosseur n'est pas de confiance → ignoré.
+    match node_c.handle_incoming_endorsement(&evil_event) {
+        EndorsementHandlingOutcome::Rejected(_) => {}
+        other => panic!("untrusted endorsement must be ignored, got {other:?}"),
+    }
+    assert_eq!(node_c.reputation.endorsement_count(&b_pubkey), 1, "nothing applied");
+    assert_eq!(node_c.reputation.score(&b_pubkey), 0.4, "reputation unchanged");
+
+    // 5. Promotion : deux autres fondateurs de confiance (F1, F2) endossent B
+    //    par le même gossip. Après 3 endossements qualifiés, C considère B
+    //    comme de confiance — uniquement via les endossements reçus.
+    let mut node_f1 = Node::new(NodeConfig {
+        display_name: "F1".to_string(),
+        ..Default::default()
+    });
+    let mut node_f2 = Node::new(NodeConfig {
+        display_name: "F2".to_string(),
+        ..Default::default()
+    });
+    let f1_pubkey = node_f1.identity.pubkey_hex();
+    let f2_pubkey = node_f2.identity.pubkey_hex();
+    node_c
+        .reputation
+        .bootstrap(&[f1_pubkey.clone(), f2_pubkey.clone()]);
+
+    node_f1.endorse(&b_pubkey)?;
+    node_f2.endorse(&b_pubkey)?;
+    assert_eq!(gossip_sync(&mut node_f1, &mut node_c)?, 1);
+    assert_eq!(gossip_sync(&mut node_f2, &mut node_c)?, 1);
+
+    assert_eq!(node_c.reputation.endorsement_count(&b_pubkey), 3);
+    assert!(
+        node_c.reputation.is_trusted(&b_pubkey),
+        "C must consider B trusted after 3 qualified endorsements received"
+    );
+    assert!(
+        node_c.reputation.score(&b_pubkey) >= TRUSTED_THRESHOLD,
+        "B's reputation must rise above the trust threshold"
     );
     Ok(())
 }

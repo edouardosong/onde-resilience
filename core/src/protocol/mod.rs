@@ -67,6 +67,14 @@ pub enum OndeMessageType {
     /// `content` vide ; `tags` portent `req_type` (manifest|chunk), `to`,
     /// `index` (chunks).
     UpdateRequest,
+    /// Web of Trust — endossement signé (Phase 1.2 : propagation des
+    /// endossements dans le gossip).
+    ///
+    /// `content` porte l'`Endorsement` (`endorser`, `endorsed`, `timestamp`)
+    /// sérialisé en JSON puis base64 ; `sig` est la signature Ed25519 de
+    /// l'endosseur (`pubkey` = `endorser`) sur l'ID canonique ; le PoW
+    /// adaptatif s'applique (un endosseur de confiance → difficulté 0).
+    Endorsement,
 }
 
 /// Nostr-style event for the mesh network
@@ -194,6 +202,9 @@ impl MeshEvent {
             OndeMessageType::UpdateManifest => 10,
             OndeMessageType::UpdateChunk => 11,
             OndeMessageType::UpdateRequest => 12,
+            // Phase 1.2 : code 13 — nouvel endossement WoT propagé dans le
+            // gossip, toujours sans renumérotation des types existants.
+            OndeMessageType::Endorsement => 13,
         }
     }
 
@@ -978,5 +989,44 @@ mod tests {
         assert_ne!(id_manifest, id_chunk);
         assert_ne!(id_chunk, id_request);
         assert_ne!(id_request, id_announce);
+    }
+
+    #[test]
+    fn test_endorsement_kind_has_stable_code() {
+        // Phase 1.2 : le nouvel Endorsement a un code dédié (13), distinct de
+        // tous les codes existants (0..12) — le format wire reste stable.
+        let codes: Vec<u8> = [
+            OndeMessageType::Alert,
+            OndeMessageType::MutualAid,
+            OndeMessageType::VoiceMemo,
+            OndeMessageType::Transcription,
+            OndeMessageType::Transaction,
+            OndeMessageType::AiQuery,
+            OndeMessageType::AiResponse,
+            OndeMessageType::FileShareRequest,
+            OndeMessageType::Heartbeat,
+            OndeMessageType::UpdateAnnounce,
+            OndeMessageType::UpdateManifest,
+            OndeMessageType::UpdateChunk,
+            OndeMessageType::UpdateRequest,
+            OndeMessageType::Endorsement,
+        ]
+        .iter()
+        .map(MeshEvent::kind_code)
+        .collect();
+        assert_eq!(codes, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+        let mut sorted = codes.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), codes.len(), "all kind codes must be distinct");
+
+        // Le kind Endorsement produit un ID canonique distinct des autres
+        // (même contenu, même timestamp, même auteur).
+        let pk = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+        let tags = vec!["peer=x".to_string()];
+        let id_alert = MeshEvent::compute_id(pk, 42, &OndeMessageType::Alert, &tags, "x");
+        let id_endorsement =
+            MeshEvent::compute_id(pk, 42, &OndeMessageType::Endorsement, &tags, "x");
+        assert_ne!(id_alert, id_endorsement);
     }
 }

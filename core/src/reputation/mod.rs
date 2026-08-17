@@ -133,6 +133,34 @@ impl ReputationSystem {
         Ok(self.score(endorsed))
     }
 
+    /// Appliquer un endossement **reçu d'un autre nœud** (propagation WoT,
+    /// Phase 1.2).
+    ///
+    /// Réutilise intégralement la logique qualifiée de [`Self::endorse`]
+    /// (anti-self, anti-doublon, seuil de l'endosseur, promotion) sans la
+    /// dupliquer. La seule différence : la signature de l'endosseur a déjà été
+    /// vérifiée par l'appelant (couche gossip / `Node`) — `endorser_sig_verified`
+    /// documente ce fait et un endossement non vérifié est rejeté d'office.
+    pub fn apply_remote_endorsement(
+        &mut self,
+        endorsement: &Endorsement,
+        endorser_sig_verified: bool,
+    ) -> Result<(), String> {
+        if !endorser_sig_verified {
+            return Err("Endorsement signature could not be verified".to_string());
+        }
+        self.endorse(&endorsement.endorser, &endorsement.endorsed, endorsement.timestamp)
+            .map(|_| ())
+    }
+
+    /// Endossements actuellement intégrés par ce nœud — jeu candidat pour le
+    /// **relai** : un nœud qui a intégré un endossement peut le rediffuser
+    /// dans le gossip (chaque receveur le re-publie vers les pairs qui ne
+    /// l'ont pas encore reçu, la déduplication restant assurée par le gossip).
+    pub fn pending_endorsements(&self) -> Vec<Endorsement> {
+        self.endorsements.values().flatten().cloned().collect()
+    }
+
     /// Compter les endossements qualifiés reçus par un nœud.
     pub fn endorsement_count(&self, pubkey: &str) -> usize {
         self.endorsements
@@ -294,5 +322,119 @@ mod tests {
 
         rep.penalize(&n, 0.5);
         assert_eq!(rep.score(&n), 0.0);
+    }
+
+    #[test]
+    fn test_apply_remote_endorsement_reuses_endorse() {
+        // Phase 1.2 : `apply_remote_endorsement` réutilise la logique `endorse`
+        // (anti-self, anti-doublon, seuil de l'endosseur) — les mêmes règles
+        // s'appliquent à un endossement reçu du réseau.
+        let mut rep = ReputationSystem::new();
+        let g1 = key("g1");
+        let g2 = key("g2");
+        let g3 = key("g3");
+        rep.bootstrap(&[g1.clone(), g2.clone(), g3.clone()]);
+        let newcomer = key("n");
+
+        // Un endossement non vérifié (signature absente) est rejeté d'office.
+        let unverified = Endorsement {
+            endorser: g1.clone(),
+            endorsed: newcomer.clone(),
+            timestamp: 1_000,
+        };
+        assert!(
+            rep.apply_remote_endorsement(&unverified, false).is_err(),
+            "unverified endorsement must be rejected"
+        );
+        assert_eq!(rep.score(&newcomer), 0.0, "nothing applied");
+
+        // Un endossement vérifié d'un endosseur de confiance s'applique (0.4).
+        let verified = Endorsement {
+            endorser: g1.clone(),
+            endorsed: newcomer.clone(),
+            timestamp: 1_001,
+        };
+        rep.apply_remote_endorsement(&verified, true).unwrap();
+        assert_eq!(rep.score(&newcomer), 0.4);
+        assert_eq!(rep.endorsement_count(&newcomer), 1);
+
+        // Le doublon (même endosseur) est rejeté par la logique `endorse`.
+        let dup = Endorsement {
+            endorser: g1.clone(),
+            endorsed: newcomer.clone(),
+            timestamp: 1_002,
+        };
+        assert!(
+            rep.apply_remote_endorsement(&dup, true).is_err(),
+            "duplicate endorsement must be rejected"
+        );
+        assert_eq!(rep.endorsement_count(&newcomer), 1);
+
+        // Un endossement d'un nœud NON de confiance est ignoré.
+        let unknown = key("u");
+        let from_unknown = Endorsement {
+            endorser: unknown.clone(),
+            endorsed: newcomer.clone(),
+            timestamp: 1_003,
+        };
+        assert!(
+            rep.apply_remote_endorsement(&from_unknown, true).is_err(),
+            "unknown endorser must be rejected"
+        );
+
+        // Un auto-endossement reçu du réseau est rejeté.
+        let self_end = Endorsement {
+            endorser: g1.clone(),
+            endorsed: g1.clone(),
+            timestamp: 1_004,
+        };
+        assert!(rep.apply_remote_endorsement(&self_end, true).is_err());
+
+        // Promotion : 3 endossements qualifiés de nœuds de confiance rendent
+        // le nouveau venu "de confiance" — exactement comme `endorse`.
+        rep.apply_remote_endorsement(
+            &Endorsement { endorser: g2.clone(), endorsed: newcomer.clone(), timestamp: 1_005 },
+            true,
+        )
+        .unwrap();
+        rep.apply_remote_endorsement(
+            &Endorsement { endorser: g3.clone(), endorsed: newcomer.clone(), timestamp: 1_006 },
+            true,
+        )
+        .unwrap();
+        assert!(rep.is_trusted(&newcomer), "3 qualified endorsements must promote");
+        assert_eq!(rep.score(&newcomer), TRUSTED_THRESHOLD);
+    }
+
+    #[test]
+    fn test_pending_endorsements_for_relay() {
+        // Phase 1.2 : les endossements intégrés sont exposés pour le relai.
+        let mut rep = ReputationSystem::new();
+        let g1 = key("g1");
+        let g2 = key("g2");
+        rep.bootstrap(&[g1.clone(), g2.clone()]);
+        let a = key("a");
+        let b = key("b");
+
+        rep.apply_remote_endorsement(
+            &Endorsement { endorser: g1.clone(), endorsed: a.clone(), timestamp: 1 },
+            true,
+        )
+        .unwrap();
+        rep.apply_remote_endorsement(
+            &Endorsement { endorser: g2.clone(), endorsed: b.clone(), timestamp: 2 },
+            true,
+        )
+        .unwrap();
+
+        let pending = rep.pending_endorsements();
+        assert_eq!(pending.len(), 2, "integrated endorsements are relayable");
+        assert!(pending.iter().any(|e| e.endorser == g1 && e.endorsed == a));
+        assert!(pending.iter().any(|e| e.endorser == g2 && e.endorsed == b));
+
+        // Un doublon rejeté n'ajoute rien au jeu de relai.
+        let dup = Endorsement { endorser: g1.clone(), endorsed: a.clone(), timestamp: 3 };
+        assert!(rep.apply_remote_endorsement(&dup, true).is_err());
+        assert_eq!(rep.pending_endorsements().len(), 2);
     }
 }
