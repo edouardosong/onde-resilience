@@ -55,3 +55,6 @@ onde/simulation/results/
 
 # Hermes orchestration state (task briefs, notes) — jamais commité
 .hermes/
+
+# Briefs de taches (etat dorchestration) - jamais committe
+briefs/
