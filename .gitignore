@@ -52,3 +52,6 @@ ui/src-tauri/gen/schemas/
 
 # Simulation results
 onde/simulation/results/
+
+# Hermes orchestration state (task briefs, notes) — jamais commité
+.hermes/
