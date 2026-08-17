@@ -340,15 +340,16 @@ async fn test_multi_node_gossip() {
  */
 #[tokio::test]
 async fn test_storage_integration() {
-    // ZIM Reader
+    // ZIM Reader — demo mode is explicit (missing files fail loudly)
     let mut zim = ZimReader::new();
-    zim.load_archive("/nonexistent/demo.zim").unwrap();
+    zim.load_demo();
     let results = zim.search("secours");
-    assert!(!results.is_empty() || zim.total_articles() > 0);
+    assert!(!results.is_empty(), "demo mode must expose searchable articles");
+    assert!(zim.total_articles() >= 5);
 
-    // MBTiles Renderer
+    // MBTiles Renderer — demo mode is explicit
     let mut maps = MBTilesRenderer::new();
-    maps.load("/nonexistent/maps.mbtiles").unwrap();
+    maps.load_demo();
 
     // Get tile for Paris at zoom 5 (demo cache has tiles 0..4)
     let tile = maps.get_tile(5, 2, 2);
@@ -358,8 +359,9 @@ async fn test_storage_integration() {
     let geohash = MBTilesRenderer::position_to_geohash(48.8566, 2.3522, 7);
     assert_eq!(geohash.len(), 7);
 
-    // IPFS Seeder
-    let seeder = IpfsSeeder::new("/tmp/onde-ipfs", 100);
+    // IPFS Seeder — demo seeds are registered explicitly
+    let mut seeder = IpfsSeeder::new("/tmp/onde-ipfs", 100).expect("seeder should initialize");
+    seeder.register_demo_seeds();
     let seeds = seeder.list_seeds();
     assert!(seeds.len() >= 5, "Should have demo seeds");
 

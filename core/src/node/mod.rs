@@ -68,7 +68,15 @@ impl Node {
         let mesh_address = YggdrasilAddress::new(&pubkey);
 
         let ai_engine = AiEngine::new(config.available_ram_mb);
-        let ipfs_seeder = IpfsSeeder::new("/tmp/onde-ipfs", config.storage_gb);
+        // The seed directory may be unavailable (e.g. read-only filesystem):
+        // log a clear warning and continue with an empty, disabled seeder.
+        let ipfs_seeder = match IpfsSeeder::new("/tmp/onde-ipfs", config.storage_gb) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("IPFS seeder disabled: {e}");
+                IpfsSeeder::disabled(config.storage_gb)
+            }
+        };
 
         Self {
             config,
