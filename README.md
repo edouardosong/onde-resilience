@@ -4,10 +4,18 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org)
-[![Tests](https://img.shields.io/badge/tests-14%20passing-brightgreen.svg)]()
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)]()
+[![Tests](https://img.shields.io/badge/tests-79%20passing-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)]()
 [![Build](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
 [![Release](https://img.shields.io/github/v/release/edouardosong/onde-resilience?label=latest)](https://github.com/edouardosong/onde-resilience/releases)
+
+---
+
+## ⚠️ Statut du projet
+
+**Prototype** — code non audité, non durci, **pas prêt pour la production**.
+Données de démo explicites (`load_demo` / `register_demo_seeds`).
+Les modules marqués **Prototype** sont fonctionnels en tests mais non durcis.
 
 ---
 
@@ -19,15 +27,15 @@
 
 | Module | Description | Statut |
 |---|---|---|
-| 🔄 **Réseau Mesh** | Wi-Fi Aware, BLE, LoRa (Meshtastic), Ethernet Bridge. Routage DTN store-and-forward | ✅ v1.0.0 |
-| 📝 **Social Text-Only** | Protocole Nostr. Flux d'alertes 280 car. + entraide hiérarchisée. Zéro image | ✅ v1.0.0 |
-| 🎙️ **Voix Asynchrone** | Mémos vocaux Opus 8kbps transitant via DTN, avec transcription STT automatique | 🔄 En cours |
-| 🧠 **IA Locale** | PocketPal mobile (Qwen 0.8-9B quantized) + Super-Oracles desktop (70B+ via RPC) | 🔄 En cours |
-| 🗺️ **Cartes Offline** | MBTiles vectorielles + positionnement Geohash radar | ✅ Demo |
-| 📚 **Encyclopédie** | Lecteur ZIM (Wikipédia hors-ligne) | 🔄 En cours |
-| 💰 **Finance ZK** | Transactions asynchrones ZK-Proofs type Mina. Push blockchain quand internet dispo | ✅ v1.0.0 |
-| 📁 **Méga-Archives** | IPFS seeder desktop : APK, ZIM, modèles IA | ✅ Demo |
-| 🔐 **Sécurité** | Ed25519, ChaCha20-Poly1305, PoW antispam CPU, Handshake DNS | ✅ v1.0.0 |
+| 🔄 **Réseau Mesh** | Wi-Fi Aware, BLE, LoRa (Meshtastic), Ethernet Bridge. Routage DTN store-and-forward | Prototype (tests verts) |
+| 📝 **Social Text-Only** | Protocole Nostr. Flux d'alertes 280 car. + entraide hiérarchisée. Zéro image | Prototype |
+| 🎙️ **Voix Asynchrone** | Mémos vocaux Opus 8kbps transitant via DTN, avec transcription STT automatique | Prototype |
+| 🧠 **IA Locale** | PocketPal mobile (Qwen 0.8-9B quantized) + Super-Oracles desktop (70B+ via RPC) | Prototype (binding llama, démo) |
+| 🗺️ **Cartes Offline** | MBTiles vectorielles + positionnement Geohash radar | Prototype (demo data via load_demo) |
+| 📚 **Encyclopédie** | Lecteur ZIM (Wikipédia hors-ligne) | Prototype (demo data via load_demo) |
+| 💰 **Finance ZK** | Transactions asynchrones ZK-Proofs type Mina. Push blockchain quand internet dispo | Mock (ZkProof::verify non implémenté) |
+| 📁 **Méga-Archives** | IPFS seeder desktop : APK, ZIM, modèles IA | Prototype (demo data via register_demo_seeds) |
+| 🔐 **Sécurité** | Ed25519, ChaCha20-Poly1305, PoW antispam CPU, Handshake DNS | Prototype |
 
 ---
 
@@ -67,28 +75,22 @@
 
 ```
 onde-resilience/
-├── 📄 README.md                 # Ce fichier - Documentation complète v1.0.0
+├── 📄 README.md                 # Ce fichier - Documentation complète
 ├── 🐳 Dockerfile.dev            # Env dev: Rust, Python, Android SDK
 ├── 🐳 docker-compose.yml        # Dev + Simulation services
 ├── 🔧 .devcontainer/            # VS Code remote container
 ├── 🧪 simulation/               # PHASE 1 — SimPy network sim (11k nœuds)
 │   ├── mesh_sim.py              # Simulation réseau mesh DTN
 │   └── results/                 # Rapports JSON des simulations
-├── 🦀 rust-core/                # PHASE 2 — Rust workspace v1.0.0 ✅
-│   ├── Cargo.toml               # Workspace manifest
-│   ├── README.md                # Documentation détaillée des crates
-│   ├── 📦 dtn-router/           # Routage DTN store-and-forward
-│   │   ├── Cargo.toml
-│   │   └── src/lib.rs           # Bundle queues, custody transfer, routing
-│   ├── 🔐 crypto-module/        # Primitives cryptographiques
-│   │   ├── Cargo.toml
-│   │   └── src/lib.rs           # Ed25519, SHA-256, ZK proofs, PoW
-│   └── 🤖 llm-inference/        # Module AI/ML
-│       ├── Cargo.toml
-│       └── src/lib.rs           # Whisper STT, Llama inference scaffold
-├── 🗑️ core/                     # Legacy core (déprécié - migrer vers rust-core/)
-│   ├── Cargo.toml
-│   └── src/...
+├── 🦀 core/                     # MOTEUR PRINCIPAL — workspace Cargo actif
+│   ├── Cargo.toml               # Workspace manifest (onde_core + onde_node + 5 crates)
+│   ├── src/                     # onde_core: network, protocol, crypto, storage, node, ai
+│   ├── bin/node.rs              # onde_node — binaire du nœud
+│   └── crates/                  # dtn-router, zim-parser, llm-inference,
+│                                # llama-bind, whisper-stt
+├── 🗑️ rust-core/                # STUB / legacy (placeholder Cargo, non utilisé)
+│   ├── Cargo.toml               # Workspace placeholder
+│   └── src/main.rs              # "Hello, world!" (3 lignes) — à supprimer ou fusionner
 ├── 🎨 ui/                       # PHASE 3 — Interface utilisateur
 │   ├── src/
 │   │   └── index.html           # UI AMOLED Black standalone (40KB)
@@ -116,13 +118,11 @@ docker compose run dev bash
 # Lancer la simulation (11k nœuds)
 python3 simulation/mesh_sim.py
 
-# Build le core Rust v1.0.0 (dans le conteneur)
-cd rust-core && cargo test --workspace
+# Build le moteur (dans le conteneur)
+cd core && cargo test --workspace
 
-# Run les binaires release
-./target/release/dtn_router
-./target/release/crypto_module
-./target/release/llm_inference
+# Run le nœud ONDE
+./target/release/onde_node
 ```
 
 ### Sans Docker
@@ -134,14 +134,13 @@ pip install simpy numpy
 # Simulation réseau
 python3 simulation/mesh_sim.py
 
-# Core Rust v1.0.0
-cd rust-core
+# Moteur (core/)
+cd core
 cargo test --workspace
 cargo build --release
 
-# Exécuter les binaires
-./target/release/dtn_router
-./target/release/crypto_module
+# Exécuter le nœud
+./target/release/onde_node
 ```
 
 ### UI Standalone
@@ -190,105 +189,94 @@ python3 simulation/mesh_sim.py
 
 ---
 
-## 🔧 Modules Core Rust (v1.0.0)
+## 🔧 Modules du moteur (`core/`)
 
-### 📦 DTN Router (`dtn-router` crate)
+### 📦 DTN Router (`core/crates/dtn-router` crate)
 
-Gestion de bundles avec priorités, custody transfer et routage épidémique.
+Routage DTN store-and-forward : buffers par nœud, priorités, rencontre opportuniste, expiration TTL.
 
 ```rust
-// Bundle management with priorities
-let mut queue = BundleQueue::new(1000);
-queue.enqueue(Bundle::new("alert", Priority::Critical, data));
-queue.enqueue(Bundle::new("chat", Priority::Normal, msg));
+// Buffer store-and-forward avec priorités (0 = urgence max)
+let router = DtnRouter::new(1000);
 
-// Custody transfer chain
-bundle.add_custody(node_id);
+// Stocker un message (broadcast ou unicast)
+router.store("alice", msg).await;
 
-// Peer encounter tracking
-tracker.record_encounter(peer_id, timestamp);
+// Rencontre opportuniste entre deux nœuds → transfert
+let (to_a, to_b) = router.encounter("alice", "bob").await;
 
-// Epidemic routing
-router.forward_to_peers(&bundle, &encounters);
+// Stats de livraison
+let stats = router.stats().await;
 ```
 
 **Fonctionnalités :**
-- ✅ File d'attente par destination (max 1000 bundles)
-- ✅ 4 niveaux de priorité (Low, Normal, High, Critical)
-- ✅ Chaîne de custody transfer
-- ✅ Nettoyage automatique des bundles expirés
-- ✅ Tracking des rencontres peer-to-peer
-- ✅ Routage épidémique optimisé
-- ✅ 5 tests unitaires
+- ✅ Buffer par nœud avec priorités (0 = urgence max)
+- ✅ Transfert opportuniste à la rencontre (store-and-forward)
+- ✅ Diffusion broadcast avec déduplication par pair
+- ✅ Expiration TTL et statistiques de livraison
+- ✅ Tests unitaires
 
-### 🔐 Crypto Module (`crypto-module` crate)
+### 🔐 Crypto & Protocole (`core/src/crypto`, `core/src/protocol`)
 
-Primitives cryptographiques pour la sécurité du réseau.
+Identités Ed25519 + X25519, chiffrement de bout en bout ChaCha20-Poly1305 (HKDF-SHA256), événements signés à ID canonique avec PoW antispam, transactions ZK asynchrones (mock).
 
 ```rust
-// Key generation
-let keypair = KeyPair::generate_ed25519();
+// Identité Ed25519 + X25519
+let identity = Identity::generate();
+let sig = identity.sign(b"message");
+assert!(identity.verify(b"message", &sig));
 
-// Sign and verify
-let signature = keypair.sign(&message);
-assert!(keypair.verify(&message, &signature));
+// Chiffrement de bout en bout (X25519 ECDH + ChaCha20-Poly1305)
+let envelope = EncryptedEnvelope::encrypt(b"secret", &alice, &bob.x25519_public_key_bytes())?;
+let plain = EncryptedEnvelope::decrypt(&envelope, &bob)?;
 
-// SHA-256 hashing
-let hash = sha256(&data);
-
-// Zero-Knowledge Proof (scaffold)
-let zk_proof = ZkProof::generate(&transaction);
-
-// Proof-of-Work antispam
-let nonce = pow_solver.solve(&data, difficulty);
-```
-
-**Fonctionnalités :**
-- ✅ Génération de paires de clés Ed25519
-- ✅ Signatures numériques et vérification
-- ✅ Hashage SHA-256
-- ✅ Preuves Zero-Knowledge (scaffold)
-- ✅ Proof-of-Work anti-spam avec difficulté adaptative
-- ✅ Messages signés authentifiés
-- ✅ 6 tests unitaires
-
-### 🤖 AI Inference (`llm-inference` crate)
-
-Framework pour intégration Whisper STT et Llama inference.
-
-```rust
-// Whisper STT integration
-let engine = WhisperEngine::new(ModelSize::Small);
-let transcription = engine.transcribe(audio_buffer).await?;
-
-// Llama inference
-let model = LlamaModel::load("qwen2.5-7b.gguf")?;
-let response = model.generate(prompt, max_tokens).await?;
-```
-
-**Fonctionnalités :**
-- 🔄 Framework pour Whisper STT (transcription vocale)
-- 🔄 Support inference Llama (modèles GGUF quantized)
-- 🔄 Feature flags modulaires
-- ✅ 3 tests unitaires scaffold
-
-### 🗑️ Legacy Core (`core/` - déprécié, migrer vers `rust-core/`)
-
-```rust
-// Network layer (legacy)
-let mut transport = MultiTransport::new();
-transport.add_transport(Box::new(WifiAwareTransport::new()));
-
-// Protocol layer (legacy)
-let mut event = MeshEvent::new(pubkey, MessageType::Alert, content);
+// Événement signé (Nostr-style) + PoW antispam
+let mut event = MeshEvent::new_signed(&identity, OndeMessageType::Alert, content, vec![]);
 event.compute_pow(100_000);
+assert!(event.validate().is_ok());
 
-// ZK Transactions (legacy)
-let tx = ZkTransaction::new("alice", "bob", amount, nonce);
+// Transactions ZK asynchrones (mock)
+let tx = ZkTransaction::new("alice", "bob", 1_000_000, 0);
 pool.submit(tx)?;
 ```
 
-> ⚠️ **Note** : Le dossier `core/` est déprécié. Utilisez `rust-core/` pour les nouveaux développements.
+**Fonctionnalités :**
+- ✅ Identités Ed25519 (signature/vérification) + X25519 (ECDH)
+- ✅ Chiffrement de bout en bout réel : X25519 + HKDF-SHA256 + ChaCha20-Poly1305
+- ✅ Événements signés à ID canonique, PoW antispam CPU
+- ⚠️ ZK proofs : **mock** (`ZkProof::verify` non implémenté — SNARK réel à venir)
+- ✅ Tests unitaires
+
+### 🤖 IA Locale (`core/crates/llm-inference` + `core/crates/llama-bind`)
+
+Prototype : sélection de modèle selon la RAM, oracle RPC desktop, bindings llama.cpp et STT Whisper en mode mock.
+
+```rust
+// Sélection automatique du modèle selon la RAM disponible
+let engine = PocketPalEngine::new(available_ram_mb);
+let resp = engine.infer("question", 256).await;
+
+// Oracle RPC (nœud desktop)
+let server = OracleRpcServer::new(8080);
+server.process(req).await;
+
+// Binding llama.cpp (mock)
+let mut ctx = LlamaContext::new(model, GenerationConfig::default());
+ctx.load("qwen2.5-7b.gguf")?;
+ctx.generate("Premiers secours ?").await?;
+```
+
+**Fonctionnalités :**
+- ✅ Sélection de modèle selon la RAM (Qwen 0.5B → 7B, Llama 70B)
+- 🔄 Binding llama.cpp **mock** (GGML réel non implémenté)
+- 🔄 STT Whisper **mock** (transcription réelle non implémentée)
+- ✅ Tests unitaires
+
+### 🗑️ rust-core/ (stub legacy)
+
+`rust-core/` est un **stub** : workspace Cargo placeholder + `src/main.rs` de 3 lignes (`println!("Hello, world!")`). Aucun code métier. À supprimer ou fusionner dans `core/`.
+
+> ⚠️ **Note** : `core/` est le moteur actif. `rust-core/` est un stub legacy (3 lignes) à supprimer ou fusionner dans `core/`.
 
 ---
 
@@ -360,58 +348,33 @@ cargo tauri ios build
 
 ## 🧪 Tests
 
-### Suite complète v1.0.0 : 14 tests
+### Suite du moteur (`core/`) — 79 tests, 0 échec
 
 ```bash
-# Tous les tests (rust-core workspace)
-cd rust-core && cargo test --workspace
-
-# Résultats :
-# dtn-router:       5 tests  ✅ Bundle management, custody transfer, peer tracking, routing
-# crypto-module:    6 tests  ✅ Ed25519 keys, signatures, SHA-256, ZK proofs, PoW
-# llm-inference:    3 tests  ✅ Whisper STT, Llama inference scaffold
-# Total:           14 tests ✅ All passing
-```
-
-### Legacy Core Tests (`core/` - déprécié)
-
-```bash
-# Ancienne suite de tests (40 tests)
+# Tous les tests (workspace core/)
 cd core && cargo test --workspace
 
-# Résultats historiques :
-# dtn-router:      1 test   ✅ Store-and-forward
-# llama-bind:      5 tests  ✅ Model selection, mock generation, quantization
-# llm-inference:   3 tests  ✅ Local inference, model auto-selection
-# whisper-stt:     4 tests  ✅ Engine creation, mock transcription
-# zim-parser:      3 tests  ✅ HTML extraction, categories, ZIM URL
-# onde-core:      15 tests  ✅ Crypto, Network, Protocol, Storage, Node
-# integration_e2e: 12 tests ✅ Scénarios end-to-end complets
-# Total:          43 tests ✅ All passing
+# Résultats : 79 tests, 0 échec
+# onde-core        : 46 tests ✅ Crypto, Network, Protocol, Storage, Node, AI
+# dtn-router       :  6 tests ✅ Store-and-forward, broadcast, priorités, TTL
+# llama-bind       :  5 tests ✅ Sélection de modèle, génération mock, quantification
+# whisper-stt      :  4 tests ✅ Création d'engine, transcription mock
+# zim-parser       :  3 tests ✅ Extraction HTML, catégories, URL ZIM
+# llm-inference    :  3 tests ✅ Inférence locale, auto-sélection de modèle
+# integration_e2e  : 12 tests ✅ Scénarios end-to-end complets
 ```
 
-### Exécution des Binaires v1.0.0
+### rust-core/ (stub)
+
+`rust-core/` ne contient aucun test métier (placeholder `src/main.rs` de 3 lignes).
+
+### Exécution du Nœud
 
 ```bash
-# DTN Router
-./target/release/dtn_router
-# Output: ONDE DTN Router initialized successfully!
-#         Queued bundles: 5
-#         Stats: DeliveryStats { bundles_sent: 5, ... }
-
-# Crypto Module
-./target/release/crypto_module
-# Output: ONDE Crypto Module v1.0.0
-#         ✅ All crypto operations completed successfully!
-#         - KeyPair généré
-#         - Message signé et vérifié
-#         - Hash calculé
-#         - PoW résolu
-#         - ZK Proof généré
-
-# AI Inference
-./target/release/llm_inference
-# Output: ONDE AI Inference Module initialized!
+# Nœud ONDE (daemon, arrêt par Ctrl+C)
+cd core
+cargo run --bin onde_node -- --type mobile --name "MyNode"
+# Options : --type <mobile|desktop> | --name <nom> | --help
 ```
 
 ---
@@ -422,18 +385,14 @@ cd core && cargo test --workspace
 
 ```bash
 # Debug build (avec symbols)
-cd rust-core && cargo build
+cd core && cargo build
 
 # Release build (optimisé)
-cd rust-core && cargo build --release
+cd core && cargo build --release
 
 # Outputs:
-# target/debug/dtn_router
-# target/debug/crypto_module
-# target/debug/llm_inference
-# target/release/dtn_router      (~2.9 MB optimisé)
-# target/release/crypto_module   (~530 KB optimisé)
-# target/release/llm_inference   (~445 KB optimisé)
+# target/debug/onde_node
+# target/release/onde_node
 ```
 
 ### Desktop (Tauri)
@@ -470,19 +429,22 @@ cargo tauri ios build
 
 ## 🗺️ Roadmap
 
-### ✅ Version actuelle : 1.0.0 - STABLE
+### 🔄 Version actuelle : 0.2.0 — Prototype
 
-**Fonctionnalités implémentées :**
-- ✅ Rust workspace avec 3 crates core (dtn-router, crypto-module, llm-inference)
-- ✅ Bundle management avec priorités et custody transfer
-- ✅ Peer encounter tracking et epidemic routing
-- ✅ Primitives cryptographiques (Ed25519, SHA-256, ZK proofs, PoW)
-- ✅ Framework AI/ML (Whisper STT, Llama inference)
-- ✅ 14 tests unitaires complets
-- ✅ Binaires exécutables testés et fonctionnels
+**Implémenté (prototype, tests verts) :**
+- ✅ Workspace Cargo actif : onde_core + onde_node + 5 crates (dtn-router, zim-parser, llm-inference, llama-bind, whisper-stt)
+- ✅ Chiffrement de bout en bout réel (X25519 + HKDF + ChaCha20-Poly1305), événements signés, PoW antispam
+- ✅ Routage DTN store-and-forward (buffers priorisés, broadcast avec déduplication, TTL)
+- ✅ 79 tests unitaires + intégration, 0 échec
 - ✅ Simulation réseau 11k nœuds validée (v0.2.5)
 - ✅ UI HTML AMOLED Black standalone
-- ✅ Documentation complète et à jour
+
+**Manques avant toute production :**
+- [ ] Audit de sécurité professionnel et fuzzing tests
+- [ ] ZK proofs réels (SNARK) — actuellement mock
+- [ ] Binding llama.cpp réel (GGML) — actuellement mock
+- [ ] STT Whisper réel — actuellement mock
+- [ ] Lecture réelle des fichiers ZIM/MBTiles — actuellement données de démo
 
 ### 🔄 Version 2.0.0 (Objectif Q1-Q2 2025)
 

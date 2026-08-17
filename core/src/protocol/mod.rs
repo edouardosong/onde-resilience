@@ -281,7 +281,7 @@ fn decode_hex_64(s: &str) -> Result<[u8; 64], ()> {
 pub struct GossipProtocol {
     known_events: std::collections::HashSet<String>,
     pending_broadcasts: Vec<MeshEvent>,
-    peer_cache: std::collections::HashMap<String, Vec<String>>,
+    _peer_cache: std::collections::HashMap<String, Vec<String>>,
 }
 
 impl GossipProtocol {
@@ -289,7 +289,7 @@ impl GossipProtocol {
         Self {
             known_events: std::collections::HashSet::new(),
             pending_broadcasts: Vec::new(),
-            peer_cache: std::collections::HashMap::new(),
+            _peer_cache: std::collections::HashMap::new(),
         }
     }
 
@@ -309,7 +309,7 @@ impl GossipProtocol {
     }
 
     /// Process event received from peer
-    pub fn receive_event(&mut self, event: MeshEvent, peer_id: &str) -> bool {
+    pub fn receive_event(&mut self, event: MeshEvent, _peer_id: &str) -> bool {
         if self.known_events.contains(&event.id) {
             return false; // Duplicate
         }

@@ -1,7 +1,6 @@
 /// Node Management — Core ONDE node with all subsystems
 
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::crypto::{Identity, ZkTransaction, TxPool};
