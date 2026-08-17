@@ -6,6 +6,8 @@ use chacha20poly1305::{
     ChaCha20Poly1305, Key, Nonce, KeyInit,
     aead::Aead,
 };
+use x25519_dalek::{StaticSecret, PublicKey as X25519PublicKey};
+use hkdf::Hkdf;
 use rand::rngs::OsRng as RandOsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -15,24 +17,40 @@ use sha2::{Digest, Sha256};
 pub struct Identity {
     signing_key: SigningKey,
     verifying_key: VerifyingKey,
+    encryption_secret: StaticSecret,
+    encryption_public: X25519PublicKey,
 }
 
 impl Identity {
     pub fn generate() -> Self {
         let signing_key = SigningKey::generate(&mut RandOsRng);
         let verifying_key = signing_key.verifying_key();
+        let encryption_secret = StaticSecret::random_from_rng(RandOsRng);
+        let encryption_public = X25519PublicKey::from(&encryption_secret);
         Self {
             signing_key,
             verifying_key,
+            encryption_secret,
+            encryption_public,
         }
     }
 
     pub fn from_bytes(bytes: &[u8; 32]) -> Self {
         let signing_key = SigningKey::from_bytes(bytes);
         let verifying_key = signing_key.verifying_key();
+        // Derive encryption key from signing key for deterministic generation
+        let mut encryption_bytes = [0u8; 32];
+        let mut hasher = Sha256::new();
+        hasher.update(b"ONDE-encryption-key-v1");
+        hasher.update(bytes);
+        encryption_bytes.copy_from_slice(&hasher.finalize());
+        let encryption_secret = StaticSecret::from(encryption_bytes);
+        let encryption_public = X25519PublicKey::from(&encryption_secret);
         Self {
             signing_key,
             verifying_key,
+            encryption_secret,
+            encryption_public,
         }
     }
 
@@ -42,6 +60,10 @@ impl Identity {
 
     pub fn verifying_key_bytes(&self) -> [u8; 32] {
         self.verifying_key.to_bytes()
+    }
+
+    pub fn encryption_public_bytes(&self) -> [u8; 32] {
+        self.encryption_public.to_bytes()
     }
 
     /// Get public key as hex
@@ -76,43 +98,78 @@ pub struct EncryptedEnvelope {
     pub ciphertext: Vec<u8>,
     /// 12-byte nonce
     pub nonce: [u8; 12],
-    /// Sender public key (for reply)
+    /// Sender X25519 public key (for ECDH key derivation)
     pub sender_pubkey: [u8; 32],
 }
 
 impl EncryptedEnvelope {
-    /// Encrypt data for a recipient using symmetric key derived from shared secret
-    pub fn encrypt(data: &[u8]) -> Result<Self, String> {
-        let key_bytes: [u8; 32] = {
-            let mut key = [0u8; 32];
-            RandOsRng.fill_bytes(&mut key);
-            key
-        };
+    /// Encrypt data for a recipient using ECDH-derived symmetric key
+    /// 
+    /// # Arguments
+    /// * `data` - The plaintext data to encrypt
+    /// * `sender_identity` - The sender's Identity (for ECDH)
+    /// * `recipient_pubkey` - The recipient's X25519 public key
+    /// 
+    /// # Security
+    /// Uses X25519 ECDH to derive a shared secret, then HKDF-SHA256 to derive
+    /// a ChaCha20-Poly1305 key. Each message uses a unique random nonce.
+    pub fn encrypt(data: &[u8], sender_identity: &Identity, recipient_pubkey: &[u8; 32]) -> Result<Self, String> {
+        // Perform ECDH key exchange
+        let recipient_x25519 = X25519PublicKey::from(*recipient_pubkey);
+        let shared_secret = sender_identity.encryption_secret.diffie_hellman(&recipient_x25519);
+        
+        // Derive encryption key using HKDF-SHA256
+        let hkdf = Hkdf::<Sha256>::new(None, shared_secret.as_bytes());
+        let mut key_bytes = [0u8; 32];
+        hkdf.expand(b"ONDE-ChaCha20Poly1305-v1", &mut key_bytes)
+            .map_err(|e| format!("HKDF expansion failed: {}", e))?;
 
+        // Generate random nonce
         let mut nonce_bytes = [0u8; 12];
         RandOsRng.fill_bytes(&mut nonce_bytes);
 
+        // Encrypt with ChaCha20-Poly1305
         let key = Key::from_slice(&key_bytes);
         let nonce = Nonce::from_slice(&nonce_bytes);
         let cipher = ChaCha20Poly1305::new(key);
 
-        let ciphertext = cipher.encrypt(nonce, data).map_err(|e| e.to_string())?;
+        let ciphertext = cipher.encrypt(nonce, data)
+            .map_err(|e| format!("Encryption failed: {}", e))?;
 
         Ok(Self {
             ciphertext,
-            nonce: nonce_bytes,  // Use nonce_bytes directly
-            sender_pubkey: [0u8; 32], // Placeholder
+            nonce: nonce_bytes,
+            sender_pubkey: sender_identity.encryption_public_bytes(),
         })
     }
 
-    pub fn decrypt(&self) -> Result<Vec<u8>, String> {
-        let key = [0u8; 32]; // In production, derived from shared secret
-        let key_bytes = Key::from_slice(&key);
+    /// Decrypt the envelope using the recipient's identity
+    /// 
+    /// # Arguments
+    /// * `recipient_identity` - The recipient's Identity (for ECDH)
+    /// 
+    /// # Security
+    /// Derives the same shared secret using ECDH with the sender's public key
+    /// from the envelope, then uses HKDF-SHA256 to derive the decryption key.
+    /// ChaCha20-Poly1305 provides authenticated encryption, so tampering is detected.
+    pub fn decrypt(&self, recipient_identity: &Identity) -> Result<Vec<u8>, String> {
+        // Perform ECDH key exchange with sender's public key
+        let sender_x25519 = X25519PublicKey::from(self.sender_pubkey);
+        let shared_secret = recipient_identity.encryption_secret.diffie_hellman(&sender_x25519);
+        
+        // Derive decryption key using HKDF-SHA256 (same as encryption)
+        let hkdf = Hkdf::<Sha256>::new(None, shared_secret.as_bytes());
+        let mut key_bytes = [0u8; 32];
+        hkdf.expand(b"ONDE-ChaCha20Poly1305-v1", &mut key_bytes)
+            .map_err(|e| format!("HKDF expansion failed: {}", e))?;
+
+        // Decrypt with ChaCha20-Poly1305
+        let key = Key::from_slice(&key_bytes);
         let nonce = Nonce::from_slice(&self.nonce);
-        let cipher = ChaCha20Poly1305::new(key_bytes);
+        let cipher = ChaCha20Poly1305::new(key);
 
         cipher.decrypt(nonce, self.ciphertext.as_ref())
-            .map_err(|e: chacha20poly1305::Error| e.to_string())
+            .map_err(|e| format!("Decryption failed (authentication error or wrong key): {}", e))
     }
 }
 
@@ -278,6 +335,97 @@ mod tests {
 
         assert!(identity.verify(data, &sig));
         assert!(!identity.verify(b"wrong", &sig));
+    }
+
+    #[test]
+    fn test_encrypted_envelope_roundtrip() {
+        // Create sender and recipient identities
+        let sender = Identity::generate();
+        let recipient = Identity::generate();
+        
+        let plaintext = b"Secret message for testing";
+        
+        // Encrypt message from sender to recipient
+        let envelope = EncryptedEnvelope::encrypt(
+            plaintext,
+            &sender,
+            &recipient.encryption_public_bytes()
+        ).expect("Encryption should succeed");
+        
+        // Verify sender_pubkey is set correctly
+        assert_eq!(envelope.sender_pubkey, sender.encryption_public_bytes());
+        
+        // Decrypt message as recipient
+        let decrypted = envelope.decrypt(&recipient)
+            .expect("Decryption should succeed");
+        
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_encrypted_envelope_wrong_recipient() {
+        // Create sender and two recipients
+        let sender = Identity::generate();
+        let recipient1 = Identity::generate();
+        let recipient2 = Identity::generate();
+        
+        let plaintext = b"Secret message";
+        
+        // Encrypt for recipient1
+        let envelope = EncryptedEnvelope::encrypt(
+            plaintext,
+            &sender,
+            &recipient1.encryption_public_bytes()
+        ).expect("Encryption should succeed");
+        
+        // Try to decrypt as recipient2 (should fail)
+        let result = envelope.decrypt(&recipient2);
+        assert!(result.is_err(), "Decryption with wrong key should fail");
+    }
+
+    #[test]
+    fn test_encrypted_envelope_tampered_ciphertext() {
+        let sender = Identity::generate();
+        let recipient = Identity::generate();
+        
+        let plaintext = b"Secret message";
+        
+        let mut envelope = EncryptedEnvelope::encrypt(
+            plaintext,
+            &sender,
+            &recipient.encryption_public_bytes()
+        ).expect("Encryption should succeed");
+        
+        // Tamper with ciphertext
+        if !envelope.ciphertext.is_empty() {
+            envelope.ciphertext[0] ^= 0xFF;
+        }
+        
+        // Decryption should fail due to authentication tag mismatch
+        let result = envelope.decrypt(&recipient);
+        assert!(result.is_err(), "Decryption of tampered ciphertext should fail");
+    }
+
+    #[test]
+    fn test_encrypted_envelope_forged_sender() {
+        let sender = Identity::generate();
+        let attacker = Identity::generate();
+        let recipient = Identity::generate();
+        
+        let plaintext = b"Secret message";
+        
+        let mut envelope = EncryptedEnvelope::encrypt(
+            plaintext,
+            &sender,
+            &recipient.encryption_public_bytes()
+        ).expect("Encryption should succeed");
+        
+        // Attacker tries to forge sender_pubkey
+        envelope.sender_pubkey = attacker.encryption_public_bytes();
+        
+        // Decryption should fail because the key derivation will be wrong
+        let result = envelope.decrypt(&recipient);
+        assert!(result.is_err(), "Decryption with forged sender should fail");
     }
 
     #[test]
