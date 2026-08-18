@@ -4,7 +4,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org)
-[![Tests](https://img.shields.io/badge/tests-156%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-160%20passing-brightgreen.svg)]()
 [![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)]()
 [![Build](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
 [![Release](https://img.shields.io/github/v/release/edouardosong/onde-resilience?label=latest)](https://github.com/edouardosong/onde-resilience/releases)
@@ -370,13 +370,13 @@ Protocole de mise à jour d'APK par le mesh (Audit #12/#13) : l'annonceur signe 
 
 ## 🧪 Tests
 
-### Suite du moteur (`core/`) — 157 tests, 0 échec
+### Suite du moteur (`core/`) — 160 tests, 0 échec
 
 ```bash
 # Tous les tests (workspace core/)
 cd core && cargo test --workspace
 
-# Résultats : 157 tests, 0 échec
+# Résultats : 160 tests, 0 échec
 # onde-core        : 120 tests ✅ Crypto, Network, Protocol, Storage, Update, Node, AI, Reputation
 # dtn-router       :   7 tests ✅ Store-and-forward, broadcast, priorités, TTL
 # llama-bind       :   5 tests ✅ Sélection de modèle, génération mock, quantification
@@ -511,7 +511,7 @@ cargo tauri ios build
 - ✅ Rotation d'identité X25519 active (forward secrecy) : annonce dans le gossip, période de grâce, rejet des inconnus (Phase 1.4)
 - ✅ Padding de trafic opérationnel (tailles de seau sur le fil) + propagation WoT des endossements (Phases 1.2/1.3)
 - ✅ Routage DTN store-and-forward (buffers priorisés, broadcast avec déduplication, TTL)
-- ✅ 156 tests unitaires + intégration, 0 échec
+- ✅ 160 tests unitaires + intégration, 0 échec
 - ✅ Simulation réseau 11k nœuds validée (v0.2.5)
 - ✅ UI HTML AMOLED Black standalone
 - ✅ Bridge Tauri fonctionnel : l'UI appelle le noyau (démarrage nœud, publication alerte/entraide, flux) via les commandes Tauri ; fallback démo navigateur hors Tauri
