@@ -4,7 +4,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org)
-[![Tests](https://img.shields.io/badge/tests-79%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-156%20passing-brightgreen.svg)]()
 [![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)]()
 [![Build](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
 [![Release](https://img.shields.io/github/v/release/edouardosong/onde-resilience?label=latest)](https://github.com/edouardosong/onde-resilience/releases)
@@ -370,21 +370,23 @@ Protocole de mise à jour d'APK par le mesh (Audit #12/#13) : l'annonceur signe 
 
 ## 🧪 Tests
 
-### Suite du moteur (`core/`) — 153 tests, 0 échec
+### Suite du moteur (`core/`) — 156 tests, 0 échec
 
 ```bash
 # Tous les tests (workspace core/)
 cd core && cargo test --workspace
 
-# Résultats : 153 tests, 0 échec
-# onde-core        : 115 tests ✅ Crypto, Network, Protocol, Storage, Update, Node, AI, Reputation
-# dtn-router       :  7 tests ✅ Store-and-forward, broadcast, priorités, TTL
-# llama-bind       :  5 tests ✅ Sélection de modèle, génération mock, quantification
-# whisper-stt      :  4 tests ✅ Création d'engine, transcription mock
-# zim-parser       :  3 tests ✅ Extraction HTML, catégories, URL ZIM
-# llm-inference    :  3 tests ✅ Inférence locale, auto-sélection de modèle
-# integration_e2e  : 16 tests ✅ Scénarios end-to-end complets
+# Résultats : 156 tests, 0 échec
+# onde-core        : 120 tests ✅ Crypto, Network, Protocol, Storage, Update, Node, AI, Reputation
+# dtn-router       :   7 tests ✅ Store-and-forward, broadcast, priorités, TTL
+# llama-bind       :   5 tests ✅ Sélection de modèle, génération mock, quantification
+# whisper-stt      :   4 tests ✅ Création d'engine, transcription mock
+# zim-parser       :   3 tests ✅ Extraction HTML, catégories, URL ZIM
+# llm-inference    :   3 tests ✅ Inférence locale, auto-sélection de modèle
+# integration_e2e  :  17 tests ✅ Scénarios end-to-end complets
 ```
+
+Les tests ajoutés en Phase 1.4 couvrent la **rotation d'identité X25519 active** : `announce_identity_rotation()` porte la clé courante (et rotit si due), `handle_incoming_rotation()` applique la nouvelle clé du pair tout en conservant l'ancienne en **période de grâce** (déchiffrement des messages in-flight), le rejet d'une annonce d'un pair non de confiance (un inconnu ne peut pas imposer sa clé de chiffrement), le rejet d'une clé dupliquée, et le test e2e `test_identity_rotation_two_nodes` (A rotit + annonce, B applique la nouvelle clé + ancienne en grâce, annonce d'un inconnu rejetée) — le tout signé par l'identité **stable** (réputation inchangée), wire kind code 14 non renuméré.
 
 Les tests ajoutés en Phase 1.3 couvrent le **padding de trafic opérationnel** : tailles de seaux (`pad` 100 B → 256 B, 2000 B → 4096 B, seau maximal 16 384 B pour 20 000 B **sans troncature**), round-trip `unpad(pad(x)) == x` sur 5 tailles (1, 100, 1000, 5000, 30000), `unpad` tolérant (message non padé → identique) et idempotent (`unpad(unpad(pad(x))) == unpad(pad(x))`), message vide → 256 B sans panique, format wire `MeshEvent::to_wire_bytes`/`from_wire_bytes` (round-trip champ par champ, entrée vide/tronquée → erreur propre), et le test e2e `test_traffic_padding_wire_two_nodes` (A publie une alerte de 100 B → **256 B observés sur le fil** → B décode un contenu identique via le helper `gossip_sync` qui achemine par le wire padé).
 
