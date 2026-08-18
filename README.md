@@ -370,21 +370,59 @@ Protocole de mise à jour d'APK par le mesh (Audit #12/#13) : l'annonceur signe 
 
 ## 🧪 Tests
 
-### Suite du moteur (`core/`) — 156 tests, 0 échec
+### Suite du moteur (`core/`) — 157 tests, 0 échec
 
 ```bash
 # Tous les tests (workspace core/)
 cd core && cargo test --workspace
 
-# Résultats : 156 tests, 0 échec
+# Résultats : 157 tests, 0 échec
 # onde-core        : 120 tests ✅ Crypto, Network, Protocol, Storage, Update, Node, AI, Reputation
 # dtn-router       :   7 tests ✅ Store-and-forward, broadcast, priorités, TTL
 # llama-bind       :   5 tests ✅ Sélection de modèle, génération mock, quantification
 # whisper-stt      :   4 tests ✅ Création d'engine, transcription mock
 # zim-parser       :   3 tests ✅ Extraction HTML, catégories, URL ZIM
 # llm-inference    :   3 tests ✅ Inférence locale, auto-sélection de modèle
-# integration_e2e  :  17 tests ✅ Scénarios end-to-end complets
+# integration_e2e  :  18 tests ✅ Scénarios end-to-end complets
 ```
+
+### Scénario de bout en bout (Phase 1.7) — `test_e2e_critical_alert_full_lifecycle`
+
+Un **scénario e2e unique et complet** prouve que le système tient de bout en
+bout **sans internet** (DTN / gossip) : une alerte critique est publiée,
+propagée, stockée en tiers **et** en SQLite, le nœud « redémarre » (perte de
+RAM simulée), l'alerte est restaurée depuis la base, re-diffusée, et survit à
+la chute d'un pair. Le flux, chaque étape étant assertée :
+
+1. **Publication** — A (fondateur de confiance) publie « Coupure d'eau secteur
+   7 » : événement `Alert` **signé** (Ed25519 vérifiable) avec le PoW adaptatif
+   (0 pour un nœud de confiance).
+2. **Propagation** — B et C reçoivent l'alerte via le gossip (helper
+   `gossip_sync`, boucle bornée par pair) : signature + PoW + réputation de
+   l'émetteur re-vérifiés (`handle_incoming_alert`), puis **stockage local**.
+3. **Stockage en tiers + SQLite** — l'alerte est écrite dans le
+   `TieredMessageStore` (tier `Critical`, 7 jours, toujours retenu par le
+   sharding Geohash) et **persistée en base** : la ligne `messages` existe avec
+   le même payload compressé qu'en mémoire.
+4. **Perte de RAM / redémarrage** — les `Node` en mémoire sont jetés (`drop`) ;
+   A' est recréé avec la **même seed d'identité** et la **même base SQLite** :
+   l'identité est identique (même pubkey Ed25519 — `Identity::from_seed` /
+   seed relue dans `meta` par `Node::new`).
+5. **Restauration** — `restore_from_persistence()` recharge l'alerte depuis
+   SQLite : même `event_id`, même contenu, signature toujours vérifiable.
+6. **Re-propagation** — A' re-diffuse l'alerte (même contenu) ; D, arrivé après
+   la perte, la récupère d'A' via gossip avec un contenu identique.
+7. **Pair défaillant** — B « tombe » (retiré de la boucle de sync) : l'alerte
+   continue d'atteindre C directement d'A' — le gossip ne dépend pas de B.
+
+Ce que ça prouve : la **résilience de bout en bout** du stockage (hiérarchique
++ SQLite) et du réseau (gossip), l'identité stable au redémarrage, et la
+propagation qui survit à un pair défaillant — le tout **déterministe** (aucune
+attente, boucles bornées, base temporaire nettoyée en début et fin de test) et
+**hors-ligne**. Le scénario ajoute aussi `Node::handle_incoming_alert` (réception
+d'une alerte : vérification de bout en bout, stockage tier `Critical`,
+persistance SQLite, relai) et `Node::restore_from_persistence` (redémarrage
+réaliste : rechargement des messages depuis la base).
 
 Les tests ajoutés en Phase 1.4 couvrent la **rotation d'identité X25519 active** : `announce_identity_rotation()` porte la clé courante (et rotit si due), `handle_incoming_rotation()` applique la nouvelle clé du pair tout en conservant l'ancienne en **période de grâce** (déchiffrement des messages in-flight), le rejet d'une annonce d'un pair non de confiance (un inconnu ne peut pas imposer sa clé de chiffrement), le rejet d'une clé dupliquée, et le test e2e `test_identity_rotation_two_nodes` (A rotit + annonce, B applique la nouvelle clé + ancienne en grâce, annonce d'un inconnu rejetée) — le tout signé par l'identité **stable** (réputation inchangée), wire kind code 14 non renuméré.
 

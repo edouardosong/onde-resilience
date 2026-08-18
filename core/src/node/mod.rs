@@ -604,6 +604,55 @@ impl Node {
         }
     }
 
+    /// Traiter une alerte critique **reçue du gossip** (Phase 1.7 — scénario
+    /// de bout en bout : publication → propagation → stockage → restauration).
+    ///
+    /// 1. **Vérification de bout en bout** (défense en profondeur) : la
+    ///    signature Ed25519, le PoW adaptatif et la réputation de l'émetteur
+    ///    sont re-vérifiés via [`MeshEvent::validate_with_reputation`] — le
+    ///    message a déjà été validé à la couche gossip avant d'arriver ici.
+    /// 2. **Stockage hiérarchique** : les alertes critiques sont toujours
+    ///    retenues localement (tier `Critical`, 7 jours — le sharding
+    ///    géographique garde les urgences) et **persistées en SQLite**
+    ///    (best-effort, via `persist_message`).
+    /// 3. **Relai** : l'événement reste/entre dans l'outbox du gossip pour
+    ///    être rediffusé aux pairs qui ne l'ont pas encore reçu (idempotent,
+    ///    dédupliqué par id).
+    ///
+    /// Retourne `true` si l'alerte a été stockée localement, `false` si le
+    /// message n'est pas une alerte ou si le budget / sharding l'exclut.
+    pub fn handle_incoming_alert(&mut self, event: &MeshEvent) -> Result<bool, String> {
+        if event.kind != OndeMessageType::Alert {
+            return Ok(false);
+        }
+        // 1. Défense en profondeur : signature + PoW + réputation re-vérifiés.
+        event.validate_with_reputation(&self.reputation)?;
+        // 3. Relai dans le gossip (idempotent — déjà connu → Ok(false)).
+        self.gossip
+            .add_event_with_reputation(event.clone(), &self.reputation)?;
+        // 2. Stockage hiérarchique : les alertes critiques sont toujours
+        //    retenues, quel que soit le geohash de l'émetteur.
+        let geohash = self.config.my_geohash.clone();
+        if self.message_store.store(
+            &event.id,
+            MessageTier::Critical,
+            event.content.as_bytes(),
+            event.created_at,
+            &geohash,
+        )? {
+            self.persist_message(
+                &event.id,
+                MessageTier::Critical,
+                event.content.as_bytes(),
+                event.created_at,
+                &geohash,
+            );
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
     /// Restaurer les messages persistés après un crash (appelé au démarrage).
     /// Les messages expirés sont ignorés ; les autres sont rechargés dans le
     /// magasin hiérarchique en mémoire.
@@ -628,6 +677,17 @@ impl Node {
             tracing::info!("Restored {restored} persisted messages from SQLite");
         }
         Ok(restored)
+    }
+
+    /// Restaurer l'état d'un nœud après un crash — l'équivalent d'un
+    /// **redémarrage** réaliste (Phase 1.7 — perte de RAM simulée).
+    ///
+    /// L'identité stable est restaurée à la construction ([`Node::new`] :
+    /// seed Ed25519 relue depuis la table `meta` de la base SQLite), les
+    /// messages sont rechargés depuis la table `messages` dans le magasin
+    /// hiérarchique en mémoire. Retourne le nombre de messages restaurés.
+    pub fn restore_from_persistence(&mut self) -> Result<usize, String> {
+        self.load_persisted_messages()
     }
 
     /// Send a ZK transaction

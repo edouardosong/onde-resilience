@@ -12,7 +12,7 @@ use onde_core::protocol::{MeshEvent, OndeMessageType};
 use onde_core::node::{Node, NodeConfig, NodeType, UpdateHandlingOutcome, EndorsementHandlingOutcome};
 use onde_core::reputation::{Endorsement, TRUSTED_THRESHOLD};
 use onde_core::update::{UpdateProtocol, Version, DEFAULT_CHUNK_SIZE};
-use onde_core::storage::{ZimReader, MBTilesRenderer, IpfsSeeder};
+use onde_core::storage::{ZimReader, MBTilesRenderer, IpfsSeeder, MessageTier};
 use dtn_router::{DtnRouter, DtnMessage, MessageType};
 use base64::Engine as _;
 
@@ -48,6 +48,13 @@ fn gossip_sync(from: &mut Node, to: &mut Node) -> Result<usize, String> {
                 // pair + période de grâce).
                 OndeMessageType::IdentityRotation => {
                     to.handle_incoming_rotation(&event);
+                }
+                // Phase 1.7 : les alertes critiques reçues sont vérifiées à
+                // nouveau (signature + PoW + réputation), stockées en tier
+                // Critical et persistées en SQLite (le reste du flux e2e :
+                // publication → propagation → restauration).
+                OndeMessageType::Alert => {
+                    to.handle_incoming_alert(&event)?;
                 }
                 _ => {
                     to.handle_incoming_update(&event)?;
@@ -1157,4 +1164,255 @@ async fn test_identity_rotation_two_nodes() -> Result<(), String> {
     );
 
     Ok(())
+}
+
+/*
+ * Phase 1.7: Scénario de bout en bout (alerte critique → propagation →
+ * stockage tiers + SQLite → perte de RAM → restauration → re-propagation →
+ * pair défaillant), le tout SANS internet (DTN / gossip).
+ *
+ * Le flux complet est enchaîné et chaque étape est assertée :
+ *   1. A (fondateur de confiance) publie une alerte critique signée
+ *      (« Coupure d'eau secteur 7 »), PoW adaptatif (0 = de confiance).
+ *   2. B et C la reçoivent via le gossip (helper `gossip_sync`, une boucle
+ *      bornée par pair) — signature, PoW et réputation de l'émetteur vérifiés,
+ *      puis stockage local.
+ *   3. L'alerte est écrite dans le `TieredMessageStore` (tier Critical) et
+ *      persistée en SQLite : la ligne existe avec le même payload compressé.
+ *   4. Perte de RAM simulée : les `Node` en mémoire sont jetés (drop) ; A' est
+ *      recréé avec la MÊME seed d'identité et la MÊME base SQLite → identité
+ *      identique (même pubkey Ed25519).
+ *   5. Restauration : A' recharge son stockage depuis SQLite et retrouve
+ *      l'alerte (même id, même contenu, signature toujours vérifiable).
+ *   6. Propagation après redémarrage : A' re-diffuse l'alerte ; D (arrivé
+ *      après la perte) la récupère d'A' via gossip avec un contenu identique.
+ *   7. Résilience au pair défaillant : B « tombe » (retiré de la boucle de
+ *      sync) — l'alerte continue d'atteindre C directement d'A', le gossip ne
+ *      dépend pas de B.
+ *
+ * Déterminisme : aucune attente, boucles bornées, cleanup du répertoire
+ * temporaire en début ET fin de test.
+ */
+#[tokio::test]
+async fn test_e2e_critical_alert_full_lifecycle() -> Result<(), String> {
+    // Répertoire SQLite temporaire unique au processus, nettoyé au début ET à
+    // la fin (résilience aux restes d'une exécution précédente).
+    let base = std::env::temp_dir().join(format!("onde_e2e_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(&base).map_err(|e| e.to_string())?;
+    let db_a = base.join("a.sqlite3").to_string_lossy().into_owned();
+    let db_b = base.join("b.sqlite3").to_string_lossy().into_owned();
+    let db_c = base.join("c.sqlite3").to_string_lossy().into_owned();
+
+    /// Exécute le scénario complet (les 7 étapes). Séparée en fonction imbriquée
+    /// pour que le cleanup du répertoire temporaire s'exécute quoi qu'il arrive.
+    async fn run_scenario(db_a: String, db_b: String, db_c: String) -> Result<(), String> {
+        // ── Nœuds : A (fondateur de confiance), B et C, tous persistés. ──
+        let mut node_a = Node::new(NodeConfig {
+            display_name: "A".to_string(),
+            sqlite_path: Some(db_a.clone()),
+            ..Default::default()
+        });
+        let mut node_b = Node::new(NodeConfig {
+            display_name: "B".to_string(),
+            sqlite_path: Some(db_b.clone()),
+            ..Default::default()
+        });
+        let mut node_c = Node::new(NodeConfig {
+            display_name: "C".to_string(),
+            sqlite_path: Some(db_c.clone()),
+            ..Default::default()
+        });
+
+        // WoT : B et C connaissent A (fondateur de confiance) → le PoW
+        // adaptatif des événements d'A est 0 chez eux.
+        let a_pubkey = node_a.identity.pubkey_hex();
+        node_b.reputation.bootstrap(std::slice::from_ref(&a_pubkey));
+        node_c.reputation.bootstrap(std::slice::from_ref(&a_pubkey));
+
+        // ── 1. Publication : alerte critique signée, PoW adapté (0). ──
+        let content = "Coupure d'eau secteur 7 — quartier Nord, retour estimé demain".to_string();
+        let event = node_a
+            .publish_alert(content.clone())
+            .await
+            .map_err(|e| e.to_string())?;
+        assert!(matches!(event.kind, OndeMessageType::Alert));
+        assert_eq!(event.content, content);
+        assert_eq!(event.pubkey, a_pubkey);
+        assert!(!event.sig.is_empty(), "l'alerte doit être signée");
+        assert_eq!(
+            event.pow_difficulty, 0,
+            "fondateur de confiance → PoW adaptatif 0"
+        );
+        assert!(
+            node_a.message_store.get(&event.id).is_some(),
+            "A stocke l'alerte en mémoire"
+        );
+        assert_eq!(
+            node_a.persistence.as_ref().unwrap().count().map_err(|e| e.to_string())?,
+            1,
+            "A persiste l'alerte en SQLite"
+        );
+
+        // ── 2. Propagation : B et C reçoivent l'alerte via le gossip. ──
+        // Chaque appel `gossip_sync` est une boucle bornée (tous les
+        // événements en attente pour le pair, une seule passe).
+        assert_eq!(gossip_sync(&mut node_a, &mut node_b)?, 1, "B reçoit l'alerte");
+        assert_eq!(gossip_sync(&mut node_a, &mut node_c)?, 1, "C reçoit l'alerte");
+
+        // B et C la valident (signature + PoW + réputation de l'émetteur) et
+        // la stockent localement, avec le bon contenu.
+        for (name, node) in [("B", &node_b), ("C", &node_c)] {
+            event
+                .validate_with_reputation(&node.reputation)
+                .map_err(|e| format!("{name} re-valide signature+PoW+réputation : {e}"))?;
+            assert_eq!(node.gossip.known_count(), 1, "{name} a reçu l'alerte via gossip");
+            let payload = node
+                .message_store
+                .get(&event.id)
+                .ok_or_else(|| format!("{name} doit stocker l'alerte"))?
+                .map_err(|e| e.to_string())?;
+            assert_eq!(payload, content.as_bytes(), "{name} stocke le bon contenu");
+        }
+
+        // ── 3. Stockage en tiers : tier Critical + ligne SQLite. ──
+        let critical_count = node_a
+            .message_store
+            .count_by_tier()
+            .iter()
+            .find(|(t, _)| *t == MessageTier::Critical)
+            .map(|(_, n)| *n)
+            .unwrap_or(0);
+        assert_eq!(critical_count, 1, "l'alerte est dans le tier Critical (7 jours)");
+
+        // La ligne existe en base avec le MÊME payload compressé qu'en mémoire
+        // et la bonne taille originale.
+        let row = node_a
+            .persistence
+            .as_ref()
+            .unwrap()
+            .get(&event.id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "la ligne SQLite de l'alerte doit exister".to_string())?;
+        let mem = node_a
+            .message_store
+            .all_messages()
+            .iter()
+            .find(|m| m.id == event.id)
+            .ok_or_else(|| "message en mémoire absent".to_string())?;
+        assert_eq!(row.tier, MessageTier::Critical);
+        assert_eq!(row.original_size, content.len());
+        assert_eq!(
+            row.payload, mem.payload,
+            "SQLite contient le même payload compressé que le magasin"
+        );
+
+        // ── 4. Perte de RAM / redémarrage : A et B sont jetés. ──
+        let a_seed = node_a.identity.signing_key_bytes();
+        drop(node_a);
+        drop(node_b);
+
+        // A' est recréé avec la MÊME seed d'identité et la MÊME base SQLite.
+        let mut node_a2 = Node::new(NodeConfig {
+            display_name: "A'".to_string(),
+            sqlite_path: Some(db_a.clone()),
+            identity_seed: Some(a_seed),
+            ..Default::default()
+        });
+        assert_eq!(
+            node_a2.identity.pubkey_hex(),
+            a_pubkey,
+            "A' doit avoir la même identité que A (même seed → même pubkey)"
+        );
+        assert_eq!(
+            node_a2.message_store.total_count(),
+            0,
+            "A' démarre sans état en mémoire (la RAM a été perdue)"
+        );
+
+        // ── 5. Restauration : A' recharge depuis SQLite. ──
+        let restored = node_a2.restore_from_persistence().map_err(|e| e.to_string())?;
+        assert_eq!(restored, 1, "A' restaure l'alerte depuis SQLite");
+        let got = node_a2
+            .message_store
+            .get(&event.id)
+            .ok_or_else(|| "A' doit retrouver l'alerte restaurée".to_string())?
+            .map_err(|e| e.to_string())?;
+        assert_eq!(got, content.as_bytes(), "A' retrouve le même contenu");
+
+        // La signature Ed25519 de l'événement original reste vérifiable (même
+        // identité restaurée) et sa validation (signature + PoW + réputation)
+        // passe toujours.
+        let pk: [u8; 32] = hex::decode(&event.pubkey)
+            .map_err(|e| e.to_string())?
+            .try_into()
+            .map_err(|_| "pubkey doit faire 32 octets".to_string())?;
+        let sig: [u8; 64] = hex::decode(&event.sig)
+            .map_err(|e| e.to_string())?
+            .try_into()
+            .map_err(|_| "sig doit faire 64 octets".to_string())?;
+        assert!(
+            Identity::verify_from_pubkey(&pk, event.id.as_bytes(), &sig),
+            "la signature Ed25519 de l'alerte est valide"
+        );
+        event
+            .validate_with_reputation(&node_a2.reputation)
+            .map_err(|e| format!("l'alerte reste vérifiable par A' : {e}"))?;
+
+        // ── 6. Propagation après redémarrage : A' re-diffuse l'alerte. ──
+        // La base SQLite persiste le payload (pas l'événement signé complet) :
+        // la re-diffusion produit donc un événement FRAIS signé par la même
+        // identité, avec un contenu identique — comportement documenté.
+        let re_event = node_a2
+            .publish_alert(content.clone())
+            .await
+            .map_err(|e| e.to_string())?;
+        assert_eq!(re_event.content, content, "A' re-diffuse le même contenu");
+
+        let mut node_d = Node::new(NodeConfig {
+            display_name: "D".to_string(),
+            ..Default::default()
+        });
+        node_d.reputation.bootstrap(std::slice::from_ref(&a_pubkey));
+        assert_eq!(
+            gossip_sync(&mut node_a2, &mut node_d)?,
+            1,
+            "D reçoit l'alerte re-diffusée d'A'"
+        );
+        let d_payload = node_d
+            .message_store
+            .get(&re_event.id)
+            .ok_or_else(|| "D doit stocker l'alerte reçue".to_string())?
+            .map_err(|e| e.to_string())?;
+        assert_eq!(
+            d_payload, content.as_bytes(),
+            "D reçoit un contenu identique à l'alerte d'origine"
+        );
+
+        // ── 7. Résilience au pair défaillant : B « tombe » (déjà retiré de
+        //        la boucle de sync) — l'alerte continue d'atteindre C
+        //        directement d'A', sans dépendre de B. ──
+        assert_eq!(
+            gossip_sync(&mut node_a2, &mut node_c)?,
+            1,
+            "C reçoit la re-diffusion d'A' même si B n'est plus synchronisé"
+        );
+        let c_payload = node_c
+            .message_store
+            .get(&re_event.id)
+            .ok_or_else(|| "C doit stocker l'alerte re-diffusée".to_string())?
+            .map_err(|e| e.to_string())?;
+        assert_eq!(c_payload, content.as_bytes(), "C a le même contenu");
+        assert!(
+            node_c.message_store.get(&event.id).is_some(),
+            "C garde aussi l'alerte originale de l'étape 2"
+        );
+
+        Ok(())
+    }
+
+    // Cleanup : la base temporaire est supprimée en fin de test.
+    let result = run_scenario(db_a, db_b, db_c).await;
+    let _ = std::fs::remove_dir_all(&base);
+    result
 }
