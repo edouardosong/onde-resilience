@@ -503,6 +503,13 @@ impl Node {
 
     /// Publish a mutual aid request
     pub async fn publish_mutual_aid(&mut self, content: String) -> Result<MeshEvent, String> {
+        // Limite côté serveur (Aikido PR#8 MED) : sans elle, un front compromis
+        // ou tout appelant du bridge Tauri pourrait émettre des événements
+        // d'entraide arbitrairement gros → épuisement mémoire/gossip/SQLite.
+        // Même cap que les alertes (280 caractères) pour cohérence.
+        if content.chars().count() > 280 {
+            return Err("Mutual aid request must be <= 280 characters".to_string());
+        }
         self.enforce_publish_throttle()?;
         let difficulty = self.reputation.required_pow_difficulty(&self.identity.pubkey_hex());
         let mut event = MeshEvent::new_signed(
@@ -1097,6 +1104,17 @@ impl Node {
     ) -> EndorsementHandlingOutcome {
         if event.kind != OndeMessageType::Endorsement {
             return EndorsementHandlingOutcome::Ignored;
+        }
+
+        // Limite de taille AVANT décodage (Aikido PR#8 MED) : un endossement
+        // peut être un JSON arbitrairement grand signé par un pair de
+        // confiance → épuisement mémoire/CPU (base64 décode ×3/4, puis JSON,
+        // puis relai dans le gossip). 1 Ko est largement suffisant pour
+        // {endorser, endorsed, timestamp}.
+        if event.content.len() > 1024 {
+            return EndorsementHandlingOutcome::Rejected(
+                "endorsement payload too large (max 1024 bytes)".to_string(),
+            );
         }
 
         // 1. Décodage du payload Endorsement (base64 → JSON).

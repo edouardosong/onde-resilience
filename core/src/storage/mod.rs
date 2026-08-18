@@ -558,6 +558,13 @@ impl TieredMessageStore {
         created_at: u64,
         geohash: &str,
     ) -> Result<bool, String> {
+        // Idempotence par id (Aikido PR#8 MED) : un même événement rejoué
+        // (replay de gossip après restart ou éviction de known_events) ne doit
+        // pas créer une seconde copie en mémoire/SQLite. Si l'id est déjà
+        // stocké, on ne ré-ajoute pas.
+        if self.messages.iter().any(|m| m.id == id) {
+            return Ok(false);
+        }
         if self.used_raw_bytes() + payload.len() as u64 > self.policy.max_bytes() {
             return Ok(false);
         }
