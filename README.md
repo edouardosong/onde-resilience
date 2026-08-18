@@ -470,8 +470,10 @@ cargo tauri ios build
 **Implémenté (prototype, tests verts) :**
 - ✅ Workspace Cargo actif : onde_core + onde_node + 5 crates (dtn-router, zim-parser, llm-inference, llama-bind, whisper-stt)
 - ✅ Chiffrement de bout en bout réel (X25519 + HKDF + ChaCha20-Poly1305), événements signés, PoW antispam
+- ✅ Rotation d'identité X25519 active (forward secrecy) : annonce dans le gossip, période de grâce, rejet des inconnus (Phase 1.4)
+- ✅ Padding de trafic opérationnel (tailles de seau sur le fil) + propagation WoT des endossements (Phases 1.2/1.3)
 - ✅ Routage DTN store-and-forward (buffers priorisés, broadcast avec déduplication, TTL)
-- ✅ 153 tests unitaires + intégration, 0 échec
+- ✅ 156 tests unitaires + intégration, 0 échec
 - ✅ Simulation réseau 11k nœuds validée (v0.2.5)
 - ✅ UI HTML AMOLED Black standalone
 - ✅ Bridge Tauri fonctionnel : l'UI appelle le noyau (démarrage nœud, publication alerte/entraide, flux) via les commandes Tauri ; fallback démo navigateur hors Tauri
