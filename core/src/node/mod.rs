@@ -296,6 +296,11 @@ pub struct Node {
     peer_x25519: std::collections::HashMap<String, String>,
     /// Clé X25519 précédente conservée en période de grâce par pair.
     peer_x25519_grace: std::collections::HashMap<String, String>,
+    /// Phase 1.4 — anti-replay : le **dernier compteur de rotation** accepté
+    /// pour chaque pair (le plus grand). Une annonce dont le compteur est
+    /// inférieur est rejetée : on ne recule jamais vers une clé X25519
+    /// antérieure, même si l'événement est signé par un pair de confiance.
+    peer_rotation_count: std::collections::HashMap<String, u64>,
 }
 
 impl Node {
@@ -396,6 +401,7 @@ impl Node {
             update_offer: None,
             peer_x25519: std::collections::HashMap::new(),
             peer_x25519_grace: std::collections::HashMap::new(),
+            peer_rotation_count: std::collections::HashMap::new(),
         }
     }
 
@@ -1185,16 +1191,34 @@ impl Node {
             .unwrap_or(0);
         let _rotated = self.identity_rotator.maybe_rotate(now);
 
-        let new_x25519 = self.identity_rotator.x25519_public_key_hex();
         let prev_x25519 = self
             .peer_x25519
             .get(&self.identity.pubkey_hex())
             .cloned()
             .unwrap_or_default();
-        let rotation_count = self.identity_rotator.rotation_count();
 
-        // Payload : nouvelle clé X25519 + compteur de rotation (pour
-        // détection de replay/ordre) + ancienne clé (période de grâce).
+        // Construction du payload (clé X25519 + compteur de rotation + clé
+        // précédente pour la période de grâce) — logique partagée avec les tests.
+        let event = Self::build_rotation_announcement(
+            &self.identity,
+            &self.identity_rotator,
+            &prev_x25519,
+        );
+        self.publish_gossip_event(event)
+    }
+
+    /// Construit l'événement d'annonce de rotation (payload, base64, tags,
+    /// signature Ed25519 par l'identité stable). Point commun unique — utilisé
+    /// par `announce_identity_rotation` et les tests, pour éviter la duplication
+    /// de la logique de construction (portée SonarQube).
+    fn build_rotation_announcement(
+        identity: &Identity,
+        rotator: &RotatingIdentity,
+        prev_x25519: &str,
+    ) -> MeshEvent {
+        let new_x25519 = rotator.x25519_public_key_hex();
+        let rotation_count = rotator.rotation_count();
+
         let payload = serde_json::json!({
             "x25519": new_x25519,
             "prev": prev_x25519,
@@ -1207,28 +1231,34 @@ impl Node {
             (TAG_IDENTITY_ROTATION, new_x25519.clone()),
             ("rotation_count", rotation_count.to_string()),
         ]);
-        let event = MeshEvent::new_signed(
-            &self.identity,
+        MeshEvent::new_signed(
+            identity,
             OndeMessageType::IdentityRotation,
             content,
             tags,
-        );
-        self.publish_gossip_event(event)
+        )
     }
 
     /// Récepteur — traite une annonce de rotation d'identité X25519 reçue.
     ///
     /// Vérifications (dans l'ordre) :
     /// 1. Le kind est bien `IdentityRotation` (sinon ignoré).
-    /// 2. Le payload est un JSON valide avec un champ `x25519` (64 hex).
-    /// 3. L'annonceur est **de confiance** dans la réputation locale
+    /// 2. Le payload est un JSON valide avec un champ `x25519` (64 hex) et un
+    ///    compteur `rotation` (u64).
+    /// 3. **La signature Ed25519 de l'événement est valide** — l'annonceur est
+    ///    bien l'auteur authentique (sinon rejeté : une annonce forgée avec la
+    ///    pubkey d'un pair de confiance ne doit pas passer).
+    /// 4. L'annonceur est **de confiance** dans la réputation locale
     ///    (sinon rejeté — un inconnu ne peut pas imposer sa clé).
-    /// 4. La clé annoncée est **nouvelle** (sinon rejeté — anti-replay :
-    ///    la même clé deux fois n'est pas une rotation).
+    /// 5. **Anti-replay / ordre** : le compteur `rotation` doit être strictement
+    ///    supérieur au dernier compteur accepté pour ce pair. Une annonce plus
+    ///    ancienne (rejouée) est rejetée : on ne recule jamais vers une clé
+    ///    X25519 antérieure.
+    /// 6. La clé annoncée est **nouvelle** (sinon rejeté — même clé deux fois).
     ///
     /// Si tout passe : la clé du pair est mise à jour, l'ancienne est
-    /// conservée en `peer_x25519_grace`, et l'annonce est relaiée dans le
-    /// gossip (idempotent).
+    /// conservée en `peer_x25519_grace`, le compteur est mémorisé, et l'annonce
+    /// est relaiée dans le gossip (idempotent).
     pub fn handle_incoming_rotation(&mut self, event: &MeshEvent) -> RotationHandlingOutcome {
         if event.kind != OndeMessageType::IdentityRotation {
             return RotationHandlingOutcome::Ignored;
@@ -1259,30 +1289,70 @@ impl Node {
                 )
             }
         };
+        let rotation_count = payload
+            .get("rotation")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
 
-        // 2. L'annonceur doit être de confiance (WoT).
         let announcer = &event.pubkey;
+
+        // 2. La signature Ed25519 de l'événement DOIT être valide —
+        //    l'annonceur est authentique, pas une pubkey usurpée (Aikido CRIT).
+        let sig_verified = {
+            let pubkey_ok = hex::decode(announcer).map(|b| b.len() == 32).unwrap_or(false);
+            let sig_ok = hex::decode(&event.sig).map(|b| b.len() == 64).unwrap_or(false);
+            pubkey_ok
+                && sig_ok
+                && {
+                    let mut pk = [0u8; 32];
+                    let mut sig = [0u8; 64];
+                    pk.copy_from_slice(&hex::decode(announcer).unwrap_or_default());
+                    sig.copy_from_slice(&hex::decode(&event.sig).unwrap_or_default());
+                    crate::crypto::Identity::verify_from_pubkey(&pk, event.id.as_bytes(), &sig)
+                }
+        };
+        if !sig_verified {
+            return RotationHandlingOutcome::Rejected(
+                "rotation signature could not be verified (forged or invalid)".to_string(),
+            );
+        }
+
+        // 3. L'annonceur doit être de confiance (WoT).
         if !self.reputation.is_trusted(announcer) {
             return RotationHandlingOutcome::Rejected(format!(
                 "rotation announced by untrusted peer {announcer}"
             ));
         }
 
-        // 3. La clé doit être nouvelle (anti-replay).
+        // 4. Anti-replay / ordre : le compteur doit progresser strictement.
+        //    Une annonce ancienne rejouée est rejetée (Aikido MED : rollback).
+        if let Some(&last) = self.peer_rotation_count.get(announcer) {
+            if rotation_count <= last {
+                return RotationHandlingOutcome::Rejected(format!(
+                    "rotation replay/stale (count {} not > last accepted {})",
+                    rotation_count, last
+                ));
+            }
+        }
+
+        // 5. La clé doit être nouvelle (même clé deux fois = pas une rotation).
         if self.peer_x25519.get(announcer).map(|k| k == &new_x25519) == Some(true) {
             return RotationHandlingOutcome::Rejected(
                 "rotation already applied (duplicate key)".to_string(),
             );
         }
 
-        // 4. Appliquer : ancienne clé → grâce, nouvelle clé → courante.
+        // 6. Appliquer : ancienne clé → grâce, nouvelle clé → courante,
+        //    mémoriser le compteur (anti-replay pour la suite).
         let prev = self.peer_x25519.get(announcer).cloned().unwrap_or_default();
         if !prev.is_empty() {
             self.peer_x25519_grace.insert(announcer.clone(), prev);
         }
         self.peer_x25519.insert(announcer.clone(), new_x25519.clone());
+        self.peer_rotation_count
+            .insert(announcer.clone(), rotation_count);
 
-        // 5. Relai dans le gossip (idempotent).
+        // 7. Relai dans le gossip (idempotent).
         let _ = self.gossip.add_event_with_reputation(event.clone(), &self.reputation);
 
         RotationHandlingOutcome::Applied
@@ -1780,6 +1850,80 @@ mod tests {
         assert!(
             matches!(outcome, RotationHandlingOutcome::Rejected(_)),
             "duplicate key announcement must be rejected, got: {outcome:?}"
+        );
+    }
+
+    /// Réception : une annonce dont la **signature est invalide** (forgée ou
+    /// altérée) est rejetée même si l'annonceur est de confiance — l'authentique
+    /// vient avant la confiance (Aikido CRIT : pubkey usurpée).
+    #[tokio::test]
+    async fn test_rotation_receive_rejects_bad_signature() {
+        let mut a = Node::new(NodeConfig::default());
+        let mut b = Node::new(NodeConfig::default());
+        let a_pub = a.identity.pubkey_hex();
+        b.reputation.bootstrap(std::slice::from_ref(&a_pub)); // A est de confiance…
+
+        let mut ev = a.announce_identity_rotation().expect("announce ok");
+        // …mais on corrompt la signature : le pair ne doit pas y croire.
+        let mut sig = ev.sig.clone();
+        sig.replace_range(0..2, if &sig[0..2] == "00" { "ff" } else { "00" });
+        ev.sig = sig;
+
+        let outcome = b.handle_incoming_rotation(&ev);
+        assert!(
+            matches!(outcome, RotationHandlingOutcome::Rejected(_)),
+            "forged/invalid signature must be rejected even for a trusted peer, got: {outcome:?}"
+        );
+        assert_eq!(
+            b.peer_x25519_key(&a_pub),
+            None,
+            "no key must be recorded for an announcement with a bad signature"
+        );
+    }
+
+    /// Réception : une annonce **plus ancienne** (compteur de rotation ≤ au
+    /// dernier accepté) est rejetée — on ne recule jamais vers une clé X25519
+    /// antérieure (Aikido MED : rollback via replay).
+    #[tokio::test]
+    async fn test_rotation_receive_rejects_stale_counter() {
+        let a = Node::new(NodeConfig::default());
+        let mut b = Node::new(NodeConfig::default());
+        let a_pub = a.identity.pubkey_hex();
+        b.reputation.bootstrap(std::slice::from_ref(&a_pub));
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        // Un rotateur qu'on fait tourner deux fois : compteur 1 puis 2, deux
+        // clés X25519 distinctes.
+        let mut rot = RotatingIdentity::new_with_start(3600, now - 7200);
+
+        // Tour 1 → compteur 1, clé K1.
+        rot.set_rotation_count(1);
+        let ev_old = Node::build_rotation_announcement(&a.identity, &rot, "");
+        assert_eq!(b.handle_incoming_rotation(&ev_old), RotationHandlingOutcome::Applied);
+        let first_key = b.peer_x25519_key(&a_pub).unwrap().to_string();
+
+        // Tour 2 → compteur 2, clé K2 ≠ K1.
+        rot.maybe_rotate(now); // due → clé K2
+        rot.set_rotation_count(2);
+        let ev_new = Node::build_rotation_announcement(&a.identity, &rot, "");
+        assert_eq!(b.handle_incoming_rotation(&ev_new), RotationHandlingOutcome::Applied);
+        let second_key = b.peer_x25519_key(&a_pub).unwrap().to_string();
+        assert_ne!(first_key, second_key, "a due rotation must change the key");
+
+        // Replay de l'annonce ANCIENNE (compteur 1, clé K1) après avoir vu le
+        // compteur 2 → rejetée, la clé courante K2 est conservée.
+        let outcome = b.handle_incoming_rotation(&ev_old);
+        assert!(
+            matches!(outcome, RotationHandlingOutcome::Rejected(_)),
+            "stale/older rotation counter must be rejected (no rollback), got: {outcome:?}"
+        );
+        assert_eq!(
+            b.peer_x25519_key(&a_pub),
+            Some(second_key.as_str()),
+            "the most-recent key must be retained after a stale replay attempt"
         );
     }
 }

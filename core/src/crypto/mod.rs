@@ -369,9 +369,13 @@ impl RotatingIdentity {
         self.rotations += 1;
         true
     }
-}
 
-/// Signature APK — vérification de chaîne de confiance (Audit #13).
+    /// Force le compteur de rotation (tests / scénario déterministe).
+    #[cfg(test)]
+    pub fn set_rotation_count(&mut self, count: u64) {
+        self.rotations = count;
+    }
+}
 ///
 /// Format d'un manifeste de build signé :
 /// ```text

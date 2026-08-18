@@ -415,13 +415,28 @@ impl MeshEvent {
 
     /// Désérialiser un événement depuis des octets wire **padés ou non**.
     ///
-    /// C'est le point de réception unique : le padding est retiré AVANT tout
-    /// décodage. `unpad` est tolérant (message non padé → identique) et
-    /// idempotent ; une entrée vide ou tronquée retourne une erreur, jamais
-    /// une panique.
+    /// C'est le point de réception unique. Le format wire est **auto-descriptif**
+    /// (champs à taille fixe ou préfixés par leur longueur ; `WireReader::take`
+    /// lit exactement la taille demandée et rejette tout excédent tronqué), donc
+    /// le lecteur est **indifférent au padding** : les zéros de seau en fin de
+    /// message sont simplement ignorés, et il n'est PAS nécessaire de les retirer
+    /// avant décodage. On ne fait donc **pas** d'`unpad` (stripping des zéros de
+    /// fin) ici — celui-ci corrompait tout message valide dont le dernier octet
+    /// réel est `0x00` (ex. `ttl = 0`) en le rognant jusqu'à la troncature.
+    ///
+    /// Une entrée vide ou tronquée (dans le contenu réel) retourne une erreur,
+    /// jamais une panique.
     pub fn from_wire_bytes(data: &[u8]) -> Result<Self, String> {
-        let unpadded = TrafficPadding::unpad(data);
-        let mut r = WireReader::new(unpadded);
+        // Garde anti-paquet nul : un paquet entièrement nul n'est jamais un
+        // événement signé légitime (id = hachage non nul, signature non nulle).
+        // Sans `unpad` le reader se-delimiterait sur ces zéros et produirait un
+        // événement dégénéré (kind=0, id/sig=0) ; on le rejette explicitement.
+        if !data.is_empty() && data.iter().all(|b| *b == 0) {
+            return Err("wire: all-zero packet is not a valid event".to_string());
+        }
+        // Pas d'`unpad` : le format est auto-descriptif, le reader s'arrête au
+        // dernier champ (ttl) et ignore le padding de seau qui suit.
+        let mut r = WireReader::new(data);
 
         let id = hex::encode(r.take_array::<32>()?);
         let pubkey = hex::encode(r.take_array::<32>()?);
@@ -1310,6 +1325,25 @@ mod tests {
         assert_eq!(wire.len(), 256, "100 B content must be padded to the 256 B bucket");
         let decoded = MeshEvent::from_wire_bytes(&wire).unwrap();
         assert_eq!(decoded.content, content);
+    }
+
+    #[test]
+    fn test_wire_trailing_zero_ttl_survives_roundtrip() {
+        // RÉGRESSION (Aikido PR #8) : `from_wire_bytes` ne doit PAS rogner les
+        // zéros de fin. Un événement dont le dernier octet réel est `0x00`
+        // (ici `ttl = 0`) doit survivre au round-trip padé. Avant la correction,
+        // `TrafficPadding::unpad` supprimait les zéros de fin et tronquait le
+        // dernier octet (ttl) du message valide.
+        let mut event = make_signed_event("alerte ttl zéro", vec![]);
+        event.ttl = 0; // dernier octet réel = 0x00
+        let wire = event.to_wire_bytes().unwrap();
+        // Le fil est padé : le dernier octet du message réel est 0x00, suivi de
+        // zéros de seau — impossible de distinguer « zéro réel » de « zéro
+        // padding » sans se fier au format auto-descriptif.
+        let decoded = MeshEvent::from_wire_bytes(&wire).expect("ttl=0 event must decode");
+        assert_eq!(decoded.ttl, 0, "a real trailing 0x00 (ttl=0) must not be stripped");
+        assert_eq!(decoded.content, event.content);
+        assert_eq!(decoded.id, event.id);
     }
 
     #[test]
