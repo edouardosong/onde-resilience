@@ -43,6 +43,12 @@ fn gossip_sync(from: &mut Node, to: &mut Node) -> Result<usize, String> {
                 OndeMessageType::Endorsement => {
                     to.handle_incoming_endorsement(&event);
                 }
+                // Phase 1.4 : les annonces de rotation d'identité X25519 sont
+                // traitées par leur propre handler (mise à jour de la clé du
+                // pair + période de grâce).
+                OndeMessageType::IdentityRotation => {
+                    to.handle_incoming_rotation(&event);
+                }
                 _ => {
                     to.handle_incoming_update(&event)?;
                 }
@@ -1053,6 +1059,102 @@ async fn test_traffic_padding_wire_two_nodes() -> Result<(), String> {
     let re_emit = received[0].to_wire_bytes()?;
     assert_eq!(re_emit.len(), 256, "re-emission is padded too");
     assert_eq!(re_emit, wire, "wire bytes are deterministic and identical");
+
+    Ok(())
+}
+
+/*
+ * Phase 1.4: IdentityRotation → two nodes (X25519 forward secrecy)
+ *
+ * Node A rotates its X25519 encryption key and announces the new public key
+ * in the gossip (signed by its STABLE identity). Node B, which trusts A,
+ * receives the announcement through the real wire path (padded), applies the
+ * new key, and keeps the previous key in the grace period. An announcement
+ * from an UNTRUSTED stranger is rejected.
+ */
+#[tokio::test]
+async fn test_identity_rotation_two_nodes() -> Result<(), String> {
+    let mut node_a = Node::new(NodeConfig {
+        node_type: NodeType::Mobile,
+        display_name: "NodeA".to_string(),
+        ..Default::default()
+    });
+    let mut node_b = Node::new(NodeConfig {
+        node_type: NodeType::Mobile,
+        display_name: "NodeB".to_string(),
+        ..Default::default()
+    });
+
+    let a_pub = node_a.identity.pubkey_hex();
+    // B fait confiance à A (bootstrap) — condition de réception d'une rotation.
+    node_b.reputation.bootstrap(std::slice::from_ref(&a_pub));
+
+    // 1. A émet sa première annonce de rotation (clé X25519 initiale).
+    let key_a0 = node_a.identity_rotator.x25519_public_key_hex();
+    let ev0 = node_a.announce_identity_rotation()?;
+    assert_eq!(ev0.kind, OndeMessageType::IdentityRotation);
+    assert_eq!(ev0.pubkey, a_pub, "announcement signed by A's stable identity");
+
+    // Livraison via le flux réel (wire padé, helper `gossip_sync` qui achemine
+    // par `get_pending_for_peer_wire` / `from_wire_bytes`).
+    let handled = gossip_sync(&mut node_a, &mut node_b)?;
+    assert_eq!(handled, 1, "B must handle the rotation announcement");
+
+    // B a appliqué la clé X25519 courante de A ; pas encore de grâce.
+    assert_eq!(node_b.peer_x25519_key(&a_pub), Some(key_a0.as_str()));
+    assert_eq!(node_b.peer_x25519_grace_key(&a_pub), None);
+
+    // 2. A rotit → nouvelle clé. B reçoit : l'ancienne passe en grâce.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    node_a.identity_rotator = onde_core::crypto::RotatingIdentity::new_with_start(3600, now - 3600);
+
+    let ev1 = node_a.announce_identity_rotation()?;
+    let key_a1 = {
+        let data = base64::engine::general_purpose::STANDARD.decode(&ev1.content).unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&data).unwrap();
+        payload["x25519"].as_str().unwrap().to_string()
+    };
+    assert_ne!(key_a0, key_a1, "A rotated to a new X25519 key");
+
+    assert_eq!(gossip_sync(&mut node_a, &mut node_b)?, 1, "B handles the 2nd rotation");
+
+    assert_eq!(
+        node_b.peer_x25519_key(&a_pub),
+        Some(key_a1.as_str()),
+        "B now uses A's new key"
+    );
+    assert_eq!(
+        node_b.peer_x25519_grace_key(&a_pub),
+        Some(key_a0.as_str()),
+        "B keeps A's previous key in the grace period"
+    );
+
+    // 3. Un INCONNU qui annonce une rotation est REJETÉ (ne peut pas imposer
+    //    sa clé de chiffrement à B).
+    let mut stranger = Node::new(NodeConfig::default());
+    // B ne fait PAS confiance à stranger → sa clé ne doit pas être appliquée.
+    let stranger_key = stranger.identity_rotator.x25519_public_key_hex();
+    let ev_s = stranger.announce_identity_rotation()?;
+    assert_eq!(
+        node_b.handle_incoming_rotation(&ev_s),
+        onde_core::node::RotationHandlingOutcome::Rejected(
+            format!("rotation announced by untrusted peer {}", stranger.identity.pubkey_hex())
+        ),
+        "untrusted rotation announcement must be rejected"
+    );
+    assert_eq!(
+        node_b.peer_x25519_key(&stranger.identity.pubkey_hex()),
+        None,
+        "no key recorded for an untrusted announcer"
+    );
+    assert_eq!(
+        stranger_key.len(),
+        64,
+        "sanity: stranger has a valid X25519 key but it must not be applied"
+    );
 
     Ok(())
 }

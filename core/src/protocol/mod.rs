@@ -75,6 +75,15 @@ pub enum OndeMessageType {
     /// l'endosseur (`pubkey` = `endorser`) sur l'ID canonique ; le PoW
     /// adaptatif s'applique (un endosseur de confiance → difficulté 0).
     Endorsement,
+    /// Rotation d'identité (Phase 1.4) — annonce signée d'une nouvelle clé
+    /// X25519 de chiffrement point-à-point.
+    ///
+    /// L'identité **stable** de signature ne change pas (la réputation reste
+    /// indexée dessus) ; seule la clé X25519 de chiffrement tourne (forward
+    /// secrecy des sessions E2E). `content` porte le JSON `{ "stable_pubkey":
+    /// hex, "x25519": hex, "timestamp": u64 }` (base64) ; `sig` est la
+    /// signature Ed25519 de l'auteur stable sur l'ID canonique.
+    IdentityRotation,
 }
 
 /// Nostr-style event for the mesh network
@@ -205,6 +214,11 @@ impl MeshEvent {
             // Phase 1.2 : code 13 — nouvel endossement WoT propagé dans le
             // gossip, toujours sans renumérotation des types existants.
             OndeMessageType::Endorsement => 13,
+            // Phase 1.4 : code 14 — annonce de rotation d'identité X25519
+            // (forward secrecy du chiffrement point-à-point). L'identité
+            // stable de signature ne change PAS (réputation intacte) ; seule
+            // la clé X25519 de chiffrement tourne.
+            OndeMessageType::IdentityRotation => 14,
         }
     }
 
@@ -458,6 +472,8 @@ impl MeshEvent {
             11 => OndeMessageType::UpdateChunk,
             12 => OndeMessageType::UpdateRequest,
             13 => OndeMessageType::Endorsement,
+            // Phase 1.4 : annonce de rotation d'identité X25519.
+            14 => OndeMessageType::IdentityRotation,
             other => return Err(format!("wire: unknown kind code {other}")),
         })
     }

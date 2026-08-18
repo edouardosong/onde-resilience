@@ -1,0 +1,21 @@
+{
+  "projectId": "<run: testsprite project list>",
+  "type": "frontend",
+  "name": "My first frontend test",
+  "description": "Replace with one sentence describing what this test verifies.",
+  "priority": "p2",
+  "planSteps": [
+    {
+      "type": "action",
+      "description": "Navigate to /login and sign in with a seeded test account"
+    },
+    {
+      "type": "action",
+      "description": "Open the first product page and click \"Add to cart\""
+    },
+    {
+      "type": "assertion",
+      "description": "Assert that the cart badge shows 1 item"
+    }
+  ]
+}

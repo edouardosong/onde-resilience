@@ -1,0 +1,15 @@
+{
+  "projectId": "<PROJET>",
+  "type": "frontend",
+  "name": "03 — Publication d'une demande d'entraide",
+  "description": "L'utilisateur publie une demande d'entraide (besoin) ; elle est diffusée et visible par les pairs.",
+  "priority": "p0",
+  "planSteps": [
+    { "type": "action", "description": "Ouvrir le formulaire de publication (onglet Publier / bouton +)" },
+    { "type": "action", "description": "Saisir une demande d'entraide (ex. 'Recherche générateur électrique') avec une zone géographique et un contact optionnel" },
+    { "type": "action", "description": "Valider la publication" },
+    { "type": "assertion", "description": "Confirmation de publication affichée (événement signé, ID visible)" },
+    { "type": "action", "description": "Ouvrir le flux et filtrer par type 'entraide'" },
+    { "type": "assertion", "description": "La demande apparaît dans le flux filtré avec son type, auteur, zone et horodatage flou" }
+  ]
+}

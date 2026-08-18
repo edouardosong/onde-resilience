@@ -1,0 +1,15 @@
+{
+  "projectId": "<PROJET>",
+  "type": "frontend",
+  "name": "04 — Flux (feed) de messages",
+  "description": "Le flux affiche les messages reçus (alertes + entraide), triés, avec horodatage flou et filtre par type.",
+  "priority": "p1",
+  "planSteps": [
+    { "type": "action", "description": "Ouvrir le flux (feed) du nœud" },
+    { "type": "assertion", "description": "Le flux liste les messages reçus et publiés, chacun avec type, auteur, zone, horodatage flou (pas d'heure exacte exposée)" },
+    { "type": "action", "description": "Filtrer le flux par type 'alerte'" },
+    { "type": "assertion", "description": "Seules les alertes restent affichées ; le compteur de résultats est cohérent" },
+    { "type": "action", "description": "Changer le filtre pour 'entraide' puis 'tous'" },
+    { "type": "assertion", "description": "Le contenu du flux suit le filtre choisi sans erreur ni plantage" }
+  ]
+}

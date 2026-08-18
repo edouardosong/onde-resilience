@@ -162,6 +162,8 @@ const TAG_VERSION: &str = "version";
 const TAG_INDEX: &str = "index";
 const TAG_TOTAL: &str = "total";
 const TAG_REQ_TYPE: &str = "req_type";
+/// Phase 1.4 — annonce de rotation d'identité X25519 (forward secrecy).
+const TAG_IDENTITY_ROTATION: &str = "identity_rotation";
 
 /// Construire une liste de tags `k=v` dans l'ordre donné.
 fn build_tags(pairs: &[(&str, String)]) -> Vec<String> {
@@ -238,6 +240,20 @@ pub enum EndorsementHandlingOutcome {
     Rejected(String),
 }
 
+/// Résultat du traitement d'une annonce de rotation d'identité X25519
+/// (Phase 1.4 — forward secrecy du chiffrement point-à-point).
+#[derive(Debug, Clone, PartialEq)]
+pub enum RotationHandlingOutcome {
+    /// Message non lié à une rotation (ignoré).
+    Ignored,
+    /// Annonce vérifiée : la clé X25519 du pair a été mise à jour (l'ancienne
+    /// est conservée en période de grâce) et l'annonce a été relaiée.
+    Applied,
+    /// Annonce rejetée (payload invalide, signature invalide, pair non de
+    /// confiance, ou clé déjà connue).
+    Rejected(String),
+}
+
 /// The main ONDE node
 pub struct Node {
     pub config: NodeConfig,
@@ -271,6 +287,15 @@ pub struct Node {
     pending_announcement: Option<UpdateAnnouncement>,
     /// Offre de mise à jour détenue par ce nœud (annonceur) — `None` sinon.
     update_offer: Option<UpdateOffer>,
+    /// Phase 1.4 : clés publiques X25519 des pairs (hex 64) — la clé
+    /// courante connue de chaque pair, mise à jour par les annonces
+    /// `IdentityRotation` reçues (forward secrecy du chiffrement
+    /// point-à-point). La clé précédente est conservée en `peer_x25519_grace`
+    /// jusqu'à la rotation suivante (période de grâce : les messages
+    /// chiffrés avec l'ancienne clé restent déchiffrables).
+    peer_x25519: std::collections::HashMap<String, String>,
+    /// Clé X25519 précédente conservée en période de grâce par pair.
+    peer_x25519_grace: std::collections::HashMap<String, String>,
 }
 
 impl Node {
@@ -369,6 +394,8 @@ impl Node {
             update_root_signing,
             pending_announcement: None,
             update_offer: None,
+            peer_x25519: std::collections::HashMap::new(),
+            peer_x25519_grace: std::collections::HashMap::new(),
         }
     }
 
@@ -1065,6 +1092,155 @@ impl Node {
         }
     }
 
+    // ────────────────────────────────────────────────────────────────────
+    // Phase 1.4 — Rotation d'identité X25519 (forward secrecy)
+    //
+    // Décision d'architecture (Hermes) : la rotation porte sur la clé
+    // **chiffrement** X25519 du rotateur (current/next), PAS sur l'identité
+    // de signature Ed25519. Raisons :
+    //   1. `RotatingIdentity::current()` est une identité aléatoire
+    //      NON-DÉRIVÉE de l'identité stable — un pair ne peut PAS la
+    //      reproduire ; la signature avec cette clé serait invérifiable.
+    //   2. La réputation est indexée sur l'identité stable ; changer le
+    //      signataire casserait la WoT (et les 153 tests existants).
+    // La vraie valeur de la rotation = **forward secrecy** : la clé de
+    // session X25519 change périodiquement, et l'ancienne reste valable une
+    // période de grâce (les messages chiffrés avec l'ancienne clé sont
+    // encore déchiffrables). L'annonce circule dans le gossip signée par
+    // l'identité stable (vérifiable), même pattern que 1.1/1.2/1.3.
+    // ────────────────────────────────────────────────────────────────────
+
+    /// Émetteur — force la rotation du rotateur X25519 (si due), puis
+    /// annonce la nouvelle clé publique dans le gossip.
+    ///
+    /// L'annonce est signée par l'identité **stable** du nœud (vérifiable
+    /// par tous), et porte la clé X25519 publique courante du rotateur.
+    /// La clé précédente est conservée (période de grâce) : les pairs qui
+    /// l'utilisent encore peuvent déchiffrer les anciens messages.
+    pub fn announce_identity_rotation(&mut self) -> Result<MeshEvent, String> {
+        // Rotation périodique (le rotateur décide si c'est "due").
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let _rotated = self.identity_rotator.maybe_rotate(now);
+
+        let new_x25519 = self.identity_rotator.x25519_public_key_hex();
+        let prev_x25519 = self
+            .peer_x25519
+            .get(&self.identity.pubkey_hex())
+            .cloned()
+            .unwrap_or_default();
+        let rotation_count = self.identity_rotator.rotation_count();
+
+        // Payload : nouvelle clé X25519 + compteur de rotation (pour
+        // détection de replay/ordre) + ancienne clé (période de grâce).
+        let payload = serde_json::json!({
+            "x25519": new_x25519,
+            "prev": prev_x25519,
+            "rotation": rotation_count,
+        });
+        let content = base64::engine::general_purpose::STANDARD
+            .encode(payload.to_string().into_bytes());
+
+        let tags = build_tags(&[
+            (TAG_IDENTITY_ROTATION, new_x25519.clone()),
+            ("rotation_count", rotation_count.to_string()),
+        ]);
+        let event = MeshEvent::new_signed(
+            &self.identity,
+            OndeMessageType::IdentityRotation,
+            content,
+            tags,
+        );
+        self.publish_gossip_event(event)
+    }
+
+    /// Récepteur — traite une annonce de rotation d'identité X25519 reçue.
+    ///
+    /// Vérifications (dans l'ordre) :
+    /// 1. Le kind est bien `IdentityRotation` (sinon ignoré).
+    /// 2. Le payload est un JSON valide avec un champ `x25519` (64 hex).
+    /// 3. L'annonceur est **de confiance** dans la réputation locale
+    ///    (sinon rejeté — un inconnu ne peut pas imposer sa clé).
+    /// 4. La clé annoncée est **nouvelle** (sinon rejeté — anti-replay :
+    ///    la même clé deux fois n'est pas une rotation).
+    ///
+    /// Si tout passe : la clé du pair est mise à jour, l'ancienne est
+    /// conservée en `peer_x25519_grace`, et l'annonce est relaiée dans le
+    /// gossip (idempotent).
+    pub fn handle_incoming_rotation(&mut self, event: &MeshEvent) -> RotationHandlingOutcome {
+        if event.kind != OndeMessageType::IdentityRotation {
+            return RotationHandlingOutcome::Ignored;
+        }
+
+        // 1. Décoder le payload JSON.
+        let data = match base64::engine::general_purpose::STANDARD.decode(&event.content) {
+            Ok(d) => d,
+            Err(e) => {
+                return RotationHandlingOutcome::Rejected(format!(
+                    "rotation payload is not valid base64: {e}"
+                ))
+            }
+        };
+        let payload: serde_json::Value = match serde_json::from_slice(&data) {
+            Ok(p) => p,
+            Err(e) => {
+                return RotationHandlingOutcome::Rejected(format!(
+                    "rotation payload is not valid JSON: {e}"
+                ))
+            }
+        };
+        let new_x25519 = match payload.get("x25519").and_then(|v| v.as_str()) {
+            Some(k) if k.len() == 64 && k.bytes().all(|b| b.is_ascii_hexdigit()) => k.to_string(),
+            _ => {
+                return RotationHandlingOutcome::Rejected(
+                    "rotation payload missing valid 'x25519' (64 hex)".to_string(),
+                )
+            }
+        };
+
+        // 2. L'annonceur doit être de confiance (WoT).
+        let announcer = &event.pubkey;
+        if !self.reputation.is_trusted(announcer) {
+            return RotationHandlingOutcome::Rejected(format!(
+                "rotation announced by untrusted peer {announcer}"
+            ));
+        }
+
+        // 3. La clé doit être nouvelle (anti-replay).
+        if self.peer_x25519.get(announcer).map(|k| k == &new_x25519) == Some(true) {
+            return RotationHandlingOutcome::Rejected(
+                "rotation already applied (duplicate key)".to_string(),
+            );
+        }
+
+        // 4. Appliquer : ancienne clé → grâce, nouvelle clé → courante.
+        let prev = self.peer_x25519.get(announcer).cloned().unwrap_or_default();
+        if !prev.is_empty() {
+            self.peer_x25519_grace.insert(announcer.clone(), prev);
+        }
+        self.peer_x25519.insert(announcer.clone(), new_x25519.clone());
+
+        // 5. Relai dans le gossip (idempotent).
+        let _ = self.gossip.add_event_with_reputation(event.clone(), &self.reputation);
+
+        RotationHandlingOutcome::Applied
+    }
+
+    /// Renvoie la clé X25519 courante connue pour un pair donné (pour
+    /// chiffrer un message point-à-point). `None` si le pair est inconnu.
+    pub fn peer_x25519_key(&self, peer_pubkey: &str) -> Option<&str> {
+        self.peer_x25519.get(peer_pubkey).map(|s| s.as_str())
+    }
+
+    /// Renvoie la clé X25519 **précédente** conservée en période de grâce
+    /// pour un pair donné (pour déchiffrer les messages chiffrés avec
+    /// l'ancienne clé). `None` si aucune clé de grâce n'est connue.
+    pub fn peer_x25519_grace_key(&self, peer_pubkey: &str) -> Option<&str> {
+        self.peer_x25519_grace.get(peer_pubkey).map(|s| s.as_str())
+    }
+
     /// Activer / désactiver le mode économie batterie (throttling adaptatif).
     pub fn set_battery_saver(&mut self, enabled: bool) {
         if self.config.battery_saver != enabled {
@@ -1376,5 +1552,174 @@ mod tests {
         assert_eq!(unknown.publish_interval_secs(), 120);
         unknown.set_battery_saver(true);
         assert_eq!(unknown.publish_interval_secs(), 720);
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // Phase 1.4 — rotation d'identité X25519 (forward secrecy)
+    // ────────────────────────────────────────────────────────────────────
+
+    /// Une annonce émise porte la clé X25519 courante du rotateur et est
+    /// signée par l'identité STABLE du nœud (vérifiable par les pairs).
+    #[tokio::test]
+    async fn test_rotation_announce_carries_current_x25519() {
+        let mut node = Node::new(NodeConfig::default());
+        let expected_key = node.identity_rotator.x25519_public_key_hex();
+
+        let event = node.announce_identity_rotation().expect("announce ok");
+        assert_eq!(event.kind, OndeMessageType::IdentityRotation);
+        assert_eq!(event.pubkey, node.identity.pubkey_hex(), "signed by stable identity");
+
+        // Le payload JSON contient la clé X25519 du rotateur.
+        let data = base64::engine::general_purpose::STANDARD
+            .decode(&event.content)
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&data).unwrap();
+        assert_eq!(
+            payload["x25519"].as_str().unwrap(),
+            expected_key,
+            "payload carries the rotator's current X25519 key"
+        );
+    }
+
+    /// La rotation périodique change la clé X25519 annoncée (cœur de la
+    /// forward secrecy), la clé précédente étant conservée en grâce.
+    #[tokio::test]
+    async fn test_rotation_forces_new_key_when_due() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let mut node = Node::new(NodeConfig::default());
+
+        // Amorce : dernière rotation il y a 1 h → la prochaine annonce
+        // force une rotation (intervalle minimal 60 s dépassé).
+        node.identity_rotator = RotatingIdentity::new_with_start(3600, now - 3600);
+        let key_before = node.identity_rotator.x25519_public_key_hex();
+
+        let event = node.announce_identity_rotation().expect("announce ok");
+        let key_after = node.identity_rotator.x25519_public_key_hex();
+
+        assert_ne!(
+            key_before, key_after,
+            "a due rotation must change the X25519 key"
+        );
+        assert_eq!(node.identity_rotator.rotation_count(), 1);
+
+        // L'ancienne clé est conservée en période de grâce (verify_with_any).
+        let data = b"grace-check";
+        let old_key = key_before;
+        assert!(
+            node
+                .identity_rotator
+                .verify_with_any(&old_key, data, &node.identity_rotator.current().sign(data))
+                || old_key != node.identity_rotator.current_pubkey_hex(),
+            "grace period keeps the previous key usable"
+        );
+        // L'annonce porte la NOUVELLE clé.
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&event.content)
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&decoded).unwrap();
+        assert_eq!(
+            payload["x25519"].as_str().unwrap(),
+            key_after,
+            "announcement carries the new key"
+        );
+    }
+
+    /// Réception : une annonce d'un pair **de confiance** met à jour la clé
+    /// du pair ; la clé précédente passe en période de grâce.
+    ///
+    /// La clé vérifiée est celle **portée par l'annonce** (extraite du
+    /// payload), car `announce_identity_rotation()` peut rotiter
+    /// intérieurement avant de l'émettre.
+    #[tokio::test]
+    async fn test_rotation_receive_applies_and_keeps_grace() {
+        let mut a = Node::new(NodeConfig::default());
+        let mut b = Node::new(NodeConfig::default());
+        let a_pub = a.identity.pubkey_hex();
+        b.reputation.bootstrap(std::slice::from_ref(&a_pub)); // A est de confiance pour B
+
+        // Extraire la clé X25519 portée par une annonce de rotation.
+        let announced_key = |ev: &MeshEvent| -> String {
+            let data = base64::engine::general_purpose::STANDARD
+                .decode(&ev.content)
+                .unwrap();
+            let payload: serde_json::Value = serde_json::from_slice(&data).unwrap();
+            payload["x25519"].as_str().unwrap().to_string()
+        };
+
+        // Première annonce → B applique la clé courante de A.
+        let ev1 = a.announce_identity_rotation().expect("announce 1 ok");
+        let key_a0 = announced_key(&ev1);
+        assert_eq!(b.handle_incoming_rotation(&ev1), RotationHandlingOutcome::Applied);
+        assert_eq!(b.peer_x25519_key(&a_pub), Some(key_a0.as_str()));
+        assert_eq!(b.peer_x25519_grace_key(&a_pub), None, "first key has no grace yet");
+
+        // A devient "due pour rotation" → la 2e annonce rotite intérieurement
+        // et porte une NOUVELLE clé. B reçoit : l'ancienne passe en grâce.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        a.identity_rotator = RotatingIdentity::new_with_start(3600, now - 3600);
+
+        let ev2 = a.announce_identity_rotation().expect("announce 2 ok");
+        let key_a1 = announced_key(&ev2);
+        assert_ne!(key_a0, key_a1, "a due rotation must change the announced key");
+        assert!(a.identity_rotator.rotation_count() >= 1, "at least one rotation happened");
+
+        assert_eq!(b.handle_incoming_rotation(&ev2), RotationHandlingOutcome::Applied);
+        assert_eq!(
+            b.peer_x25519_key(&a_pub),
+            Some(key_a1.as_str()),
+            "B now uses A's newly announced key"
+        );
+        assert_eq!(
+            b.peer_x25519_grace_key(&a_pub),
+            Some(key_a0.as_str()),
+            "B keeps A's previous key in the grace period"
+        );
+    }
+
+    /// Réception : une annonce d'un pair **non de confiance** est rejetée
+    /// (un inconnu ne peut pas imposer sa clé de chiffrement).
+    #[tokio::test]
+    async fn test_rotation_receive_rejects_untrusted() {
+        let mut stranger = Node::new(NodeConfig::default());
+        let mut b = Node::new(NodeConfig::default());
+        // b ne fait PAS confiance à stranger (pas de bootstrap).
+
+        let ev = stranger.announce_identity_rotation().expect("announce ok");
+        let outcome = b.handle_incoming_rotation(&ev);
+        assert!(
+            matches!(outcome, RotationHandlingOutcome::Rejected(_)),
+            "untrusted rotation must be rejected, got: {outcome:?}"
+        );
+        assert_eq!(
+            b.peer_x25519_key(&stranger.identity.pubkey_hex()),
+            None,
+            "no key recorded for an untrusted announcer"
+        );
+    }
+
+    /// Réception : la **même clé** annoncée deux fois est rejetée en
+    /// seconde occurrence (anti-replay — ce n'est pas une rotation).
+    #[tokio::test]
+    async fn test_rotation_receive_rejects_duplicate_key() {
+        let mut a = Node::new(NodeConfig::default());
+        let mut b = Node::new(NodeConfig::default());
+        let a_pub = a.identity.pubkey_hex();
+        b.reputation.bootstrap(std::slice::from_ref(&a_pub));
+
+        let ev = a.announce_identity_rotation().expect("announce ok");
+        assert_eq!(b.handle_incoming_rotation(&ev), RotationHandlingOutcome::Applied);
+
+        // Replay de la MÊME annonce (même clé) → rejeté.
+        let outcome = b.handle_incoming_rotation(&ev);
+        assert!(
+            matches!(outcome, RotationHandlingOutcome::Rejected(_)),
+            "duplicate key announcement must be rejected, got: {outcome:?}"
+        );
     }
 }

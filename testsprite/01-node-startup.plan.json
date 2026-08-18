@@ -1,0 +1,14 @@
+{
+  "projectId": "<PROJET>",
+  "type": "frontend",
+  "name": "01 — Démarrage du nœud",
+  "description": "Le nœud démarre, affiche son identité et son état de santé (transport, réputation, stockage).",
+  "priority": "p0",
+  "planSteps": [
+    { "type": "action", "description": "Ouvrir l'application ONDE (URL du nœud local / build Tauri ou WebView Android)" },
+    { "type": "assertion", "description": "L'écran principal s'affiche avec le nom du nœud, son type (Mobile/Desktop/Gateway) et un indicateur d'état (actif/inactif)" },
+    { "type": "assertion", "description": "La section État montre : transport actif, nombre de pairs, réputation globale, capacité de stockage" },
+    { "type": "action", "description": "Ouvrir le panneau des logs/santé du nœud" },
+    { "type": "assertion", "description": "Les logs de démarrage sont visibles (identité générée/chargée, transports initialisés, base SQLite ouverte)" }
+  ]
+}

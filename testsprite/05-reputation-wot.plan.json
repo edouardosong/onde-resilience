@@ -1,0 +1,15 @@
+{
+  "projectId": "<PROJET>",
+  "type": "frontend",
+  "name": "05 — Réputation / Web of Trust",
+  "description": "L'écran de réputation affiche la confiance par pair, les endossements, et reflète les nœuds de confiance vs inconnus.",
+  "priority": "p1",
+  "planSteps": [
+    { "type": "action", "description": "Ouvrir l'écran de réputation / Web of Trust" },
+    { "type": "assertion", "description": "La liste des pairs affiche pour chacun : identité, niveau de confiance (score), statut (fondateur/de confiance/inconnu)" },
+    { "type": "action", "description": "Ouvrir le détail d'un pair" },
+    { "type": "assertion", "description": "Le détail montre : nombre d'endossements reçus, difficulté PoW exigée (adaptative), dernière activité" },
+    { "type": "action", "description": "Valider l'endossement d'un pair (bouton 'Endosser')" },
+    { "type": "assertion", "description": "L'endossement est confirmé, le pair passe à un niveau de confiance supérieur, et l'événement d'endossement est marqué comme diffusé" }
+  ]
+}
