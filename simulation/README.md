@@ -82,10 +82,22 @@ Toutes deux sont exposées dans le rapport JSON, champ `network_stats`.
 
 ---
 
-## Rappel — rencontres (L2-04)
+## Rappel — rencontres (L2-04 / L2-14)
 
 La recherche des paires de rencontre est EXACTE (même ensemble de paires, même
-ordre) par bucketing spatial ou par double-boucle — choisie selon le régime via
-`_encounter_pairs`. Les tests de régression `encounter_*` (test_mesh_sim.py)
-prouvent l'équivalence NAIVE vs BUCKETÉ, le traitement du bord `dist = S`
-(portée exacte) et l'absence de faux positifs hors-portée.
+ordre) et passe par `_encounter_pairs` :
+- L2-04 : bucketing spatial à grille unique S = max range, ou double-boucle
+  `_encounter_pairs_naive` (référence exacte) selon le régime ;
+- L2-14 (ADR-001, option b) : **bucketing multi-tier** `_encounter_pairs_tiered`
+  (un index spatial PAR TIER de portée — grille fine nœuds 50/200 m, grossière
+  LORA 5000 m, ponts 999 km), désormais le chemin nominal du dispatch. Il reste
+  EXACTEMENT équivalent (mêmes paires, même ordre) à la référence, y compris
+  avec un pont échantillonné dans un petit domaine (cas où l'ancienne grille
+  unique dégénérait en O(m²)). Sémantique préservée : aucune paire ajoutée ni
+  retirée, ordre d'émission des `forward_opportunity` inchangé.
+
+Les tests de régression `encounter_*` (test_mesh_sim.py) verrouillent
+l'équivalence NAIVE vs BUCKETÉ vs TIERED (même ensemble ET même ordre), le
+traitement du bord `dist = S` (portée exacte) et l'absence de faux positifs
+hors-portée. Décision complète et bench dans
+`docs/adr/ADR-001-encounter-perf.md`.
