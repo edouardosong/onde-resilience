@@ -100,6 +100,29 @@ class SimStats:
     pow_fail: int = 0
     delivery_latency_samples: list = field(default_factory=list)
     queue_depth_history: list = field(default_factory=list)
+    # L2-01 : livraisons uniques déjà comptées, clé = (sender_id, message_id).
+    # Un message remis à N voisins (ou relayé N fois) ne compte qu'UNE livraison.
+    # Mémoire négligeable : 1 tuple par message envoyé (et non par copie).
+    delivered_keys: set = field(default_factory=set)
+
+    def register_unique_delivery(self, sender_id: int, msg_id: str,
+                                 latency: float) -> bool:
+        """Compte la PREMIÈRE livraison d'un message (et sa latence).
+
+        Détection des doublons par (sender_id, message_id) : les copies
+        suivantes du même message (voisins supplémentaires, relais DTN)
+        ne sont pas recomptées.
+
+        Retourne True si la livraison était unique (comptée), False si le
+        message avait déjà été livré (doublon ignoré).
+        """
+        key = (sender_id, msg_id)
+        if key in self.delivered_keys:
+            return False
+        self.delivered_keys.add(key)
+        self.total_messages_delivered += 1
+        self.delivery_latency_samples.append(latency)
+        return True
 
 # ==============================================================================
 # POW (Proof of Work) — Antispam local
@@ -172,7 +195,6 @@ class DTNRouter:
         
         for node_from, node_to in [(node_a, node_b), (node_b, node_a)]:
             buf = self.buffers[node_from]
-            to_forward = []
             
             new_buf = deque()
             for msg in buf:
@@ -183,6 +205,13 @@ class DTNRouter:
                         forwarded.append(msg)
                         stats.total_dtn_hops += 1
                         self.forward_count += 1
+                        # L2-01 : la première réception du message par le réseau
+                        # (ici via store-and-forward) = 1 livraison UNIQUE,
+                        # dédupliquée par (sender, message_id). Latence =
+                        # création → livraison, attente store-and-forward incluse.
+                        stats.register_unique_delivery(
+                            msg.sender_id, msg.msg_id, self.env.now - msg.timestamp
+                        )
                     else:
                         stats.total_messages_expired += 1
                 else:
@@ -410,11 +439,27 @@ class MeshNetwork:
         neighbors = self.find_neighbors(sender)
         
         # Délivrance directe aux voisins
+        # L2-01 : un message = au plus UNE livraison unique (déduplication par
+        # (sender, message_id)). Avant le fix, chaque voisin recevant le message
+        # incrémentait le compteur → taux de délivrance > 100% (ex. 32953%).
+        first_delivery_latency = None
         for nb_id in neighbors:
             nb = self.nodes[nb_id]
             if msg.destination is None or msg.destination == nb_id:
-                self.stats.total_messages_delivered += 1
-                self.stats.delivery_latency_samples.append(self.env.now - msg.timestamp)
+                # L2-01 : latence de lien modélisée (fix « latence moyenne = 0.0 ») :
+                # latence de base de la radio + temps de transmission (payload / bande passante).
+                # Avant le fix, l'échantillon = env.now - msg.timestamp = 0.0
+                # (message créé ET délivré au même tick).
+                profile = TECH_PROFILES[nb.tech]
+                link_latency = (profile.latency_ms / 1000.0
+                                + (msg.payload_size_bytes * 8) / max(1.0, profile.bandwidth_bps))
+                # La première copie à arriver = le lien le plus rapide (min des latences)
+                if first_delivery_latency is None or link_latency < first_delivery_latency:
+                    first_delivery_latency = link_latency
+
+        if first_delivery_latency is not None:
+            self.stats.register_unique_delivery(
+                msg.sender_id, msg.msg_id, first_delivery_latency)
         
         # Stockage DTN pour forwarding ultérieur
         for nb_id in neighbors[:10]:  # limite pour perf
