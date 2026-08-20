@@ -14,10 +14,13 @@ Ces tests encadrent le contrat attendu :
 - latence moyenne > 0 (retard de lien modélisé, et non 0.0 par construction);
 - comptage PoW symétrique (success + fail = nombre de messages PoW-gatés).
 """
+import json
 import math
 import random
+import shutil
 import sys
 import os
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -412,4 +415,75 @@ def test_same_sender_same_tick_tx_ids_are_unique():
     # Comportement d'émission inchangé : mêmes champs métier, même timestamp.
     assert (tx1["sender"], tx1["receiver"], tx1["amount"], tx1["timestamp"]) == \
            (tx2["sender"], tx2["receiver"], tx2["amount"], tx2["timestamp"])
+
+
+# ----------------------------------------------------------------------------
+# 12. L2-12 : seed = paramètre explicite et documenté de run_simulation()
+#
+# Constat (checker L2-08) : la reproductibilité des runs dépendait du fait
+# que l'APPELANT appelle random.seed(42) avant run_simulation(). Sans cette
+# convention externe, deux runs consécutifs étaient DIFFÉRENTS (le 2e run
+# hérite de l'état du PRNG global consommé par le 1er) — la reproductibilité
+# tenait à un usage, pas à l'API.
+#
+# Contrat : `seed` est un paramètre explicite de l'API (défaut 42 = la valeur
+# utilisée partout dans les tests/preuves), et run_simulation() applique
+# random.seed(seed) elle-même :
+# - 2 runs avec seed=42  → rapports byte-identiques (hors wall-time) ;
+# - 1 run avec seed=7    → stats DIFFÉRENTES (la seed agit réellement).
+# ----------------------------------------------------------------------------
+
+def _report_without_walltime(report: dict) -> dict:
+    """Copie profonde du rapport SANS les champs wall-time (``real_time_sec``)
+    — la seule partie du rapport non déterministe (mesure réelle d'exécution)."""
+    r = json.loads(json.dumps(report))
+    r["simulation_config"].pop("real_time_sec", None)
+    return r
+
+
+def test_run_simulation_seed_determinism():
+    """L2-12 : déterminisme garanti par l'API (paramètre seed), pas par
+    convention externe de l'appelant.
+
+    AVANT fix : ROUGE — `run_simulation()` n'a pas de paramètre `seed`
+    (TypeError), et sans random.seed() de l'appelant, 2 runs consécutifs
+    diffèrent (état global du PRNG). APRES fix : VERT.
+    """
+    # Configuration réduite (le contrat testé est la DETERMINATION, pas
+    # l'échelle) — un run complet (10k nœuds / 1 h simulée) coûte ~3 min.
+    cfg = dict(
+        sim_duration=120.0,
+        mobile_count=150,
+        bridge_count=15,
+        area_km=2.0,
+        report_interval=30.0,
+    )
+
+    # run_simulation() sauvegarde son rapport en chemin RELATIF
+    # (onde/simulation/results/...) : on l'isole dans un répertoire
+    # temporaire pour ne pas écraser les artefacts du dépôt.
+    cwd = os.getcwd()
+    tmp = tempfile.mkdtemp(prefix="onde_seed_test_")
+    os.chdir(tmp)
+    try:
+        r42_a = _report_without_walltime(mesh_sim.run_simulation(seed=42, **cfg))
+        r42_b = _report_without_walltime(mesh_sim.run_simulation(seed=42, **cfg))
+        r7 = _report_without_walltime(mesh_sim.run_simulation(seed=7, **cfg))
+    finally:
+        os.chdir(cwd)
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    # 1) Même seed → rapport byte-identique (hors wall-time).
+    assert r42_a == r42_b, (
+        "2 runs avec seed=42 doivent être byte-identiques (hors wall-time) ; "
+        "déterminisme attendu garanti par l'API (L2-12), pas par l'état "
+        "global du PRNG"
+    )
+
+    # 2) Seed différente → stats DIFFÉRENTES (la seed agit réellement sur
+    #    le PRNG global : positions des nœuds, trafic, PoW, rencontres).
+    assert r7["network_stats"] != r42_a["network_stats"], (
+        f"seed=7 doit produire des stats différentes de seed=42 "
+        f"(obtenu identique : {r7['network_stats']})"
+    )
 

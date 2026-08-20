@@ -698,10 +698,35 @@ def run_simulation(
     mobile_count: int = 10000,         # 10k mobile (scaled pour perf)
     bridge_count: int = 1000,          # 1k ponts desktop
     area_km: float = 10.0,
-    report_interval: float = 60.0
+    report_interval: float = 60.0,
+    seed: int = 42                     # L2-12 : graine du PRNG global (défaut 42 = tests/preuves)
 ):
-    """Exécute la simulation complète."""
-    
+    """Exécute la simulation complète.
+
+    Paramètres
+    ----------
+    seed : int, défaut 42
+        Graine du PRNG global (module ``random``) — la SEULE source d'aléa
+        du simulateur (positions des nœuds, mouvement, trafic, rencontres ;
+        le PoW est un calcul déterministe et le planificateur SimPy est
+        déterministe : file à priorité + tie-break monotone, aucun RNG
+        interne, et NumPy n'est pas utilisé). ``run_simulation`` applique
+        ``random.seed(seed)`` lui-même au début du run :
+
+        **2 runs avec la même seed sont byte-identiques (hors wall-time —
+        le champ ``real_time_sec`` du rapport).**
+
+        La reproductibilité est donc garantie par l'API, pas par une
+        convention externe : l'appelant n'a plus besoin d'appeler
+        ``random.seed(...)`` avant le run (L2-12, signalé par le checker
+        L2-08). Le défaut 42 conserve le comportement des runs actuels des
+        tests/preuves.
+    """
+    # L2-12 : détermination garantie par l'API — toutes les sources d'aléa
+    # du simulateur passent par le module `random` global (audit : aucun
+    # np.random, aucun RNG interne SimPy), donc une seule seed suffit.
+    random.seed(seed)
+
     logger.info(f"=== ONDE MESH SIMULATION ===")
     logger.info(f"Mobiles: {mobile_count:,} | Bridges: {bridge_count:,} | Zone: {area_km}km²")
     logger.info(f"Durée: {sim_duration}s | Rapport: toutes les {report_interval}s")
