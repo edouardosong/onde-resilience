@@ -507,36 +507,162 @@ class MeshNetwork:
         
         return True
     
+    # ==============================================================================
+    # L2-04 — Recherche EXACTE des paires de rencontre (remplace le double-boucle O(m²))
+    # ==============================================================================
+    # Sémantique (inchangée, héritée de L2-01) : une paire {a, b}, a ≠ b, est une
+    # « rencontre » si et seulement si  dist(a, b) ≤ max(range(a), range(b)).
+    # L'ORDRE d'émission des paires est (i, j) avec i < j dans l'ordre de la liste
+    # `positions` : c'est cet ordre qui détermine la séquence des mutations DTN
+    # (`forward_opportunity` est appelée paire par paire dans cet ordre et elle est
+    # NON commutative sur les buffers). Les deux implémentations ci-dessous
+    # produisent DONC le même ensemble de paires ET le même ordre (preuve :
+    # /tmp/l2_04_equivalence.py).
+    #
+    #   _encounter_pairs_naive    : double-boucle O(m²) — ancien code, référence.
+    #   _encounter_pairs_bucketed : bucketing spatial EXACT, O(m·k) (k = densité
+    #                               locale ; k = O(1) en régime sparse).
+    #
+    # Pourquoi le bucketing est EXACT (pas d'approximation) :
+    #   Soit S = max range de l'échantillon (≥ range(a) et range(b) pour toute
+    #   paire). Si dist(a,b) ≤ max(range(a),range(b)) ≤ S, alors |x_a − x_b| ≤ S
+    #   et |y_a − y_b| ≤ S. Avec cell(v) = floor(v/S), on a
+    #   |cell(x_a) − cell(x_b)| ≤ 1 et |cell(y_a) − cell(y_b)| ≤ 1 (sinon
+    #   |x_a − x_b| > S, contradiction). Donc a et b sont dans la même cellule ou
+    #   une voisine directe (fenêtre 3×3). Réciproquement, le filtre distance²
+    #   exact (max des deux portées) ne retient que les vraies rencontres.
+    #   → même ensemble de paires que le double-boucle.
+    #
+    # Limite (documentée) : S = max range est dominé par le plus grand rayon
+    # présent (ETHERNET = 999 999 m si un pont est échantillonné). Quand le
+    # domaine est « petit » devant S (grille ≤ ~18 cellules), le bucketing est
+    # constant-factor moins rapide que le double-boucle ; `_encounter_pairs`
+    # (dispatch) retombe alors sur la référence exacte. En régime sparse
+    # (domaine ≫ S, densité constante), le bucketing est O(m) vs O(m²).
+
+    @staticmethod
+    def _encounter_pairs_naive(positions) -> list:
+        """Double-boucle O(m²) — l'ancienne implémentation (référence exacte).
+
+        `positions` : liste de (node_id, x, y, tech). Retourne la liste des paires
+        de rencontre (node_id_a, node_id_b) dans l'ordre (i, j), i < j, où i/j sont
+        les indices dans `positions`.
+        """
+        m = len(positions)
+        pairs = []
+        for i in range(m):
+            nid_a, x_a, y_a, tech_a = positions[i]
+            max_range_a = TECH_PROFILES[tech_a].range_m
+            for j in range(i + 1, m):
+                nid_b, x_b, y_b, tech_b = positions[j]
+                dx = x_a - x_b
+                dy = y_a - y_b
+                dist_sq = dx * dx + dy * dy
+                max_tech_range = max(max_range_a, TECH_PROFILES[tech_b].range_m)
+                if dist_sq <= max_tech_range * max_tech_range:
+                    pairs.append((nid_a, nid_b))
+        return pairs
+
+    @staticmethod
+    def _encounter_pairs_bucketed(positions) -> list:
+        """Bucketing spatial EXACT — L2-04 (remplace le double-boucle O(m²)).
+
+        Grille de cellules de côté S = max range de l'échantillon ; chaque nœud ne
+        candidate que sa cellule + 8 voisines (fenêtre 3×3), puis le filtre
+        distance² exact (max des deux portées) ne retient que les vraies
+        rencontres. Produit le même ensemble de paires ET le même ordre (i, j) que
+        `_encounter_pairs_naive` (exact, pas d'approximation — cf. bloc de preuve
+        ci-dessus).
+        """
+        m = len(positions)
+        if m < 2:
+            return []
+        S = max(TECH_PROFILES[positions[i][3]].range_m for i in range(m))
+        if S <= 0:
+            # Cas dégénéré (aucune portée positive) : retombe sur la référence.
+            return MeshNetwork._encounter_pairs_naive(positions)
+
+        inv_S = 1.0 / S
+        cells = {}
+        cell_of = [None] * m
+        for i in range(m):
+            _nid, x, y, _tech = positions[i]
+            c = (math.floor(x * inv_S), math.floor(y * inv_S))
+            cell_of[i] = c
+            bucket = cells.get(c)
+            if bucket is None:
+                cells[c] = [i]
+            else:
+                bucket.append(i)
+
+        pairs = []
+        for i in range(m):
+            nid_a, x_a, y_a, tech_a = positions[i]
+            max_range_a = TECH_PROFILES[tech_a].range_m
+            cx, cy = cell_of[i]
+            cands = []
+            for ox in (-1, 0, 1):
+                for oy in (-1, 0, 1):
+                    bucket = cells.get((cx + ox, cy + oy))
+                    if bucket is not None:
+                        for j in bucket:
+                            if j > i:
+                                cands.append(j)
+            if not cands:
+                continue
+            cands.sort()  # reproduit l'ordre (i, j) du double-boucle
+            for j in cands:
+                nid_b, x_b, y_b, tech_b = positions[j]
+                dx = x_a - x_b
+                dy = y_a - y_b
+                dist_sq = dx * dx + dy * dy
+                max_tech_range = max(max_range_a, TECH_PROFILES[tech_b].range_m)
+                if dist_sq <= max_tech_range * max_tech_range:
+                    pairs.append((nid_a, nid_b))
+        return pairs
+
+    def _encounter_pairs(self, positions) -> list:
+        """Dispatch exact (L2-04) : bucketing si la grille est fine (régime
+        sparse), sinon la référence double-boucle (grille trop grossière). Les
+        deux sont EXACTEMENT équivalents (mêmes paires, même ordre) — cf. bloc de
+        preuve ci-dessus ; le choix ne change jamais le résultat, seulement le
+        facteur constant.
+        """
+        if not positions:
+            return []
+        S = max(TECH_PROFILES[p[3]].range_m for p in positions)
+        if S > 0:
+            n_cells = (self.width_m / S) * (self.height_m / S)
+            if n_cells >= 18:  # crossover asymptotique : 9/M < 1/2
+                return self._encounter_pairs_bucketed(positions)
+        return self._encounter_pairs_naive(positions)
+
     def encounter_opportunity(self) -> int:
-        """Gère les rencontres entre nœuds (échantillonnage optimisé)."""
+        """Gère les rencontres entre nœuds (échantillonnage optimisé).
+
+        L2-04 : la recherche des paires passe par `_encounter_pairs` (bucketing
+        spatial EXACT, ou la référence exacte selon le régime) au lieu du
+        double-boucle O(m²) en ligne. L'échantillonnage (`random.sample`), la
+        condition de rencontre et l'ordre des appels `forward_opportunity` sont
+        INCHANGÉS : même consommation du PRNG (reproductibilité L2-12), même
+        ensemble de paires, même ordre.
+        """
         # Échantillonne 500 nœuds pour la simulation (optimisation performance)
         sample_size = min(500, len(self.nodes))
         sample_ids = random.sample(list(self.nodes.keys()), sample_size)
-        
-        encounters = 0
-        
-        # Optimisation: pré-calcul des positions
-        positions = [(nid, self.nodes[nid].x, self.nodes[nid].y, self.nodes[nid].tech) 
-                     for nid in sample_ids]
-        
-        # Boucle optimisée avec distance squared (évite sqrt inutile)
-        for i in range(len(positions)):
-            nid_a, x_a, y_a, tech_a = positions[i]
-            max_range_a = TECH_PROFILES[tech_a].range_m
-            
-            for j in range(i + 1, len(positions)):
-                nid_b, x_b, y_b, tech_b = positions[j]
-                
-                # Distance squared check first (avoid sqrt if possible)
-                dx = x_a - x_b
-                dy = y_a - y_b
-                dist_sq = dx*dx + dy*dy
-                
-                max_tech_range = max(max_range_a, TECH_PROFILES[tech_b].range_m)
-                if dist_sq <= max_tech_range * max_tech_range:
-                    self.dtn_router.forward_opportunity(nid_a, nid_b, self.stats)
-                    encounters += 1
 
+        # Pré-calcul des positions (ordre de l'échantillon conservé)
+        positions = [(nid, self.nodes[nid].x, self.nodes[nid].y, self.nodes[nid].tech)
+                     for nid in sample_ids]
+
+        # Paires de rencontre EXACTES (mêmes paires, même ordre que l'ancien
+        # double-boucle) — L2-04.
+        pairs = self._encounter_pairs(positions)
+
+        encounters = 0
+        for nid_a, nid_b in pairs:
+            self.dtn_router.forward_opportunity(nid_a, nid_b, self.stats)
+            encounters += 1
         return encounters
     def process_queue_transactions(self):
         """Traite les transactions ZK en attente."""
