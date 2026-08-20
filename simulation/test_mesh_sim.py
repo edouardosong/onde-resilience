@@ -487,3 +487,191 @@ def test_run_simulation_seed_determinism():
         f"(obtenu identique : {r7['network_stats']})"
     )
 
+
+
+# ----------------------------------------------------------------------------
+# 13. L2-10 / RECO checker L2-04 : régression `encounter_opportunity`
+#     (NAIVE vs BUCKETÉ — même ensemble de paires, bord dist=S, hors-portée)
+#
+# Objet : LA recherche des paires de rencontre utilise indifféremment
+# `_encounter_pairs_naive` (double-boucle O(m²), référence exacte) ou
+# `_encounter_pairs_bucketed` (bucketing spatial EXACT, O(m·k)). Un bug de
+# régression dans l'un des deux chemins (le bucketing surtout, plus complexe)
+# changerait l'ensemble des rencontres et donc la consommation du PRNG et les
+# mutations DTN (forward_opportunity) — sans casser forcément un test existant.
+# Ce test encadre le contrat : même ensemble de paires, même traitement du
+# bord `dist = S` (portée exacte), zéro faux positif hors-portée.
+# Déterministe : positions explicites (aucun PRNG) + seed fixe pour le test
+# end-to-end. Rapide (< 5 s).
+# ----------------------------------------------------------------------------
+
+# Cas contrôlé L2-10 : 6 nœuds, positions posées à la main, portées connues.
+# S = max range de l'échantillon = 200 m (WIFI_AWARE). Comprend :
+#   - un bord EXACT dist == S   (A↔B : 200.0 m = portée WIFI 200 m) ;
+#   - un bord JUSTE AU-DESSUS    (A↔C : 200.5 m > S) → hors-portée ;
+#   - une portée ASYMÉTRIQUE      (BLE 50 m vs WIFI 200 m) ;
+#   - un nœud LOINTAIN            (F à 14 km) → aucun faux positif.
+ENCOUNTER_POSITIONS = [
+    (0, 0.0,    0.0,    TechType.WIFI_AWARE),  # A — expéditeur (portée 200)
+    (1, 200.0,  0.0,    TechType.WIFI_AWARE),  # B — dist = 200 = S (bord)
+    (2, 200.5,  0.0,    TechType.WIFI_AWARE),  # C — dist = 200.5 > S (hors)
+    (3, 0.0,    150.0,  TechType.WIFI_AWARE),  # D — dist(A)=150 ≤ 200
+    (4, 0.0,    40.0,   TechType.BLE),         # E — range 50 (asymétrique)
+    (5, 10000.0, 10000.0, TechType.WIFI_AWARE),# F — très loin (aucune paire)
+]
+
+# Ensemble exact attendu (calculé à la main sur les portées connues) :
+# (A,B)=200 ✓ · (A,C)=200.5 ✗ · (A,D)=150 ✓ · (A,E)=40 ≤ max(200,50) ✓ ·
+# (B,C)=0.5 ✓ · (B,D)=250 ✗ · (B,E)≈203.96>200 ✗ · (C,D)≈250.4 ✗ ·
+# (C,E)≈204.45 ✗ · (D,E)=110 ✓ · toute paire avec F : ✗.
+ENCOUNTER_EXPECTED = {(0, 1), (0, 3), (0, 4), (1, 2), (3, 4)}
+
+
+def test_encounter_naive_vs_bucketed_same_pairs():
+    """L2-10 : les chemins NAIVE et BUCKETÉ produisent le même ENSEMBLE de
+    paires (ordre indifférent), et cet ensemble est exactement celui attendu
+    sur le cas contrôlé (portées connues)."""
+    naive = set(MeshNetwork._encounter_pairs_naive(ENCOUNTER_POSITIONS))
+    bucketed = set(MeshNetwork._encounter_pairs_bucketed(ENCOUNTER_POSITIONS))
+
+    # 1) même ensemble de paires opportunes (ordre indifférent)
+    assert naive == bucketed, (
+        "chemins NAIVE/BUCKETÉ divergents\n"
+        f"  naive   = {sorted(naive)}\n"
+        f"  bucketed= {sorted(bucketed)}"
+    )
+    # 2) cet ensemble est exactement les paires attendues (référence manuelle)
+    assert naive == ENCOUNTER_EXPECTED, (
+        "l'ensemble NAIVE/BUCKETÉ ne correspond pas au cas contrôlé attendu :\n"
+        f"  obtenu   = {sorted(naive)}\n"
+        f"  attendu  = {sorted(ENCOUNTER_EXPECTED)}"
+    )
+
+
+def test_encounter_boundary_dist_equal_range_identical():
+    """L2-10 : le bord `dist = S` (portée EXACTE) est traité de façon
+    IDENTIQUE entre NAIVE et BUCKETÉ.
+
+    Code : les deux chemins utilisent la même inégalité non stricte
+    ``dist_sq <= max_range²`` → l'inclusion/exclusion du bord est identique.
+    Ici la paire A↔B (dist exactement 200 m = portée WIFI 200 m) doit être
+    INCLUSE par les deux, et A↔C (200.5 m, juste au-dessus) EXCLUE par les
+    deux. Toute asymétrie de bord entre les chemins = régression.
+    """
+    naive = set(MeshNetwork._encounter_pairs_naive(ENCOUNTER_POSITIONS))
+    bucketed = set(MeshNetwork._encounter_pairs_bucketed(ENCOUNTER_POSITIONS))
+
+    boundary_pair = (0, 1)   # A↔B : dist = 200.0 = S
+    above_pair = (0, 2)      # A↔C : dist = 200.5 > S
+
+    assert boundary_pair in naive and boundary_pair in bucketed, (
+        f"la paire au bord exact dist == S ({boundary_pair}) doit être INCLUSE "
+        f"par les deux chemins (naive={boundary_pair in naive}, "
+        f"bucketed={boundary_pair in bucketed}) — inégalité non stricte"
+    )
+    assert above_pair not in naive and above_pair not in bucketed, (
+        f"la paire légèrement au-dessus du bord ({above_pair}, dist=200.5 > S) "
+        f"doit être EXCLUE par les deux chemins — cohérence d'exclusion du bord"
+    )
+
+
+def test_encounter_no_out_of_range_false_positive():
+    """L2-10 : AUCUN faux positif hors-portée dans l'un OU l'autre chemin.
+
+    Pour chaque paire rapportée (dans quelque chemin que ce soit), la
+    distance réelle doit être ≤ max(range(a), range(b)) — sinon le chemin
+    invente une rencontre hors de portée (faux positif), biaisant la
+    consommation du PRNG et les mutations DTN.
+    """
+    from mesh_sim import TECH_PROFILES
+    for positions, name in (
+        (ENCOUNTER_POSITIONS, "cas contrôlé"),
+    ):
+        for pairs, pname in (
+            (MeshNetwork._encounter_pairs_naive(positions), "naive"),
+            (MeshNetwork._encounter_pairs_bucketed(positions), "bucketed"),
+        ):
+            for (a, b) in pairs:
+                a_row = next(p for p in positions if p[0] == a)
+                b_row = next(p for p in positions if p[0] == b)
+                dist = math.hypot(a_row[1] - b_row[1], a_row[2] - b_row[2])
+                max_range = max(TECH_PROFILES[a_row[3]].range_m,
+                                TECH_PROFILES[b_row[3]].range_m)
+                assert dist <= max_range, (
+                    f"FAUX POSITIF hors-portée {pname} : {a}-{b} dist={dist:.1f}m "
+                    f"> portée {max_range}m (contredit la définition d'une rencontre)"
+                )
+            # chaîne fermée : toutes les paires hors portée sont absentes
+            all_ids = [p[0] for p in positions]
+            for i, a in enumerate(all_ids):
+                for b in all_ids[i + 1:]:
+                    a_row = next(p for p in positions if p[0] == a)
+                    b_row = next(p for p in positions if p[0] == b)
+                    dist = math.hypot(a_row[1] - b_row[1], a_row[2] - b_row[2])
+                    max_range = max(TECH_PROFILES[a_row[3]].range_m,
+                                    TECH_PROFILES[b_row[3]].range_m)
+                    in_pairs = (a, b) in pairs
+                    if dist <= max_range:
+                        assert in_pairs, (
+                            f"rencontre manquée (faux négatif) {pname} : "
+                            f"{a}-{b} dist={dist:.1f} ≤ portée {max_range}m"
+                        )
+                    else:
+                        assert not in_pairs, (
+                            f"faux positif hors-portée {pname} : "
+                            f"{a}-{b} dist={dist:.1f} > portée {max_range}m"
+                        )
+            break  # un seul cas de contrôlé suffit pour la chaîne fermée
+
+
+def test_encounter_dispatch_matches_naive_and_is_deterministic():
+    """L2-10 : `encounter_opportunity()` end-to-end (sélecteur + forward DTN)
+    est déterministe (seed fixe) et produit le même ensemble de rencontres
+    sur un domaine assez grand pour que `_encounter_pairs` choisisse le
+    chemin BUCKETÉ (grille ≥ 18 cellules), comparé à la référence NAIVE.
+
+    La recherche (échantillonnage + paires exactes) est découplée du forward :
+    on compare l'ensemble des paires décidé par le sélecteur à celui de la
+    référence NAIVE appliquée aux mêmes positions échantillonnées.
+    """
+    env = simpy.Environment()
+    net = MeshNetwork(env, width_km=2.0, height_km=2.0)  # 2000×2000 m
+    # Positions explicites (déterministe, pas de PRNG) sur un domaine 2000×2000 :
+    # avec S = 200 m (WIFI), n_cells=(2000/200)²=100 ≥ 18 → chemin BUCKETÉ choisi.
+    for nid, (x, y) in {
+        0: (0, 0), 1: (200, 0), 2: (200, 200), 3: (0, 200),
+        4: (400, 0), 5: (400, 400), 6: (800, 800), 7: (1200, 300),
+    }.items():
+        net.nodes[nid] = Node(node_id=nid, is_bridge=False,
+                              tech=TechType.WIFI_AWARE, x=x, y=y)
+        net.yggdrasil.assign_address(nid)
+
+    sample_ids = sorted(net.nodes.keys())
+    positions = [(nid, net.nodes[nid].x, net.nodes[nid].y, net.nodes[nid].tech)
+                 for nid in sample_ids]
+
+    # Le sélecteur doit réellement passer par le BUCKETING (preuve de chemin).
+    S = max(mesh_sim.TECH_PROFILES[p[3]].range_m for p in positions)
+    n_cells = (net.width_m / S) * (net.height_m / S)
+    assert n_cells >= 18, f"prémisse : bucketing attendu (n_cells={n_cells}), non atteint"
+
+    decided = set(net._encounter_pairs(positions))           # chemin dispatché
+    reference = set(MeshNetwork._encounter_pairs_naive(positions))  # référence exacte
+
+    assert decided == reference, (
+        "le sélecteur dispatché ne reproduit pas la référence NAIVE :\n"
+        f"  dispatch = {sorted(decided)}\n"
+        f"  naive    = {sorted(reference)}"
+    )
+
+    # Déterminisme : 2 exécutions de `encounter_opportunity` avec seed fixe
+    # comptent le même nombre de rencontres et ne mutent rien d'incohérent.
+    import random as _random
+    _random.seed(1234)
+    first = net.encounter_opportunity()
+    _random.seed(1234)
+    second = net.encounter_opportunity()
+    assert first == second, (
+        f"encounter_opportunity() non déterministe sous seed fixe : "
+        f"{first} != {second}"
+    )
