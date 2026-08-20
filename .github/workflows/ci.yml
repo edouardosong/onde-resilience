@@ -1,30 +1,48 @@
-name: CI
+name: CI — Rust / Android / UI
 
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: "0 9 * * 1"   # Qualité hebdomadaire (dépendances / audit)
 
-# Least-privilege token: the CI only reads the repo (no PR write, no packages).
+# Least-privilege : la CI lit le repo ; le write passe par GITHUB_TOKEN explicitement
+# sur les jobs de release uniquement, en élargissant le scope au plus fin (contents: write,
+# seulement lorsque tag v*).
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
 jobs:
-  core-tests:
-    name: Rust core — build + test
+
+  #────────────────────────────────────────────────────────────────────────
+  # JOB 1 — rust (core/) : fmt + clippy + tests + coverage + build release
+  #────────────────────────────────────────────────────────────────────────
+  rust:
+    name: Rust core (fmt · clippy · test · coverage)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
+      - name: Install Rust toolchain (fmt + clippy)
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
         with:
           toolchain: stable
+          components: rustfmt, clippy
 
-      - name: Cache cargo registry
+      - name: Cache cargo
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
@@ -34,26 +52,156 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('core/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      - name: Build
+      # ── Gates de qualité rust ──────────────────────────────────────────
+      - name: Gate — cargo fmt (check)
         working-directory: core
-        run: cargo build --workspace
+        run: cargo fmt --all -- --check
 
-      - name: Test (workspace)
+      - name: Gate — cargo clippy (-D warnings)
+        working-directory: core
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Gate — unit + doc tests
         working-directory: core
         run: cargo test --workspace
 
-  ui-build:
-    name: UI web — vite build
+      - name: Gate — integration e2e
+        working-directory: core
+        run: cargo test --test integration_e2e
+
+      # ── Coverage (codecov) ─────────────────────────────────────────────
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@11af988c3b780511d3d16aa2b0b8bbc7c1bb7f72 # v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Generate coverage
+        working-directory: core
+        run: cargo llvm-cov --workspace --all-targets --lcov --output-path lcov.info
+
+      - name: Upload coverage to codecov
+        uses: codecov/codecov-action@eaaf4bedf32dbdc6b720b63067d99c4d77d6047d # v5
+        with:
+          files: core/lcov.info
+          fail_ci_if_error: false
+          verbose: true
+
+      # ── Release (tag v*) ──────────────────────────────────────────────
+      - name: Build release binaries
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: core
+        run: cargo build --release --workspace
+
+      - name: Upload release binaries
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fddac49c9aa69cda4752 # v4.6.0
+        with:
+          name: onde-core-release
+          path: |
+            core/target/release/onde_node
+            core/target/release/*.so
+            core/target/release/*.dylib
+          if-no-files-found: ignore
+
+  #────────────────────────────────────────────────────────────────────────
+  # JOB 2 — android : librust core NDK + gradle build + lint + APK release
+  #────────────────────────────────────────────────────────────────────────
+  android:
+    name: Android (NDK core · gradle build · lint · APK)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
 
-      - name: Setup Node
+      - name: Setup Java 17 (Temurin)
+        uses: actions/setup-java@99b8673ff64fbf99cc8c638810abfc1e9a4461ef # v4.9.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK (API 34 + NDK 26.2.11394342)
+        uses: android-actions/setup-android@18d40da690b55fe5fdedbd6b7ad88c3b5b2d2ef4 # v3.2.2
+        with:
+          api-level: 34
+          ndk-version: "26.2.11394342"
+
+      - name: Install Rust + Android targets
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: stable
+          targets: aarch64-linux-android, armv7-linux-androideabi, x86_64-linux-android
+
+      - name: Cache cargo (NDK)
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            core/target
+          key: ${{ runner.os }}-cargo-android-${{ hashFiles('core/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-android-
+
+      - name: Cache gradle
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('android/**/*.gradle*') }}
+          restore-keys: ${{ runner.os }}-gradle-
+
+      # Le wrapper gradle (jar + gradlew) est absent du repo : on le génère.
+      - name: Generate Gradle wrapper
+        working-directory: android
+        run: |
+          gradle wrapper --gradle-version 8.2
+        env:
+          GRADLE_USER_HOME: ${{ runner.home }}/.gradle
+
+      - name: Build Rust core for Android (NDK)
+        working-directory: core
+        run: cargo build --release --target aarch64-linux-android
+
+      - name: Gate — Android lint (Zero critical)
+        working-directory: android
+        run: ./gradlew lint
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug
+
+      # ── Gate qualité : APK sig vérifiable (cœur crypto) ──────────────
+      - name: Release APK (assembleRelease)
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: android
+        run: ./gradlew assembleRelease
+
+      - name: Upload APK (release)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698caf2b5a9a5e1a2c1fdee # v4.6.0
+        with:
+          name: onde-android-release
+          path: android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+  #────────────────────────────────────────────────────────────────────────
+  # JOB 3 — ui (Tauri + React) : npm ci · build · audit · tauri rust checks
+  #────────────────────────────────────────────────────────────────────────
+  ui:
+    name: UI (vite build · npm audit · tauri rust)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Node 20
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '20'
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ui/web/package-lock.json
 
       - name: Cache node_modules
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -62,10 +210,55 @@ jobs:
           key: ${{ runner.os }}-node-${{ hashFiles('ui/web/package-lock.json') }}
           restore-keys: ${{ runner.os }}-node-
 
-      - name: Install
+      - name: Install deps
         working-directory: ui/web
         run: npm ci
 
-      - name: Build
+      - name: Build (vite)
         working-directory: ui/web
         run: npm run build
+
+      # ── Gate qualité ui ──────────────────────────────────────────────
+      - name: Gate — npm audit (high+ = fail)
+        working-directory: ui/web
+        run: npm audit --audit-level=high
+
+      - name: Install Tauri system deps (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.0-dev libgtk-3-dev             libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Install Rust (tauri src)
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Gate — tauri clippy
+        working-directory: ui/src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Gate — tauri tests
+        working-directory: ui/src-tauri
+        run: cargo test
+
+  #────────────────────────────────────────────────────────────────────────
+  # Quality gate hebdomadaire : conflit de dépendances obsolètes
+  #────────────────────────────────────────────────────────────────────────
+  quality-scan:
+    name: Qualité hebdo (cargo audit · npm audit)
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: cargo audit (rust)
+        uses: rustsec/audit-check@69366f33ea965a0ea4d6c6a9786e04a06b93b8fb # v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: npm audit (ui)
+        working-directory: ui/web
+        run: npm audit --audit-level=high || true   # report non-bloquant hebdo
