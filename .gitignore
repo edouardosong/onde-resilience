@@ -61,3 +61,8 @@ briefs/
 
 # Agent loop (ONDE) — infra hors versioning; les preuves durables vont dans reports/loop-evidence/
 .agentloop/
+
+# Playwright E2E (ui/web) — artéfacts : screenshots/traces + rapport HTML
+ui/web/e2e-results/
+ui/web/playwright-report/
+ui/src/.vite/
