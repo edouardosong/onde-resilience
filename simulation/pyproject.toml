@@ -1,0 +1,29 @@
+# ONDE — simulation réseau maillé (SimPy)
+#
+# Projet « virtual » : il n'y a AUCUN package Python à publier ici (scripts + tests).
+# Ce manifeste existe pour rendre l'ENVIRONNEMENT reproductible :
+#   - dépendances exactes (simpy) + dev (pytest)
+#   - uv.lock versionné = résolution exacte et figée
+#
+# Usage (depuis la racine du repo ou depuis simulation/) :
+#   uv sync --project simulation
+#   uv run --project simulation pytest simulation/ -q
+[project]
+name = "onde-simulation"
+version = "0.2.0"  # aligné sur core/Cargo.toml et badge README
+description = "ONDE — simulation mesh (SimPy) : dépendances d'environnement + tests reproductibles"
+requires-python = ">=3.11"
+dependencies = [
+    "simpy==4.1.2",  # version exacte validée par les makers (L2-11/L2-12), aucune autre dep sim
+]
+
+# Dépendances de développement (PEP 735) — installées par `uv sync` (par défaut).
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",  # version validée dans les venv makers (Python 3.11.16)
+]
+
+# Pas de [build-system] + package=false => uv ne tente pas de builder un wheel :
+# `uv sync` se contente d'installer les dépendances dans simulation/.venv.
+[tool.uv]
+package = false
