@@ -15,6 +15,7 @@ Ces tests encadrent le contrat attendu :
 - comptage PoW symétrique (success + fail = nombre de messages PoW-gatés).
 """
 import math
+import random
 import sys
 import os
 
@@ -23,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import simpy
 import mesh_sim
 from mesh_sim import (
-    Message, MeshNetwork, Node, TechType,
+    Message, MeshNetwork, Node, TechType, TrafficGenerator,
 )
 
 
@@ -238,3 +239,88 @@ def test_pow_failure_blocks_delivery():
     assert net.send_message(0, msg) is False
     assert net.stats.pow_fail == 1
     assert net.stats.total_messages_delivered == 0
+
+
+# ----------------------------------------------------------------------------
+# 5. L2-08 : msg_id unique par message émis (2 messages même sender même
+#    tick = 2 livraisons uniques, pas 1)
+#
+# Cause racine : TrafficGenerator générait msg_id = md5(f"{sender}:{env.now}")
+# [:12] — deux messages DISTINCTS du même expéditeur émis au même tick de
+# simulation (même env.now) produisaient la MÊME clé de dédup (sender_id,
+# msg_id) → le fix L2-01 (register_unique_delivery) les comptait comme
+# UN SEUL message → sous-comptage des livraisons.
+#
+# Contrat attendu : l'identité d'un message émis est unique PAR ÉMISSION
+# (séquenceur par expéditeur), quelle que soit l'heure de simulation.
+# ----------------------------------------------------------------------------
+
+def test_same_sender_same_tick_two_unique_deliveries():
+    """L2-08 : 2+ messages du même expéditeur, même tick → chacun compte 1
+    livraison unique (pas de dédup entre messages distincts).
+
+    Dispositif : un SEUL nœud mobile (expéditeur) + 1 pont à portée.
+    1 tick de `generate_alerts` = randint(5, 50) messages, tous du même
+    expéditeur, tous au même env.now → collision de msg_id GARANTIE
+    avant fix (tous dédupliqués en 1 livraison), 0 collision après fix.
+    """
+    env, net = make_network()
+    place(net, 0, TechType.WIFI_AWARE, 500, 500)          # expéditeur unique
+    net.nodes[1000] = Node(                                # pont à 50 m (portée 200 m)
+        node_id=1000, is_bridge=True, tech=TechType.ETHERNET, x=550, y=500,
+    )
+    # PoW déterministe ici : difficulté 2 → P(échec/msg) ≈ e^-39 ≈ 0,
+    # et le comptage ci-dessous intègre pow_fail des deux côtés (invariant exact).
+    net.pow_validator.difficulty = 2
+    net.pow_validator.adaptive = False
+
+    random.seed(42)
+    traffic = TrafficGenerator(env, net)
+    env.process(traffic.generate_alerts(interval=5.0, max_nodes_alert=50))
+    env.run(until=6.0)   # un seul tick d'émission (t=5.0)
+
+    s = net.stats
+    assert s.total_messages_sent >= 5, f"prémisse : ≥5 messages attendus, obtenu {s.total_messages_sent}"
+    # LE BUG (avant fix) : delivered == 1 (N messages distincts dédupliqués
+    # par le msg_id identique md5("0:<tick>") → comptés comme 1 message).
+    assert s.total_messages_delivered >= 2, (
+        f"attendu ≥2 livraisons uniques pour {s.total_messages_sent} messages "
+        f"distincts du même expéditeur au même tick, obtenu "
+        f"{s.total_messages_delivered} (sous-comptage par msg_id non unique)"
+    )
+    # Invariant exact : chaque message envoyé (passé le PoW) compte
+    # EXACTEMENT 1 livraison — ni sous-comptage (L2-08) ni double-comptage (L2-01).
+    assert s.total_messages_delivered == s.total_messages_sent - s.pow_fail, (
+        f"livrées={s.total_messages_delivered} ≠ envoyées({s.total_messages_sent}) "
+        f"- pow_fail({s.pow_fail}) : un message distinct doit compter 1 livraison"
+    )
+
+
+def test_same_sender_same_tick_msg_ids_are_unique():
+    """L2-08 : les msg_id émis par le même expéditeur au même tick sont distincts.
+
+    Le buffer DTN de l'expéditeur contient tous les messages émis au tick :
+    avant fix, ils partagent TOUS le même msg_id ; après fix, tous distincts.
+    """
+    env, net = make_network()
+    place(net, 0, TechType.WIFI_AWARE, 500, 500)
+    net.nodes[1000] = Node(
+        node_id=1000, is_bridge=True, tech=TechType.ETHERNET, x=550, y=500,
+    )
+    net.pow_validator.difficulty = 2
+    net.pow_validator.adaptive = False
+
+    random.seed(42)
+    traffic = TrafficGenerator(env, net)
+    env.process(traffic.generate_alerts(interval=5.0, max_nodes_alert=50))
+    env.run(until=6.0)
+
+    emitted = list(net.dtn_router.buffers[0])
+    assert len(emitted) >= 2, f"prémisse : ≥2 messages émis, obtenu {len(emitted)}"
+    ids = [m.msg_id for m in emitted]
+    dup = sorted({i for i in ids if ids.count(i) > 1})
+    assert len(ids) == len(set(ids)), (
+        f"msg_id non unique pour {len(ids)} messages distincts émis au même tick "
+        f"par le même expéditeur : {len(dup)} id dupliqué(s) {dup[:3]}… "
+        "(l'identité doit être unique par message émis, pas par (expéditeur, tick))"
+    )
