@@ -675,3 +675,301 @@ def test_encounter_dispatch_matches_naive_and_is_deterministic():
         f"encounter_opportunity() non déterministe sous seed fixe : "
         f"{first} != {second}"
     )
+
+
+# ----------------------------------------------------------------------------
+# 15. L2-14 / ADR-001 : rencontre en bucketing multi-tier (option b)
+#     `_encounter_pairs_tiered` == `_encounter_pairs_naive` (même ensemble ET
+#     même ordre). Le dispatch nominal est désormais le chemin multi-tier, qui
+#     remplace la grille unique S=max range (L2-04) dégénérée en O(m²) dès qu'un
+#     pont (ETHERNET 999999 m) est échantillonné (cf. docs/adr/ADR-001-encounter-perf.md).
+#     Ces tests verrouillent l'équivalence sémantique exacte du nouveau chemin.
+# ----------------------------------------------------------------------------
+
+# Technologies à répartir (mobiles WIFI/BLE/LORA + pont ETHERNET).
+_TIER_TECHS = [TechType.WIFI_AWARE, TechType.BLE, TechType.LORA, TechType.ETHERNET]
+_TIER_TECHS_NO_BRIDGE = [TechType.WIFI_AWARE, TechType.BLE, TechType.LORA]
+# Domaines de test (m) — inclut des coordonnées NÉGATIVES pour vérifier le hash
+# de cellule sur toute la droite réelle.
+_TIER_DOMAINS = [100, 500, 2000, 5000, 100000]
+
+
+def _generate_tier_positions(seed, n, domain, techs):
+    """Positions déterministes (random local, aucune fuite d'état global)."""
+    rng = random.Random(seed)
+    return [(i,
+             rng.uniform(-domain, domain),
+             rng.uniform(-domain, domain),
+             rng.choice(techs))
+            for i in range(n)]
+
+
+def test_encounter_tiered_matches_naive_sequence():
+    """L2-14 : `_encounter_pairs_tiered` reproduit EXACTEMENT la référence
+    `_encounter_pairs_naive` — même ENSEMBLE de paires ET même ORDRE (i, j) —
+    sur une séquence déterministe de configurations mixtes (4 tiers de portée,
+    coords ±, domaines variés). C'est la garantie de non-régression de l'option
+    b (ADR-001) : le chemin multi-tier est interchangeable avec le double-boucle
+    jusqu'à l'ordre d'émission (déterminant pour la chaîne de mutations DTN et
+    la consommation du PRNG)."""
+    for seed in range(60):
+        rng = random.Random(seed)
+        n = rng.randint(2, 40)
+        domain = rng.choice(_TIER_DOMAINS)
+        techs = rng.choice([_TIER_TECHS, _TIER_TECHS_NO_BRIDGE])
+        pos = _generate_tier_positions(seed, n, domain, techs)
+        naive = MeshNetwork._encounter_pairs_naive(pos)
+        tiered = MeshNetwork._encounter_pairs_tiered(pos)
+        assert tiered == naive, (
+            "ordre non reproductible (L2-14) : tiered != naive\n"
+            f"  seed={seed} n={n} domain={domain}\n"
+            f"  naive ={naive}\n"
+            f"  tiered={tiered}"
+        )
+        assert set(tiered) == set(naive), (
+            f"ensemble divergent (L2-14) à seed={seed} : "
+            f"{sorted(set(tiered) ^ set(naive))}"
+        )
+
+
+def test_encounter_tiered_bridge_present_matches_naive():
+    """L2-14 : cas contrôlé avec un PONT (ETHERNET) dans un petit domaine —
+    c'est EXACTEMENT la configuration où l'ancien bucketing L2-04 (S = max range
+    999999 m → ~1 cellule → n_cells < 18) retombait sur le double-boucle O(m²).
+    Le chemin multi-tier doit produire la même sortie que la référence.
+
+    Positions explicites (déterministe, aucun PRNG) :
+      A(10,10,WIFI 200) B(30,10,WIFI) C(5,5,BLE 50) D(40,40,LORA 5000)
+      E(60,60,ETHERNET bridge 999999) F(200,200,WIFI)
+    Le bridge E voit TOUT (portée ≫ domaine) → A,B,C,D,F sont tous rencontrés.
+    Reste mobile-mobile : A-B (20≤200✓), A-C(≈7.07≤200✓), B-C(≈25.5≤200✓),
+    A-D(≈42.4≤5000✓), etc. (le filtre exact est celui de la référence)."""
+    pos = [
+        (0, 10.0, 10.0, TechType.WIFI_AWARE),     # A
+        (1, 30.0, 10.0, TechType.WIFI_AWARE),     # B
+        (2, 5.0, 5.0, TechType.BLE),              # C
+        (3, 40.0, 40.0, TechType.LORA),           # D
+        (4, 60.0, 60.0, TechType.ETHERNET),       # E bridge
+        (5, 200.0, 200.0, TechType.WIFI_AWARE),   # F
+    ]
+    naive = MeshNetwork._encounter_pairs_naive(pos)
+    tiered = MeshNetwork._encounter_pairs_tiered(pos)
+    assert tiered == naive, (
+        "bridge dans petit domaine (L2-14) : tiered != naive\n"
+        f"  naive ={naive}\n  tiered={tiered}"
+    )
+    # Le bridge E (id 4) est bien en rencontre avec TOUS les autres nœuds :
+    # les paires (i, j) sont émis avec i < j, donc le bridge est en 1re position
+    # pour les id > 4 (→ (4,5)) et en 2e position pour les id < 4 (→ (0,4)...(3,4)).
+    bridge_pairs = {(i, j) for (i, j) in tiered if i == 4 or j == 4}
+    expected_bridge = {(i, 4) for i in (0, 1, 2, 3)} | {(4, 5)}
+    assert bridge_pairs == expected_bridge, (
+        "le bridge (portée 999999 m) doit rencontrer tous les nœuds du domaine : "
+        f"got {sorted(bridge_pairs)}, expected {sorted(expected_bridge)}"
+    )
+
+
+def test_encounter_tiered_boundary_dist_equal_and_no_false_positive():
+    """L2-14 : le bord `dist = S` (portée EXACTE) est traité identiquement entre
+    le chemin multi-tier et la référence NAIVE, et AUCUN faux positif hors-portée
+    n'est rapporté — sur l'ensemble des paires de plusieurs configurations.
+
+    Inégalité non stricte `dist_sq <= R*²` partagée : une paire à dist == max portée
+    est INCLUSE par les deux chemins ; une paire juste au-dessus est EXCLUE. Tout
+    faux positif (paire rapportée alors que dist > R*) = bug de l'énumérateur."""
+    from mesh_sim import TECH_PROFILES
+    cases = [ENCOUNTER_POSITIONS] + [
+        _generate_tier_positions(seed, 25, domain, _TIER_TECHS)
+        for seed in range(5) for domain in _TIER_DOMAINS]
+    for positions in cases:
+        for name, pairs in (
+            ("naive",  MeshNetwork._encounter_pairs_naive(positions)),
+            ("tiered", MeshNetwork._encounter_pairs_tiered(positions)),
+        ):
+            all_ids = [p[0] for p in positions]
+            for i, a in enumerate(all_ids):
+                for b in all_ids[i + 1:]:
+                    a_row = next(p for p in positions if p[0] == a)
+                    b_row = next(p for p in positions if p[0] == b)
+                    dist = math.hypot(a_row[1] - b_row[1], a_row[2] - b_row[2])
+                    max_range = max(TECH_PROFILES[a_row[3]].range_m,
+                                    TECH_PROFILES[b_row[3]].range_m)
+                    present = (a, b) in pairs
+                    if dist <= max_range:
+                        assert present, (
+                            f"rencontre manquée (faux négatif) {name} : "
+                            f"{a}-{b} dist={dist:.1f} ≤ portée {max_range}m"
+                        )
+                    else:
+                        assert not present, (
+                            f"faux positif hors-portée {name} : "
+                            f"{a}-{b} dist={dist:.1f} > portée {max_range}m"
+                        )
+
+
+def test_encounter_dispatch_uses_tiered_equivalent():
+    """L2-14 : le dispatch `_encounter_pairs` (chemin nominal = multi-tier)
+    reproduit la référence NAIVE — ENSEMBLE et ORDRE compris — sur deux régimes :
+    (a) un échantillon varié (WIFI/BLE/LORA, petite grille) et (b) un petit
+    régime avec pont (config où l'ANCIEN bucketing à grille unique L2-04
+    n_cells < 18 retombait sur le double-boucle O(m²)). Le dispatch n'altère
+    jamais le résultat (le choix de l'enumérateur est un facteur constant,
+    cf. ADR-001). Le ROUTAGE effectif vers le chemin multi-tier est verrouillé
+    séparément par `test_encounter_dispatch_routing_to_tiered` (spy d'appel) :
+    ce test-ci compare les SORTIES, l'autre prouve que c'est bien le tiered qui
+    est appelé depuis le dispatch. Termine par le déterminisme end-to-end sous
+    seed fixe (2 exécutions identiques)."""
+    # (a) Échantillon varié (WIFI/BLE/LORA) : le dispatch doit valoir NAIVE.
+    big_pos = ([(i, (i % 20) * 200.0, (i // 20) * 200.0, TechType.WIFI_AWARE)
+                for i in range(16)] +
+               [(16, 10.0, 10.0, TechType.LORA),
+                (17, 1000.0, 1000.0, TechType.BLE)])
+    env = simpy.Environment()
+    net = MeshNetwork(env, width_km=10.0, height_km=10.0)
+    for nid, x, y, tech in big_pos:
+        net.nodes[nid] = Node(node_id=nid, is_bridge=(tech == TechType.ETHERNET),
+                              tech=tech, x=x, y=y)
+        net.yggdrasil.assign_address(nid)
+
+    decided = net._encounter_pairs(big_pos)                      # dispatch (tiered)
+    reference = MeshNetwork._encounter_pairs_naive(big_pos)      # référence exacte
+    assert decided == reference, (
+        "le dispatcher (tiered) ne reproduit pas NAIVE :\n"
+        f"  dispatch = {decided}\n  naive    = {reference}"
+    )
+
+    # (b) Petit régime avec bridge (n_cells<18 sous l'ancienne grille unique) :
+    #     le dispatch doit quand même égaler NAIVE (config du test bridge).
+    small_pos = [
+        (0, 10.0, 10.0, TechType.WIFI_AWARE),
+        (1, 30.0, 10.0, TechType.WIFI_AWARE),
+        (2, 5.0, 5.0, TechType.BLE),
+        (3, 60.0, 60.0, TechType.ETHERNET),
+    ]
+    decided_s = net._encounter_pairs(small_pos)
+    reference_s = MeshNetwork._encounter_pairs_naive(small_pos)
+    assert decided_s == reference_s, (
+        f"dispatch (petit régime bridge) != naïve : {decided_s} != {reference_s}"
+    )
+
+    # (c) Déterminisme sous seed fixe (end-to-end `encounter_opportunity`).
+    random.seed(777)
+    first = net.encounter_opportunity()
+    random.seed(777)
+    second = net.encounter_opportunity()
+    assert first == second, (
+        f"encounter_opportunity() non déterministe (L2-14) : {first} != {second}"
+    )
+
+
+def test_encounter_tiered_bucketed_naive_all_agree():
+    """L2-14 : sur un régime où le bucketing L2-04 à grille fine s'applique
+    (n_cells ≥ 18, portées étroites seules), les TROIS chemins — multi-tier,
+    bucketing unique et double-boucle — produisent la même sortie (set ET ordre).
+    Garantit l'interchangeabilité des implémentations sans régression croisée.
+
+    Config : 12 nœuds WIFI/BLE étalés sur 1000×1000 m, S = max range = 5000
+    (LORA) → n_cells = (1000/5000)² = 0.04 < 18 ... on force plutôt une grille
+    fine : on retire LORA et on utilise S = 200 (WIFI) → n_cells = (1000/200)²=25
+    ≥ 18 → le bucketing L2-04 s'applique réellement."""
+    pos = [(i, (i % 5) * 180.0, (i // 5) * 180.0, TechType.WIFI_AWARE)
+           for i in range(12)]
+    pos.append((12, 900.0, 900.0, TechType.BLE))
+    S = max(mesh_sim.TECH_PROFILES[p[3]].range_m for p in pos)
+    n_cells = (1000.0 / S) * (1000.0 / S)
+    assert n_cells >= 18, f"prémisse bucketing fin : n_cells={n_cells}"
+
+    naive = MeshNetwork._encounter_pairs_naive(pos)
+    bucketed = MeshNetwork._encounter_pairs_bucketed(pos)
+    tiered = MeshNetwork._encounter_pairs_tiered(pos)
+    assert naive == bucketed == tiered, (
+        "NAIVE / BUCKETÉ / TIERED divergents (L2-14) :\n"
+        f"  naive   = {naive}\n"
+        f"  bucketed= {bucketed}\n"
+        f"  tiered  = {tiered}"
+    )
+
+
+def test_encounter_tiered_exact_boundary_multiples_no_false_negative():
+    """L2-14 (revue CALL-A) : RÉGRESSION — faux négatif de l'exactitude FP quand
+    une coordonnée est un multiple EXACT de la portée R ET que dist = R exact.
+
+    Contre-exemple du checker : A=(15999984, 0) WIFI (r=200), B=(16999983, 0)
+    ETHERNET (r=999999). dist = 900000? Non : |16999983 − 15999984| = 999999 = R*
+    exact, et les coords sont des multiples de R* : 15999984 = 16×999999,
+    16999983 = 17×999999. Avec le calcul FP fautif `x * (1.0/R)`, on obtient
+    `x_a * inv_R` = 15.999999999999998 → floor 15 alors que `x_a / R` = 16.0
+    (floor 16) : la cellule était décalée de 2 → (a,b) hors fenêtre 3×3 →
+    tiered/bucketed = [] alors que naive = [(0,1)]. Le correctif (division
+    DIRECTE `x / R`, `x / S`) doit rendre tiered == bucketed == naive == [(0,1)].
+
+    Axe x ET axe y (rôles inversés), + héritage du fix dans `_encounter_pairs_bucketed`."""
+    # Contre-exemple : axe x
+    px = [
+        (0, 15999984.0, 0.0, TechType.WIFI_AWARE),   # = 16 × 999999
+        (1, 16999983.0, 0.0, TechType.ETHERNET),     # = 17 × 999999
+    ]
+    assert MeshNetwork._encounter_pairs_naive(px) == [(0, 1)], (
+        "précondition : la référence NAIVE doit voir la paire (0,1)"
+    )
+    assert MeshNetwork._encounter_pairs_tiered(px) == [(0, 1)], (
+        "FAUX NÉGATIF L2-14 : tiered rate la paire au multiple exact de R (x)"
+    )
+    assert MeshNetwork._encounter_pairs_bucketed(px) == [(0, 1)], (
+        "FAUX NÉGATIF L2-04 : bucketed rate la paire au multiple exact de R (x)"
+    )
+
+    # Axe y (rôles inversés : coords portées par y)
+    py = [
+        (0, 0.0, 15999984.0, TechType.WIFI_AWARE),
+        (1, 0.0, 16999983.0, TechType.ETHERNET),
+    ]
+    assert MeshNetwork._encounter_pairs_tiered(py) == [(0, 1)], (
+        "FAUX NÉGATIF L2-14 : tiered rate la paire au multiple exact de R (y)"
+    )
+    assert MeshNetwork._encounter_pairs_bucketed(py) == [(0, 1)], (
+        "FAUX NÉGATIF L2-04 : bucketed rate la paire au multiple exact de R (y)"
+    )
+
+
+def test_encounter_dispatch_routing_to_tiered():
+    """L2-14 (revue CALL-A) : verrou de ROUTAGE — le dispatch `_encounter_pairs`
+    appelle bien le chemin multi-tier `_encounter_pairs_tiered` (et non la
+    référence naive). Sans ce spy, une régression qui ferait appel au naive
+    passerait les tests de sortie (le contenu serait identique) : ici on compte
+    les APPELS réels via un wrapper compteur, puis on restaure l'original.
+    Couvre le dispatch direct ET la route end-to-end `encounter_opportunity`."""
+    positions = [
+        (0, 10.0, 10.0, TechType.WIFI_AWARE),
+        (1, 30.0, 10.0, TechType.WIFI_AWARE),
+        (2, 5.0, 5.0, TechType.BLE),
+        (3, 40.0, 40.0, TechType.LORA),
+        (4, 60.0, 60.0, TechType.ETHERNET),
+    ]
+    env = simpy.Environment()
+    net = MeshNetwork(env, width_km=10.0, height_km=10.0)
+    for nid, x, y, tech in positions:
+        net.nodes[nid] = Node(node_id=nid, is_bridge=(tech == TechType.ETHERNET),
+                              tech=tech, x=x, y=y)
+        net.yggdrasil.assign_address(nid)
+
+    orig = MeshNetwork._encounter_pairs_tiered
+    calls = []
+    # Wrapper compteur (staticmethod pour préserver la signature statique réelle).
+    def spy(*args, **kwargs):
+        calls.append(1)
+        return orig(*args, **kwargs)
+    try:
+        MeshNetwork._encounter_pairs_tiered = staticmethod(spy)
+        # (a) dispatch direct
+        net._encounter_pairs(positions)
+        # (b) route end-to-end `encounter_opportunity` (qui passe par le dispatch)
+        net.encounter_opportunity()
+        assert len(calls) >= 2, (
+            "ROUTAGE cassé : le dispatch/`encounter_opportunity` n'appelle pas "
+            f"_encounter_pairs_tiered (calls={calls})"
+        )
+    finally:
+        # ⚠ Restauration OBLIGATOIRE en staticmethod (sinon `self.` lie la méthode
+        # et le dispatch reçoit 2 args). `orig` (accès classe) est la fonction nue.
+        MeshNetwork._encounter_pairs_tiered = staticmethod(orig)

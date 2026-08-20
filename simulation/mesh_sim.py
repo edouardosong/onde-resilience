@@ -667,12 +667,13 @@ class MeshNetwork:
             # Cas dégénéré (aucune portée positive) : retombe sur la référence.
             return MeshNetwork._encounter_pairs_naive(positions)
 
-        inv_S = 1.0 / S
+        # ⚠ Exactitude FP : division DIRECTE `x / S` (même correctif que le
+        # chemin multi-tier L2-14) — voir note dans `_encounter_pairs_tiered`.
         cells = {}
         cell_of = [None] * m
         for i in range(m):
             _nid, x, y, _tech = positions[i]
-            c = (math.floor(x * inv_S), math.floor(y * inv_S))
+            c = (math.floor(x / S), math.floor(y / S))
             cell_of[i] = c
             bucket = cells.get(c)
             if bucket is None:
@@ -706,21 +707,137 @@ class MeshNetwork:
                     pairs.append((nid_a, nid_b))
         return pairs
 
+
+    @staticmethod
+    def _encounter_pairs_tiered(positions) -> list:
+        """Bucketing MULTI-TIER EXACT — L2-14 (option (b), ADR-001).
+
+        REMPLACE le dispatch L2-04 (une SEULE grille de cellule S = max range)
+        qui dégénérait en Ω(m²) pour TOUS quand un pont (ETHERNET, 999 999 m)
+        est échantillonné : dans un domaine « petit » devant S, tout tenait dans
+        ~1 cellule → la fenêtre 3×3 couvrait tout → bucketing inutile, retombée
+        sur le double-boucle. Voir docs/adr/ADR-001-encounter-perf.md.
+
+        Principe (option (b) de l'ADR) : UN index spatial PAR TIER de portée.
+        Soit R* = max(range(a), range(b)). On construit une grille de cellule
+        R pour CHAQUE portée distincte R présente. Une paire (a, b) est une
+        rencontre (a ≠ b) ssi dist(a,b) ≤ R*. La condition dist(a,b) ≤ R≤R*
+        ⇒ |x_a-x_b| ≤ R et |y_a-y_b| ≤ R ⇒ `cell(a)` et `cell(b)` ne diffèrent
+        que de ≤1 par axe dans la grille de cellule R : a et b sont dans une
+        même cellule ou deux cellules voisines (fenêtre 3×3) de la grille R*.
+
+        Algorithme (ordre et ensemble IDENTIQUES à `_encounter_pairs_naive`) :
+
+        1. `tiers` = portées distinctes croissantes (≤ 4 ici : 50/200/5000/999999).
+        2. Pour chaque tier R, une grille dont les cellules contiennent les
+           indices indexés par leur propre portée (`r_j`) — on évite ainsi de
+           rescaner tous les nœuds de la grille grossière d'un pont.
+        3. Pour chaque nœud i (ordre croissant) : pour chaque tier R ≥ r_i, on
+           pose la fenêtre 3×3 de i dans la grille R et on candidate les j qui
+           vérifient `max(r_i, r_j) == R` et `j > i`. Une paire n'est candidate
+           qu'une seule fois (R est uniquement max(r_i, r_j)). Les candidats
+           j sont triés croissant → même ordre (i, j) que le double-boucle.
+        4. Filtre distance² exact `dist ≤ R*` (inégalité non stricte, comme la
+           référence) → mêmes paires, même ordre.
+
+        Preuve d'équivalence : /tmp/l2_14_tier_proto.py — 2000 configurations
+        aléatoires (mixtes tiers / densités / domaines) + cas L2-10 contrôlé +
+        coords négatives : ensemble ET ordre identiques à `naive`. Verrouillé
+        par les tests `test_encounter_tiered_*` ci-dessous.
+
+        Complexité : O(m·K·k) avec K = nb de tiers (≤4) et k = densité locale
+        de la fenêtre pertinente ; pour un mélange réaliste (nœuds + quelques
+        ponts) les nœuds ne rescanent que leur grain fin + les ponts du maint.
+        Le nombre de paires vraies impliquant des ponts (toutes dans la portée
+        999 km) reste non réductible SANS changement sémantique — c'est une
+        propriété du modèle, pas un défaut de l'enumérateur (documenté ADR-001).
+        """
+        m = len(positions)
+        if m < 2:
+            return []
+        # Portées distinctes croissantes (K ≤ 4 ici).
+        ranges = [TECH_PROFILES[p[3]].range_m for p in positions]
+        # Garde (portée 0) : une portée ≤ 0 rendrait la division par R illégale.
+        # Les profils du modèle sont tous > 0 ; en défense on retombe sur la
+        # référence exacte (aucun tier exploitable) — voir ADR-001 §4 / point
+        # de revue #4.
+        if min(ranges) <= 0:
+            return MeshNetwork._encounter_pairs_naive(positions)
+        tiers = sorted(set(ranges))
+
+        # Grilles par tier : cells_R[cell] -> {range: [indices]}.
+        # ⚠ Exactitude FP : la division DIRECTE `x / R` (et non `x * (1.0/R)`)
+        # évite le faux négatif quand x est un multiple EXACT de R et dist = R
+        # (ex. A=(15999984,0) vs B=(16999983,0), R=999999 : `x/R`=16.0 floor
+        # exact, `x*inv_R`=15.999999999999998 floor 15 → cellule décalée de 2).
+        grids = {}
+        for R in tiers:
+            cells = {}
+            for idx, (_nid, x, y, tech) in enumerate(positions):
+                r = TECH_PROFILES[tech].range_m
+                c = (math.floor(x / R), math.floor(y / R))
+                cell = cells.get(c)
+                if cell is None:
+                    cell = {}
+                    cells[c] = cell
+                bucket = cell.get(r)
+                if bucket is None:
+                    cell[r] = [idx]
+                else:
+                    bucket.append(idx)
+            grids[R] = cells
+
+        pairs = []
+        for i in range(m):
+            nid_a, x_a, y_a, tech_a = positions[i]
+            r_a = TECH_PROFILES[tech_a].range_m
+            cand = set()
+            for R in tiers:
+                if R < r_a:
+                    continue
+                cx = math.floor(x_a / R)
+                cy = math.floor(y_a / R)
+                cells_R = grids[R]
+                for ox in (-1, 0, 1):
+                    for oy in (-1, 0, 1):
+                        cell = cells_R.get((cx + ox, cy + oy))
+                        if cell is None:
+                            continue
+                        for rj, idxs in cell.items():
+                            if max(r_a, rj) != R:
+                                continue
+                            for j in idxs:
+                                if j > i:
+                                    cand.add(j)
+            if not cand:
+                continue
+            cand = sorted(cand)  # reproduit l'ordre (i, j) du double-boucle
+            for j in cand:
+                nid_b, x_b, y_b, tech_b = positions[j]
+                r_j = TECH_PROFILES[tech_b].range_m
+                R_pair = max(r_a, r_j)
+                dx = x_a - x_b
+                dy = y_a - y_b
+                dist_sq = dx * dx + dy * dy
+                if dist_sq <= R_pair * R_pair:
+                    pairs.append((nid_a, nid_b))
+        return pairs
+
+
     def _encounter_pairs(self, positions) -> list:
-        """Dispatch exact (L2-04) : bucketing si la grille est fine (régime
-        sparse), sinon la référence double-boucle (grille trop grossière). Les
-        deux sont EXACTEMENT équivalents (mêmes paires, même ordre) — cf. bloc de
-        preuve ci-dessus ; le choix ne change jamais le résultat, seulement le
-        facteur constant.
+        """Dispatch exact (L2-14) : `_encounter_pairs_tiered` (bucketing
+        multi-tier, option (b) ADR-001) est le chemin nominal — EXACTEMENT
+        équivalent (mêmes paires, même ordre) à la référence double-boucle.
+        ``_encounter_pairs_naive`` (référence exacte, L2-01) et
+        ``_encounter_pairs_bucketed`` (grille unique S=max range, L2-04) restent
+        disponibles et identiques. Le choix ne change jamais le résultat,
+        seulement le facteur constant (cf. bloc de preuve + tests `encounter_*`).
         """
         if not positions:
             return []
-        S = max(TECH_PROFILES[p[3]].range_m for p in positions)
-        if S > 0:
-            n_cells = (self.width_m / S) * (self.height_m / S)
-            if n_cells >= 18:  # crossover asymptotique : 9/M < 1/2
-                return self._encounter_pairs_bucketed(positions)
-        return self._encounter_pairs_naive(positions)
+        if len(positions) < 2:
+            return []
+        return self._encounter_pairs_tiered(positions)
 
     def encounter_opportunity(self) -> int:
         """Gère les rencontres entre nœuds (échantillonnage optimisé).
