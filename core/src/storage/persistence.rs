@@ -30,7 +30,7 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use super::{MessageTier, TieredMessage};
 
@@ -68,7 +68,9 @@ impl SqliteStore {
              );",
         )
         .map_err(|e| format!("SQLite schema init failed: {e}"))?;
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     /// Ouvrir une base en mémoire (tests).
@@ -77,7 +79,9 @@ impl SqliteStore {
     }
 
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>, String> {
-        self.conn.lock().map_err(|_| "SQLite mutex poisoned".to_string())
+        self.conn
+            .lock()
+            .map_err(|_| "SQLite mutex poisoned".to_string())
     }
 
     /// Insérer ou remplacer un message.
@@ -157,7 +161,12 @@ impl SqliteStore {
         // conservé 7 jours, un Low 1 heure, etc.
         let conn = self.lock()?;
         let mut purged = 0usize;
-        for tier in [MessageTier::Critical, MessageTier::Important, MessageTier::Normal, MessageTier::Low] {
+        for tier in [
+            MessageTier::Critical,
+            MessageTier::Important,
+            MessageTier::Normal,
+            MessageTier::Low,
+        ] {
             let cutoff = now.saturating_sub(tier.retention_secs()) as i64;
             let n = conn
                 .execute(
@@ -173,7 +182,9 @@ impl SqliteStore {
     /// Nombre de messages persistés.
     pub fn count(&self) -> Result<usize, String> {
         self.lock()?
-            .query_row("SELECT COUNT(*) FROM messages", [], |row| row.get::<_, i64>(0))
+            .query_row("SELECT COUNT(*) FROM messages", [], |row| {
+                row.get::<_, i64>(0)
+            })
             .map(|n| n as usize)
             .map_err(|e| format!("SQLite count failed: {e}"))
     }
@@ -252,7 +263,9 @@ mod tests {
         assert_eq!(got.payload, msg.payload);
 
         // Idempotent : re-store avec le même id remplace (INSERT OR REPLACE)
-        store.store(&sample("evt-1", MessageTier::Normal, 1_800_000_000)).unwrap();
+        store
+            .store(&sample("evt-1", MessageTier::Normal, 1_800_000_000))
+            .unwrap();
         let got2 = store.get("evt-1").unwrap().unwrap();
         assert_eq!(got2.tier, MessageTier::Normal);
         assert_eq!(store.count().unwrap(), 1);
@@ -261,9 +274,13 @@ mod tests {
     #[test]
     fn test_load_all_roundtrip() {
         let store = SqliteStore::open_in_memory().unwrap();
-        store.store(&sample("a", MessageTier::Critical, 100)).unwrap();
+        store
+            .store(&sample("a", MessageTier::Critical, 100))
+            .unwrap();
         store.store(&sample("b", MessageTier::Low, 200)).unwrap();
-        store.store(&sample("c", MessageTier::Important, 300)).unwrap();
+        store
+            .store(&sample("c", MessageTier::Important, 300))
+            .unwrap();
 
         let all = store.load_all().unwrap();
         assert_eq!(all.len(), 3);
@@ -277,9 +294,15 @@ mod tests {
     fn test_sweep_expired() {
         let store = SqliteStore::open_in_memory().unwrap();
         let now = 2_000_000_000u64;
-        store.store(&sample("crit", MessageTier::Critical, now - 2 * 24 * 3600)).unwrap();
-        store.store(&sample("norm", MessageTier::Normal, now - 7 * 3600)).unwrap();
-        store.store(&sample("low", MessageTier::Low, now - 7200)).unwrap();
+        store
+            .store(&sample("crit", MessageTier::Critical, now - 2 * 24 * 3600))
+            .unwrap();
+        store
+            .store(&sample("norm", MessageTier::Normal, now - 7 * 3600))
+            .unwrap();
+        store
+            .store(&sample("low", MessageTier::Low, now - 7200))
+            .unwrap();
 
         let purged = store.sweep_expired(now).unwrap();
         assert_eq!(purged, 2, "Normal (7h > 6h) and Low (2h > 1h) expire");
@@ -305,7 +328,9 @@ mod tests {
         // Écriture dans une première session
         {
             let store = SqliteStore::open(&path_str).unwrap();
-            store.store(&sample("persist-1", MessageTier::Critical, 1_800_000_000)).unwrap();
+            store
+                .store(&sample("persist-1", MessageTier::Critical, 1_800_000_000))
+                .unwrap();
         }
 
         // Réouverture : le message est toujours là (résilience aux crashs)

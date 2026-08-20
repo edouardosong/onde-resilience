@@ -255,7 +255,10 @@ impl LlamaContext {
             // 1. llama_model_load_from_file(model_path, params)
             // 2. llama_new_context(model, ctx_params)
             // For now: mock mode only
-            Err("Real llama.cpp bindings not yet implemented. Use 'mock' feature for testing.".to_string())
+            Err(
+                "Real llama.cpp bindings not yet implemented. Use 'mock' feature for testing."
+                    .to_string(),
+            )
         }
     }
 
@@ -370,7 +373,9 @@ mod tests {
 
     #[test]
     fn test_quantization_ram() {
-        assert!(Quantization::Q4K.ram_per_billion_params() < Quantization::F32.ram_per_billion_params());
+        assert!(
+            Quantization::Q4K.ram_per_billion_params() < Quantization::F32.ram_per_billion_params()
+        );
         assert_eq!(Quantization::Q2K.ram_per_billion_params(), 450);
     }
 }

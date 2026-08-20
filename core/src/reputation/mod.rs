@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 /// Reputation / Web-of-Trust — remplacement du PoW CPU fixe (Audit #11)
 ///
 /// Principe :
@@ -13,7 +14,6 @@
 /// sa propre charge anti-spam — le coût est concentré sur les nœuds qui
 /// n'ont pas encore prouvé leur fiabilité.
 use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 
 /// Seuil au-dessus duquel un nœud est considéré "de confiance"
 /// (peut poster sans PoW, peut endosser d'autres nœuds).
@@ -89,7 +89,12 @@ impl ReputationSystem {
     ///   new = max(current, endorser_score × ENDORSEMENT_DECAY)
     /// Après `REQUIRED_ENDORSEMENTS` endossements qualifiés, le nœud
     /// devient "de confiance" (score >= TRUSTED_THRESHOLD).
-    pub fn endorse(&mut self, endorser: &str, endorsed: &str, timestamp: u64) -> Result<f64, String> {
+    pub fn endorse(
+        &mut self,
+        endorser: &str,
+        endorsed: &str,
+        timestamp: u64,
+    ) -> Result<f64, String> {
         if endorser == endorsed {
             return Err("A node cannot endorse itself".to_string());
         }
@@ -118,11 +123,15 @@ impl ReputationSystem {
 
         // Promotion automatique après suffisamment d'endossements qualifiés
         // (calculé sans garder l'emprunt mutable sur `endorsements`)
-        let qualified = self.endorsements
+        let qualified = self
+            .endorsements
             .get(endorsed)
             .map(|l| {
                 l.iter()
-                    .filter(|e| self.scores.get(&e.endorser).copied().unwrap_or(0.0) >= ENDORSEMENT_THRESHOLD)
+                    .filter(|e| {
+                        self.scores.get(&e.endorser).copied().unwrap_or(0.0)
+                            >= ENDORSEMENT_THRESHOLD
+                    })
                     .count()
             })
             .unwrap_or(0);
@@ -149,8 +158,12 @@ impl ReputationSystem {
         if !endorser_sig_verified {
             return Err("Endorsement signature could not be verified".to_string());
         }
-        self.endorse(&endorsement.endorser, &endorsement.endorsed, endorsement.timestamp)
-            .map(|_| ())
+        self.endorse(
+            &endorsement.endorser,
+            &endorsement.endorsed,
+            endorsement.timestamp,
+        )
+        .map(|_| ())
     }
 
     /// Endossements actuellement intégrés par ce nœud — jeu candidat pour le
@@ -167,7 +180,10 @@ impl ReputationSystem {
             .get(pubkey)
             .map(|l| {
                 l.iter()
-                    .filter(|e| self.scores.get(&e.endorser).copied().unwrap_or(0.0) >= ENDORSEMENT_THRESHOLD)
+                    .filter(|e| {
+                        self.scores.get(&e.endorser).copied().unwrap_or(0.0)
+                            >= ENDORSEMENT_THRESHOLD
+                    })
                     .count()
             })
             .unwrap_or(0)
@@ -190,7 +206,8 @@ impl ReputationSystem {
     /// Signaler un comportement abusif (spam, signature invalide).
     pub fn penalize(&mut self, pubkey: &str, amount: f64) {
         let s = self.score(pubkey);
-        self.scores.insert(pubkey.to_string(), (s - amount).max(0.0));
+        self.scores
+            .insert(pubkey.to_string(), (s - amount).max(0.0));
     }
 
     /// Difficulté PoW adaptative requise pour un expéditeur.
@@ -210,7 +227,8 @@ impl ReputationSystem {
         // 0 < score < 0.7 : difficulté entre BASE et MAX, inversement
         // proportionnelle au score. Ex. score 0.35 → ~3.
         let t = score / TRUSTED_THRESHOLD; // 0..1
-        let diff_f = MAX_POW_DIFFICULTY as f64 - t * (MAX_POW_DIFFICULTY - BASE_POW_DIFFICULTY) as f64;
+        let diff_f =
+            MAX_POW_DIFFICULTY as f64 - t * (MAX_POW_DIFFICULTY - BASE_POW_DIFFICULTY) as f64;
         (diff_f.round() as u8).clamp(BASE_POW_DIFFICULTY, MAX_POW_DIFFICULTY)
     }
 
@@ -393,16 +411,27 @@ mod tests {
         // Promotion : 3 endossements qualifiés de nœuds de confiance rendent
         // le nouveau venu "de confiance" — exactement comme `endorse`.
         rep.apply_remote_endorsement(
-            &Endorsement { endorser: g2.clone(), endorsed: newcomer.clone(), timestamp: 1_005 },
+            &Endorsement {
+                endorser: g2.clone(),
+                endorsed: newcomer.clone(),
+                timestamp: 1_005,
+            },
             true,
         )
         .unwrap();
         rep.apply_remote_endorsement(
-            &Endorsement { endorser: g3.clone(), endorsed: newcomer.clone(), timestamp: 1_006 },
+            &Endorsement {
+                endorser: g3.clone(),
+                endorsed: newcomer.clone(),
+                timestamp: 1_006,
+            },
             true,
         )
         .unwrap();
-        assert!(rep.is_trusted(&newcomer), "3 qualified endorsements must promote");
+        assert!(
+            rep.is_trusted(&newcomer),
+            "3 qualified endorsements must promote"
+        );
         assert_eq!(rep.score(&newcomer), TRUSTED_THRESHOLD);
     }
 
@@ -417,12 +446,20 @@ mod tests {
         let b = key("b");
 
         rep.apply_remote_endorsement(
-            &Endorsement { endorser: g1.clone(), endorsed: a.clone(), timestamp: 1 },
+            &Endorsement {
+                endorser: g1.clone(),
+                endorsed: a.clone(),
+                timestamp: 1,
+            },
             true,
         )
         .unwrap();
         rep.apply_remote_endorsement(
-            &Endorsement { endorser: g2.clone(), endorsed: b.clone(), timestamp: 2 },
+            &Endorsement {
+                endorser: g2.clone(),
+                endorsed: b.clone(),
+                timestamp: 2,
+            },
             true,
         )
         .unwrap();
@@ -433,7 +470,11 @@ mod tests {
         assert!(pending.iter().any(|e| e.endorser == g2 && e.endorsed == b));
 
         // Un doublon rejeté n'ajoute rien au jeu de relai.
-        let dup = Endorsement { endorser: g1.clone(), endorsed: a.clone(), timestamp: 3 };
+        let dup = Endorsement {
+            endorser: g1.clone(),
+            endorsed: a.clone(),
+            timestamp: 3,
+        };
         assert!(rep.apply_remote_endorsement(&dup, true).is_err());
         assert_eq!(rep.pending_endorsements().len(), 2);
     }

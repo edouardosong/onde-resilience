@@ -102,20 +102,22 @@ impl ZimReader {
 
     pub fn get_article(&self, url: &str) -> Option<ZimArticle> {
         self.title_index.get(url).map(|idx| ZimArticle {
-                url: url.to_string(),
-                title: url.replace(['_', '-'], " ").to_string(),
-                mime_type: "text/html".to_string(),
-                content: Vec::new(),
-                content_size: 0,
-                is_main: false,
-                namespace: 'A',
-                index: *idx,
-            })
+            url: url.to_string(),
+            title: url.replace(['_', '-'], " ").to_string(),
+            mime_type: "text/html".to_string(),
+            content: Vec::new(),
+            content_size: 0,
+            is_main: false,
+            namespace: 'A',
+            index: *idx,
+        })
     }
 
     pub fn search(&self, query: &str, max_results: usize) -> Vec<SearchResult> {
         let query_lower = query.to_lowercase();
-        let mut results: Vec<SearchResult> = self.title_index.keys()
+        let mut results: Vec<SearchResult> = self
+            .title_index
+            .keys()
             .filter(|url| url.to_lowercase().contains(&query_lower))
             .take(max_results)
             .map(|url| SearchResult {
@@ -126,7 +128,11 @@ impl ZimReader {
                 namespace: 'A',
             })
             .collect();
-        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         results
     }
 

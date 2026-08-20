@@ -4,14 +4,14 @@
 //! Provides DTN routing, PoW antispam, Nostr protocol,
 //! cryptography, AI inference, and offline storage.
 
-pub mod network;
-pub mod protocol;
+pub mod ai;
 pub mod crypto;
+pub mod network;
+pub mod node;
+pub mod protocol;
 pub mod reputation;
 pub mod storage;
 pub mod update;
-pub mod ai;
-pub mod node;
 
 // Re-exports for convenience
 pub use dtn_router as dtn;

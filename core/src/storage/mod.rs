@@ -1,12 +1,12 @@
+use serde::{Deserialize, Serialize};
 /// Offline Storage — ZIM reader, MBTiles renderer, IPFS seeder
 ///
 /// Honest-storage principle (prototype): a missing file fails loudly with an
 /// `Err`. Demo data is only ever loaded through EXPLICIT methods
 /// (`load_demo` / `register_demo_seeds`), never silently by default.
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::fs;
-use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 use base64::Engine as _;
 
@@ -82,14 +82,27 @@ impl ZimReader {
         let demo_articles: [(&str, &[u8]); 6] = [
             ("Premiers_secours", b"Article sur les premiers secours..."),
             ("Survie", b"Techniques de survie en milieu hostile..."),
-            ("Purification_de_l_eau", b"Purifier l'eau par ebullition ou filtration..."),
-            ("Communication_radio", b"Etablir des communications radio de secours..."),
-            ("Abri_d_urgence", b"Construire un abri d'urgence avec des moyens locaux..."),
-            ("Orientation_cartographique", b"Se reperer avec carte et boussole..."),
+            (
+                "Purification_de_l_eau",
+                b"Purifier l'eau par ebullition ou filtration...",
+            ),
+            (
+                "Communication_radio",
+                b"Etablir des communications radio de secours...",
+            ),
+            (
+                "Abri_d_urgence",
+                b"Construire un abri d'urgence avec des moyens locaux...",
+            ),
+            (
+                "Orientation_cartographique",
+                b"Se reperer avec carte et boussole...",
+            ),
         ];
         self.article_cache.clear();
         for (title, content) in demo_articles {
-            self.article_cache.insert(title.to_string(), content.to_vec());
+            self.article_cache
+                .insert(title.to_string(), content.to_vec());
         }
         self.total_articles = demo_articles.len() as u64;
         self.archive_path = None;
@@ -284,7 +297,7 @@ fn decode_demo_png() -> Vec<u8> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SeedInfo {
-    pub cid: String,               // Content ID
+    pub cid: String, // Content ID
     pub file_name: String,
     pub file_size_bytes: u64,
     pub mime_type: String,
@@ -340,11 +353,36 @@ impl IpfsSeeder {
     /// remaining capacity are skipped. Never invoked implicitly.
     pub fn register_demo_seeds(&mut self) {
         let demo_seeds = [
-            ("QmWikipedia", "wikipedia_fr_2024.zim", 90_000_000_000u64, "application/x-zim"),
-            ("QmOndeAPK", "onde-latest.apk", 45_000_000u64, "application/vnd.android.package-archive"),
-            ("QmQwen08B", "qwen2-0_5b-q4_k_m.gguf", 530_000_000u64, "application/octet-stream"),
-            ("QmQwen9B", "qwen2-7b-q4_k_m.gguf", 5_600_000_000u64, "application/octet-stream"),
-            ("QmMaps", "france_tiles.mbtiles", 2_000_000_000u64, "application/x-sqlite"),
+            (
+                "QmWikipedia",
+                "wikipedia_fr_2024.zim",
+                90_000_000_000u64,
+                "application/x-zim",
+            ),
+            (
+                "QmOndeAPK",
+                "onde-latest.apk",
+                45_000_000u64,
+                "application/vnd.android.package-archive",
+            ),
+            (
+                "QmQwen08B",
+                "qwen2-0_5b-q4_k_m.gguf",
+                530_000_000u64,
+                "application/octet-stream",
+            ),
+            (
+                "QmQwen9B",
+                "qwen2-7b-q4_k_m.gguf",
+                5_600_000_000u64,
+                "application/octet-stream",
+            ),
+            (
+                "QmMaps",
+                "france_tiles.mbtiles",
+                2_000_000_000u64,
+                "application/x-sqlite",
+            ),
         ];
 
         for (cid, name, size, mime) in demo_seeds {
@@ -468,8 +506,8 @@ pub enum StoragePolicy {
 impl StoragePolicy {
     pub fn max_bytes(self) -> u64 {
         match self {
-            StoragePolicy::Mobile => 64 * 1024 * 1024,      // 64 MB
-            StoragePolicy::Desktop => 2 * 1024 * 1024 * 1024, // 2 GB
+            StoragePolicy::Mobile => 64 * 1024 * 1024,         // 64 MB
+            StoragePolicy::Desktop => 2 * 1024 * 1024 * 1024,  // 2 GB
             StoragePolicy::Gateway => 16 * 1024 * 1024 * 1024, // 16 GB
         }
     }
@@ -529,7 +567,9 @@ impl TieredMessageStore {
     /// Compresser un payload (Deflate).
     fn compress(data: &[u8]) -> Vec<u8> {
         let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
-        encoder.write_all(data).expect("in-memory write cannot fail");
+        encoder
+            .write_all(data)
+            .expect("in-memory write cannot fail");
         encoder.finish().expect("in-memory finish cannot fail")
     }
 
@@ -585,7 +625,10 @@ impl TieredMessageStore {
 
     /// Récupérer le payload décompressé d'un message.
     pub fn get(&self, id: &str) -> Option<Result<Vec<u8>, String>> {
-        self.messages.iter().find(|m| m.id == id).map(|m| Self::decompress(&m.payload))
+        self.messages
+            .iter()
+            .find(|m| m.id == id)
+            .map(|m| Self::decompress(&m.payload))
     }
 
     /// Accès aux messages stockés (pour la persistance SQLite).
@@ -611,14 +654,20 @@ impl TieredMessageStore {
     /// de messages purgés.
     pub fn sweep_expired(&mut self, now: u64) -> usize {
         let before = self.messages.len();
-        self.messages.retain(|m| now.saturating_sub(m.created_at) < m.tier.retention_secs());
+        self.messages
+            .retain(|m| now.saturating_sub(m.created_at) < m.tier.retention_secs());
         before - self.messages.len()
     }
 
     /// Décider si un message doit être stocké localement selon le sharding
     /// Geohash : on garde ce qui est dans notre voisinage (préfixe commun
     /// >= `prefix_len`) ou les alertes critiques.
-    pub fn should_store_locally(geohash: &str, my_geohash: &str, tier: MessageTier, prefix_len: usize) -> bool {
+    pub fn should_store_locally(
+        geohash: &str,
+        my_geohash: &str,
+        tier: MessageTier,
+        prefix_len: usize,
+    ) -> bool {
         if tier == MessageTier::Critical {
             return true;
         }
@@ -652,10 +701,34 @@ impl TieredMessageStore {
     /// Nombre de messages par tier (stats).
     pub fn count_by_tier(&self) -> [(MessageTier, usize); 4] {
         [
-            (MessageTier::Critical, self.messages.iter().filter(|m| m.tier == MessageTier::Critical).count()),
-            (MessageTier::Important, self.messages.iter().filter(|m| m.tier == MessageTier::Important).count()),
-            (MessageTier::Normal, self.messages.iter().filter(|m| m.tier == MessageTier::Normal).count()),
-            (MessageTier::Low, self.messages.iter().filter(|m| m.tier == MessageTier::Low).count()),
+            (
+                MessageTier::Critical,
+                self.messages
+                    .iter()
+                    .filter(|m| m.tier == MessageTier::Critical)
+                    .count(),
+            ),
+            (
+                MessageTier::Important,
+                self.messages
+                    .iter()
+                    .filter(|m| m.tier == MessageTier::Important)
+                    .count(),
+            ),
+            (
+                MessageTier::Normal,
+                self.messages
+                    .iter()
+                    .filter(|m| m.tier == MessageTier::Normal)
+                    .count(),
+            ),
+            (
+                MessageTier::Low,
+                self.messages
+                    .iter()
+                    .filter(|m| m.tier == MessageTier::Low)
+                    .count(),
+            ),
         ]
     }
 
@@ -697,7 +770,7 @@ mod tests {
     fn test_zim_load_real_header() {
         // Synthetic openZIM header: >= 70 bytes, major version 5, articleCount = 12345
         let mut buf = [0u8; 70];
-        buf[0..2].copy_from_slice(&5u16.to_le_bytes());   // major version
+        buf[0..2].copy_from_slice(&5u16.to_le_bytes()); // major version
         buf[14..22].copy_from_slice(&12345u64.to_le_bytes()); // article count
         let path = std::env::temp_dir().join(format!("onde-zim-{}.zim", std::process::id()));
         std::fs::write(&path, buf).unwrap();
@@ -714,7 +787,7 @@ mod tests {
     fn test_zim_rejects_old_major_version() {
         // >= 70 bytes so the header is fully read, major version 3 (< 5)
         let mut buf = [0u8; 70];
-        buf[0..2].copy_from_slice(&3u16.to_le_bytes());   // major version 3
+        buf[0..2].copy_from_slice(&3u16.to_le_bytes()); // major version 3
         buf[14..22].copy_from_slice(&100u64.to_le_bytes());
         let path = std::env::temp_dir().join(format!("onde-zim-old-{}.zim", std::process::id()));
         std::fs::write(&path, buf).unwrap();
@@ -722,7 +795,10 @@ mod tests {
         let mut reader = ZimReader::new();
         let err = reader.load_archive(path.to_str().unwrap()).unwrap_err();
         assert!(err.contains("not a valid ZIM"), "unexpected error: {err}");
-        assert!(err.contains("3"), "error must mention the major version: {err}");
+        assert!(
+            err.contains("3"),
+            "error must mention the major version: {err}"
+        );
 
         std::fs::remove_file(&path).ok();
     }
@@ -747,7 +823,10 @@ mod tests {
     fn test_zim_load_demo() {
         let mut reader = ZimReader::new();
         let count = reader.load_demo();
-        assert!(count >= 5, "demo mode must expose at least 5 articles, got {count}");
+        assert!(
+            count >= 5,
+            "demo mode must expose at least 5 articles, got {count}"
+        );
         assert_eq!(reader.total_articles(), count);
         assert!(
             !reader.search("secours").is_empty(),
@@ -815,7 +894,8 @@ mod tests {
             );
             // IEND chunk present
             assert!(
-                tile.windows(8).any(|w| w == [0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82]),
+                tile.windows(8)
+                    .any(|w| w == [0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82]),
                 "tile must contain the IEND chunk"
             );
             assert!(tile.len() > 60, "demo tile must be a full PNG");
@@ -847,7 +927,8 @@ mod tests {
     #[test]
     fn test_ipfs_new_empty_no_auto_demo() {
         let path = std::env::temp_dir().join(format!("onde-ipfs-{}", std::process::id()));
-        let seeder = IpfsSeeder::new(path.to_str().unwrap(), 100).expect("seeder should initialize");
+        let seeder =
+            IpfsSeeder::new(path.to_str().unwrap(), 100).expect("seeder should initialize");
         assert!(
             seeder.list_seeds().is_empty(),
             "no demo seeds may be auto-registered"
@@ -916,7 +997,14 @@ mod tests {
         let mut store = TieredMessageStore::new(StoragePolicy::Mobile);
         let payload = b"alerte civique : coupure d'eau secteur nord, reservoir 3 rempli".repeat(10);
 
-        let stored = store.store("evt-1", MessageTier::Critical, &payload, 1_800_000_000, "u09tunq")
+        let stored = store
+            .store(
+                "evt-1",
+                MessageTier::Critical,
+                &payload,
+                1_800_000_000,
+                "u09tunq",
+            )
             .expect("store must accept within budget");
         assert!(stored);
 
@@ -925,7 +1013,10 @@ mod tests {
         assert!(compressed < raw, "compression must reduce size");
 
         // Round-trip
-        let got = store.get("evt-1").expect("message must exist").expect("decompress ok");
+        let got = store
+            .get("evt-1")
+            .expect("message must exist")
+            .expect("decompress ok");
         assert_eq!(got, payload);
     }
 
@@ -935,9 +1026,21 @@ mod tests {
         let now = 2_000_000_000u64;
         // Messages locaux (geohash du nœud) — le sharding géographique les
         // retient ; seuls des messages distants non critiques seraient écartés.
-        store.store("crit", MessageTier::Critical, b"c", now - 2 * 24 * 3600, "u09tunq").unwrap();
-        store.store("norm", MessageTier::Normal, b"n", now - 7 * 3600, "u09tunq").unwrap();
-        store.store("low", MessageTier::Low, b"l", now - 7200, "u09tunq").unwrap();
+        store
+            .store(
+                "crit",
+                MessageTier::Critical,
+                b"c",
+                now - 2 * 24 * 3600,
+                "u09tunq",
+            )
+            .unwrap();
+        store
+            .store("norm", MessageTier::Normal, b"n", now - 7 * 3600, "u09tunq")
+            .unwrap();
+        store
+            .store("low", MessageTier::Low, b"l", now - 7200, "u09tunq")
+            .unwrap();
 
         assert_eq!(store.total_count(), 3);
         let purged = store.sweep_expired(now);
@@ -951,13 +1054,33 @@ mod tests {
     #[test]
     fn test_geohash_sharding() {
         let my = "u09tunq"; // Paris (Eiffel Tower)
-        // Même voisinage (préfixe >= 5) → stockage local
-        assert!(TieredMessageStore::should_store_locally("u09tunx", my, MessageTier::Normal, 5));
+                            // Même voisinage (préfixe >= 5) → stockage local
+        assert!(TieredMessageStore::should_store_locally(
+            "u09tunx",
+            my,
+            MessageTier::Normal,
+            5
+        ));
         // Zone éloignée → non stocké (sauf alerte critique)
-        assert!(!TieredMessageStore::should_store_locally("sp05abc", my, MessageTier::Normal, 5));
-        assert!(TieredMessageStore::should_store_locally("sp05abc", my, MessageTier::Critical, 5));
+        assert!(!TieredMessageStore::should_store_locally(
+            "sp05abc",
+            my,
+            MessageTier::Normal,
+            5
+        ));
+        assert!(TieredMessageStore::should_store_locally(
+            "sp05abc",
+            my,
+            MessageTier::Critical,
+            5
+        ));
         // prefix_len = 0 → rien n'est stocké localement
-        assert!(!TieredMessageStore::should_store_locally("u09tunq", my, MessageTier::Normal, 0));
+        assert!(!TieredMessageStore::should_store_locally(
+            "u09tunq",
+            my,
+            MessageTier::Normal,
+            0
+        ));
     }
 
     #[test]
@@ -968,40 +1091,67 @@ mod tests {
         let payload = b"message de test";
 
         // 1. Même geohash (message local) → stocké
-        assert!(store.store("local", MessageTier::Normal, payload, 1_000, "u09tunq").unwrap());
+        assert!(store
+            .store("local", MessageTier::Normal, payload, 1_000, "u09tunq")
+            .unwrap());
         // 2. Voisinage proche (préfixe 5 commun : u09tu) → stocké
-        assert!(store.store("near", MessageTier::Normal, payload, 1_000, "u09tuxx").unwrap());
+        assert!(store
+            .store("near", MessageTier::Normal, payload, 1_000, "u09tuxx")
+            .unwrap());
         // 3. Zone éloignée en tier Normal → NON stocké (routé seulement)
-        assert!(!store.store("far", MessageTier::Normal, payload, 1_000, "sp05abc").unwrap());
+        assert!(!store
+            .store("far", MessageTier::Normal, payload, 1_000, "sp05abc")
+            .unwrap());
         // 4. Zone éloignée mais Critical → toujours stocké (urgence)
-        assert!(store.store("far-crit", MessageTier::Critical, payload, 1_000, "sp05abc").unwrap());
+        assert!(store
+            .store("far-crit", MessageTier::Critical, payload, 1_000, "sp05abc")
+            .unwrap());
 
         assert_eq!(store.total_count(), 3);
         assert!(store.get("local").is_some());
         assert!(store.get("near").is_some());
-        assert!(store.get("far").is_none(), "far Normal message must not be stored locally");
-        assert!(store.get("far-crit").is_some(), "critical alerts are always kept");
+        assert!(
+            store.get("far").is_none(),
+            "far Normal message must not be stored locally"
+        );
+        assert!(
+            store.get("far-crit").is_some(),
+            "critical alerts are always kept"
+        );
     }
 
     #[test]
     fn test_delegate_threshold() {
         let mobile = TieredMessageStore::new(StoragePolicy::Mobile);
-        assert!(mobile.should_delegate(70_000), "mobile delegates payloads > 64 KB");
+        assert!(
+            mobile.should_delegate(70_000),
+            "mobile delegates payloads > 64 KB"
+        );
         assert!(!mobile.should_delegate(1_000));
 
         let gateway = TieredMessageStore::new(StoragePolicy::Gateway);
-        assert!(!gateway.should_delegate(70_000), "gateway keeps larger payloads locally");
+        assert!(
+            !gateway.should_delegate(70_000),
+            "gateway keeps larger payloads locally"
+        );
     }
 
     #[test]
     fn test_store_respects_budget() {
         let mut store = TieredMessageStore::new(StoragePolicy::Mobile); // 64 MB
         let big = vec![0x55u8; 40 * 1024 * 1024];
-        store.store("a", MessageTier::Important, &big, 1_000, "u09tunq").unwrap();
+        store
+            .store("a", MessageTier::Important, &big, 1_000, "u09tunq")
+            .unwrap();
         // Deuxième message de 40 Mo : 40+40 = 80 Mo > budget mobile 64 Mo
         // → refusé localement (le budget compte la taille brute, pas compressée)
-        let second = store.store("b", MessageTier::Important, &big, 1_001, "u09tunq").unwrap();
-        assert!(!second, "second 40 MB message must exceed the 64 MB mobile budget");
+        let second = store
+            .store("b", MessageTier::Important, &big, 1_001, "u09tunq")
+            .unwrap();
+        assert!(
+            !second,
+            "second 40 MB message must exceed the 64 MB mobile budget"
+        );
         assert_eq!(store.total_count(), 1);
     }
 }

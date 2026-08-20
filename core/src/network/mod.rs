@@ -180,7 +180,10 @@ mod tests {
             .parse()
             .expect("generated address must be a valid IPv6 address");
         // ULA fd00::/8: starts with "fd", first octet is 0xfd
-        assert!(ipv6.starts_with("fd"), "ULA address must start with fd, got: {ipv6}");
+        assert!(
+            ipv6.starts_with("fd"),
+            "ULA address must start with fd, got: {ipv6}"
+        );
         assert_eq!(parsed.octets()[0], 0xfd);
         assert_eq!(parsed.octets().len(), 16);
     }
@@ -201,7 +204,10 @@ mod tests {
         let a = YggdrasilAddress::new("node-1");
         let b = YggdrasilAddress::new("node-2");
         let (addr_a, addr_b) = (a.generate_ipv6(), b.generate_ipv6());
-        assert_ne!(addr_a, addr_b, "different identities must give different addresses");
+        assert_ne!(
+            addr_a, addr_b,
+            "different identities must give different addresses"
+        );
         // Both remain valid ULAs
         assert!(addr_a.starts_with("fd"));
         assert!(addr_b.starts_with("fd"));
@@ -210,10 +216,7 @@ mod tests {
     #[test]
     fn test_tree_distance_identical() {
         let addr = "fd00::1";
-        assert_eq!(
-            YggdrasilAddress::tree_distance(addr, addr).unwrap(),
-            128
-        );
+        assert_eq!(YggdrasilAddress::tree_distance(addr, addr).unwrap(), 128);
     }
 
     #[test]
@@ -248,10 +251,7 @@ mod tests {
     #[test]
     fn test_tree_distance_no_common_bit() {
         // 0x00 (0000_0000) vs 0x80 (1000_0000): no common MSB bit
-        assert_eq!(
-            YggdrasilAddress::tree_distance("::", "8000::").unwrap(),
-            0
-        );
+        assert_eq!(YggdrasilAddress::tree_distance("::", "8000::").unwrap(), 0);
     }
 
     #[test]

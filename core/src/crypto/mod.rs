@@ -1,10 +1,7 @@
-/// Cryptography — Ed25519 identities, X25519 ECDH encryption, ZK transactions
-use ed25519_dalek::{SigningKey, VerifyingKey, Verifier, Signer};
+use chacha20poly1305::{aead::AeadInPlace, ChaCha20Poly1305, Key, KeyInit, Nonce};
 use ed25519_dalek::Signature as EdSignature;
-use chacha20poly1305::{
-    aead::AeadInPlace,
-    ChaCha20Poly1305, Key, Nonce, KeyInit,
-};
+/// Cryptography — Ed25519 identities, X25519 ECDH encryption, ZK transactions
+use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use rand::rngs::OsRng as RandOsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -361,10 +358,10 @@ impl RotatingIdentity {
         if now.saturating_sub(self.last_rotation) < self.rotation_interval_secs {
             return false;
         }
-        self.previous = Some(std::mem::replace(&mut self.current, std::mem::replace(
-            &mut self.next,
-            Identity::generate(),
-        )));
+        self.previous = Some(std::mem::replace(
+            &mut self.current,
+            std::mem::replace(&mut self.next, Identity::generate()),
+        ));
         self.last_rotation = now;
         self.rotations += 1;
         true
@@ -661,8 +658,7 @@ impl ZkTransaction {
             .as_bytes(),
         ));
         self.zk_proof.commitment == expected_commitment
-            && self.zk_proof.public_inputs
-                == [self.sender.clone(), self.receiver.clone()]
+            && self.zk_proof.public_inputs == [self.sender.clone(), self.receiver.clone()]
     }
 }
 
@@ -714,7 +710,11 @@ impl TxPool {
         }
 
         // Reject duplicate (same sender + nonce already pending)
-        if self.pending.iter().any(|t| t.sender == tx.sender && t.nonce == tx.nonce) {
+        if self
+            .pending
+            .iter()
+            .any(|t| t.sender == tx.sender && t.nonce == tx.nonce)
+        {
             return Err("Duplicate nonce".to_string());
         }
 
@@ -744,7 +744,7 @@ impl TxPool {
             // Update state root
             let last = self.state_roots.last().unwrap().clone();
             let new_root = hex::encode(Sha256::digest(
-                format!("{last}:{}", self.committed.len()).as_bytes()
+                format!("{last}:{}", self.committed.len()).as_bytes(),
             ));
             self.state_roots.push(new_root);
         }
@@ -771,7 +771,6 @@ impl Default for TxPool {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -797,7 +796,10 @@ mod tests {
         assert_ne!(identity.x25519_secret_key_bytes(), pub_bytes);
         // Two identities must have distinct X25519 public keys
         let other = Identity::generate();
-        assert_ne!(identity.x25519_public_key_hex(), other.x25519_public_key_hex());
+        assert_ne!(
+            identity.x25519_public_key_hex(),
+            other.x25519_public_key_hex()
+        );
     }
 
     #[test]
@@ -806,7 +808,8 @@ mod tests {
         let bob = Identity::generate();
 
         let message = b"Message confidentiel pour Bob";
-        let envelope = EncryptedEnvelope::encrypt(message, &alice, &bob.x25519_public_key_bytes()).unwrap();
+        let envelope =
+            EncryptedEnvelope::encrypt(message, &alice, &bob.x25519_public_key_bytes()).unwrap();
 
         // Envelope carries the ephemeral public key and the sender's X25519 key
         assert_eq!(envelope.eph_public_key.len(), 32);
@@ -828,7 +831,9 @@ mod tests {
         let bob = Identity::generate();
         let charlie = Identity::generate();
 
-        let envelope = EncryptedEnvelope::encrypt(b"top secret", &alice, &bob.x25519_public_key_bytes()).unwrap();
+        let envelope =
+            EncryptedEnvelope::encrypt(b"top secret", &alice, &bob.x25519_public_key_bytes())
+                .unwrap();
 
         // Bob (intended recipient) decrypts fine
         assert!(EncryptedEnvelope::decrypt(&envelope, &bob).is_ok());
@@ -843,7 +848,8 @@ mod tests {
         let alice = Identity::generate();
         let bob = Identity::generate();
 
-        let mut envelope = EncryptedEnvelope::encrypt(b"hello", &alice, &bob.x25519_public_key_bytes()).unwrap();
+        let mut envelope =
+            EncryptedEnvelope::encrypt(b"hello", &alice, &bob.x25519_public_key_bytes()).unwrap();
         // Flip a bit in the ciphertext — authentication must fail
         envelope.ciphertext[0] ^= 0x01;
         assert!(EncryptedEnvelope::decrypt(&envelope, &bob).is_err());
@@ -860,8 +866,7 @@ mod tests {
         let eve = Identity::generate();
 
         let mut envelope =
-            EncryptedEnvelope::encrypt(b"to bob", &alice, &bob.x25519_public_key_bytes())
-                .unwrap();
+            EncryptedEnvelope::encrypt(b"to bob", &alice, &bob.x25519_public_key_bytes()).unwrap();
 
         // Honest path still works
         assert_eq!(
@@ -892,8 +897,9 @@ mod tests {
 
         // E2E across a restore must round-trip
         let bob = Identity::generate();
-        let envelope = EncryptedEnvelope::encrypt(b"after restart", &a1, &bob.x25519_public_key_bytes())
-            .unwrap();
+        let envelope =
+            EncryptedEnvelope::encrypt(b"after restart", &a1, &bob.x25519_public_key_bytes())
+                .unwrap();
         assert_eq!(
             EncryptedEnvelope::decrypt(&envelope, &bob).unwrap(),
             b"after restart"
@@ -942,7 +948,9 @@ mod tests {
         );
 
         // La transaction authentique, elle, passe
-        assert!(pool.submit(ZkTransaction::new("alice", "bob", 100, 0)).is_ok());
+        assert!(pool
+            .submit(ZkTransaction::new("alice", "bob", 100, 0))
+            .is_ok());
     }
 
     #[test]
@@ -965,25 +973,35 @@ mod tests {
         let mut pool = TxPool::new();
 
         // Nonce 0 submitted and committed
-        pool.submit(ZkTransaction::new("alice", "bob", 100, 0)).unwrap();
+        pool.submit(ZkTransaction::new("alice", "bob", 100, 0))
+            .unwrap();
         pool.commit_pending(10);
         assert_eq!(pool.next_expected_nonce("alice"), 1);
 
         // Replay of the committed nonce → rejected (behind the expected sequence)
         let replay = ZkTransaction::new("alice", "bob", 100, 0);
-        assert!(pool.submit(replay).is_err(), "Nonce behind expected sequence must be rejected");
+        assert!(
+            pool.submit(replay).is_err(),
+            "Nonce behind expected sequence must be rejected"
+        );
 
         // Nonce 1 is the next expected → accepted
-        pool.submit(ZkTransaction::new("alice", "bob", 100, 1)).unwrap();
+        pool.submit(ZkTransaction::new("alice", "bob", 100, 1))
+            .unwrap();
         assert_eq!(pool.next_expected_nonce("alice"), 2);
 
         // Same (sender, nonce) already pending → rejected as duplicate
         let dup = ZkTransaction::new("alice", "bob", 999, 1);
-        assert!(pool.submit(dup).is_err(), "Duplicate (sender, nonce) must be rejected");
+        assert!(
+            pool.submit(dup).is_err(),
+            "Duplicate (sender, nonce) must be rejected"
+        );
 
         // Independent nonce sequence per sender
         assert_eq!(pool.next_expected_nonce("carol"), 0);
-        assert!(pool.submit(ZkTransaction::new("carol", "alice", 100, 0)).is_ok());
+        assert!(pool
+            .submit(ZkTransaction::new("carol", "alice", 100, 0))
+            .is_ok());
     }
 
     #[test]
@@ -1044,8 +1062,8 @@ mod tests {
             .expect("valid hex")
             .try_into()
             .expect("32 bytes");
-        let envelope = EncryptedEnvelope::encrypt(b"secret to old identity", &sender, &old_pub_bytes)
-            .unwrap();
+        let envelope =
+            EncryptedEnvelope::encrypt(b"secret to old identity", &sender, &old_pub_bytes).unwrap();
 
         // Déchiffrement avec l'ancienne clé : OK
         assert!(EncryptedEnvelope::decrypt(&envelope, rot.current()).is_ok());
@@ -1070,17 +1088,30 @@ mod tests {
         let (sig, bytes) = manifest.sign(&root);
 
         // Vérification avec la racine épinglée : OK
-        assert!(ApkManifest::verify(&root.verifying_key_bytes(), &bytes, &sig));
+        assert!(ApkManifest::verify(
+            &root.verifying_key_bytes(),
+            &bytes,
+            &sig
+        ));
 
         // Mauvaise racine → rejeté
         let other_root = Identity::generate();
-        assert!(!ApkManifest::verify(&other_root.verifying_key_bytes(), &bytes, &sig));
+        assert!(!ApkManifest::verify(
+            &other_root.verifying_key_bytes(),
+            &bytes,
+            &sig
+        ));
 
         // Manifeste falsifié (APK différent) → rejeté
         let evil_apk: Vec<u8> = (0..4096u32).map(|i| (i % 249) as u8).collect();
-        let evil_manifest = ApkManifest::from_apk(&evil_apk, dev.verifying_key_bytes(), 1_800_000_000);
+        let evil_manifest =
+            ApkManifest::from_apk(&evil_apk, dev.verifying_key_bytes(), 1_800_000_000);
         let (evil_sig, _evil_bytes) = evil_manifest.sign(&root);
-        assert!(!ApkManifest::verify(&root.verifying_key_bytes(), &bytes, &evil_sig));
+        assert!(!ApkManifest::verify(
+            &root.verifying_key_bytes(),
+            &bytes,
+            &evil_sig
+        ));
 
         // Le hash de l'APK d'origine est bien celui attendu
         let hash: [u8; 32] = Sha256::digest(&apk).into();
@@ -1098,24 +1129,35 @@ mod tests {
         let (sig, manifest_bytes) = manifest.sign(&root);
 
         // APK authentique + signature racine valide → accepté
-        let verified = verify_apk_signature(&apk, &manifest_bytes, &sig, &root.verifying_key_bytes())
-            .expect("authentic APK must verify");
+        let verified =
+            verify_apk_signature(&apk, &manifest_bytes, &sig, &root.verifying_key_bytes())
+                .expect("authentic APK must verify");
         assert_eq!(verified.dev_pubkey, dev.verifying_key_bytes());
         assert_eq!(verified.timestamp, 1_800_000_000);
 
         // APK falsifié (contenu modifié) → rejeté (hash mismatch)
         let evil_apk: Vec<u8> = (0..8192u32).map(|i| (i % 251) as u8).collect();
         assert!(
-            verify_apk_signature(&evil_apk, &manifest_bytes, &sig, &root.verifying_key_bytes())
-                .is_err(),
+            verify_apk_signature(
+                &evil_apk,
+                &manifest_bytes,
+                &sig,
+                &root.verifying_key_bytes()
+            )
+            .is_err(),
             "tampered APK must be rejected"
         );
 
         // Signature d'une racine inconnue → rejeté (pinning)
         let other_root = Identity::generate();
         assert!(
-            verify_apk_signature(&apk, &manifest_bytes, &sig, &other_root.verifying_key_bytes())
-                .is_err(),
+            verify_apk_signature(
+                &apk,
+                &manifest_bytes,
+                &sig,
+                &other_root.verifying_key_bytes()
+            )
+            .is_err(),
             "untrusted root must be rejected"
         );
 
@@ -1158,7 +1200,11 @@ mod tests {
         assert_eq!(TrafficPadding::bucket_for(20_000), 16_384);
         let big = vec![0x03; 20_000];
         let padded = TrafficPadding::pad(&big);
-        assert_eq!(padded.len(), 20_000, "oversized messages are never truncated");
+        assert_eq!(
+            padded.len(),
+            20_000,
+            "oversized messages are never truncated"
+        );
         assert_eq!(TrafficPadding::unpad(&padded), big.as_slice());
     }
 

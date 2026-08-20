@@ -1,10 +1,6 @@
 /// AI Module — PocketPal integration & Oracle RPC bridge
 pub use llm_inference::{
-    InferenceRequest,
-    InferenceResponse,
-    ModelSize,
-    OracleRpcServer,
-    PocketPalEngine,
+    InferenceRequest, InferenceResponse, ModelSize, OracleRpcServer, PocketPalEngine,
     VoiceTranscriber,
 };
 

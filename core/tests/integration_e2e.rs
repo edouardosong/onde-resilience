@@ -7,14 +7,16 @@
 //! - AI Query → Oracle Response
 //! - DTN Store-and-Forward
 
-use onde_core::crypto::Identity;
-use onde_core::protocol::{MeshEvent, OndeMessageType};
-use onde_core::node::{Node, NodeConfig, NodeType, UpdateHandlingOutcome, EndorsementHandlingOutcome};
-use onde_core::reputation::{Endorsement, TRUSTED_THRESHOLD};
-use onde_core::update::{UpdateProtocol, Version, DEFAULT_CHUNK_SIZE};
-use onde_core::storage::{ZimReader, MBTilesRenderer, IpfsSeeder, MessageTier};
-use dtn_router::{DtnRouter, DtnMessage, MessageType};
 use base64::Engine as _;
+use dtn_router::{DtnMessage, DtnRouter, MessageType};
+use onde_core::crypto::Identity;
+use onde_core::node::{
+    EndorsementHandlingOutcome, Node, NodeConfig, NodeType, UpdateHandlingOutcome,
+};
+use onde_core::protocol::{MeshEvent, OndeMessageType};
+use onde_core::reputation::{Endorsement, TRUSTED_THRESHOLD};
+use onde_core::storage::{IpfsSeeder, MBTilesRenderer, MessageTier, ZimReader};
+use onde_core::update::{UpdateProtocol, Version, DEFAULT_CHUNK_SIZE};
 
 /// Déplacer les événements en attente du gossip de `from` vers `to`
 /// (validation adaptative par réputation), puis les faire traiter par le
@@ -105,9 +107,7 @@ async fn test_alert_gossip_reception() {
 
     // Node B connaît A comme pair de confiance (Web of Trust) — c'est ce qui
     // lui permet d'accepter un événement à difficulté 0 sans se faire spammer.
-    node_b
-        .reputation
-        .bootstrap(&[node_a.identity.pubkey_hex()]);
+    node_b.reputation.bootstrap(&[node_a.identity.pubkey_hex()]);
 
     // Node B receives event via gossip (validation adaptative par réputation)
     assert!(
@@ -154,7 +154,10 @@ async fn test_zk_transaction_flow() {
     assert_eq!(tx.sender, node_a.identity.pubkey_hex());
     assert_eq!(tx.receiver, receiver_pubkey);
     assert_eq!(tx.amount_micro, 500);
-    assert!(!tx.zk_proof.commitment.is_empty(), "ZK proof should be generated");
+    assert!(
+        !tx.zk_proof.commitment.is_empty(),
+        "ZK proof should be generated"
+    );
 
     // Check pool state
     assert_eq!(node_a.tx_pool.pending_count(), 1);
@@ -177,7 +180,7 @@ async fn test_zk_transaction_flow() {
  */
 #[tokio::test]
 async fn test_voice_memo_transcription() {
-    use whisper_stt::{WhisperEngine, WhisperConfig};
+    use whisper_stt::{WhisperConfig, WhisperEngine};
 
     // Create voice memo event (simulated) — signed by a real identity so that
     // gossip validation (signature + PoW) accepts it
@@ -239,20 +242,30 @@ async fn test_ai_query_response() {
     });
 
     // Query AI engine directly
-    let response = node.ai_engine.lock().await.infer(
-        "Comment faire la RCP (Reanimation Cardio-Pulmonaire) ?",
-        256,
-    ).await;
+    let response = node
+        .ai_engine
+        .lock()
+        .await
+        .infer(
+            "Comment faire la RCP (Reanimation Cardio-Pulmonaire) ?",
+            256,
+        )
+        .await;
 
     // Verify response
     assert!(!response.text.is_empty(), "AI response should not be empty");
-    assert!(response.tokens_generated > 0, "Should have generated tokens");
+    assert!(
+        response.tokens_generated > 0,
+        "Should have generated tokens"
+    );
     assert!(response.latency_ms > 0, "Should have latency metric");
 
     // Verify response contains relevant first aid info
     let text_lower = response.text.to_lowercase();
     assert!(
-        text_lower.contains("compression") || text_lower.contains("cardio") || text_lower.contains("reanimation"),
+        text_lower.contains("compression")
+            || text_lower.contains("cardio")
+            || text_lower.contains("reanimation"),
         "Response should contain first aid related content"
     );
 }
@@ -283,7 +296,10 @@ async fn test_dtn_store_and_forward() {
     };
 
     // Store message in DTN buffer (Node D is offline)
-    assert!(router.store("node_a", msg).await, "Message should be stored");
+    assert!(
+        router.store("node_a", msg).await,
+        "Message should be stored"
+    );
 
     // Verify message is buffered
     assert_eq!(router.buffer_size("node_a").await, 1);
@@ -326,14 +342,18 @@ async fn test_full_node_lifecycle() {
     assert!(node.is_running());
 
     // Publish alert
-    let alert = node.publish_alert("Test alert from desktop".to_string()).await;
+    let alert = node
+        .publish_alert("Test alert from desktop".to_string())
+        .await;
     assert!(alert.is_ok());
 
     // Query AI
-    let response = node.ai_engine.lock().await.infer(
-        "Quelles sont les techniques de survie en foret ?",
-        128,
-    ).await;
+    let response = node
+        .ai_engine
+        .lock()
+        .await
+        .infer("Quelles sont les techniques de survie en foret ?", 128)
+        .await;
     assert!(!response.text.is_empty());
 
     // Check status
@@ -370,14 +390,18 @@ async fn test_multi_node_gossip() {
         .collect();
 
     // Node 0 publishes alert (self-trusted → PoW adaptatif = 0)
-    let alert = nodes[0].publish_alert("Alerte reseau: tremblement de terre".to_string()).await.unwrap();
+    let alert = nodes[0]
+        .publish_alert("Alerte reseau: tremblement de terre".to_string())
+        .await
+        .unwrap();
 
     // Propagation par gossip (simulation de flooding).
     // Chaque nœud connaît Node 0 comme pair de confiance (WoT), sinon un
     // événement à difficulté 0 serait (correctement) rejeté comme spam.
     let publisher_pubkey = nodes[0].identity.pubkey_hex();
     for (i, node) in nodes.iter_mut().enumerate().skip(1) {
-        node.reputation.bootstrap(std::slice::from_ref(&publisher_pubkey));
+        node.reputation
+            .bootstrap(std::slice::from_ref(&publisher_pubkey));
         // Clone de la réputation : emprunt disjoint via index impossible sinon
         let rep = node.reputation.clone();
         assert!(
@@ -412,7 +436,10 @@ async fn test_storage_integration() {
     let mut zim = ZimReader::new();
     zim.load_demo();
     let results = zim.search("secours");
-    assert!(!results.is_empty(), "demo mode must expose searchable articles");
+    assert!(
+        !results.is_empty(),
+        "demo mode must expose searchable articles"
+    );
     assert!(zim.total_articles() >= 5);
 
     // MBTiles Renderer — demo mode is explicit
@@ -538,7 +565,10 @@ async fn test_dtn_ttl_expiration() {
         delivered_to: vec![],
     };
 
-    assert!(router.store("node_x", msg).await, "Message should be stored");
+    assert!(
+        router.store("node_x", msg).await,
+        "Message should be stored"
+    );
     assert_eq!(router.buffer_size("node_x").await, 1);
 
     // First tick: TTL becomes 1
@@ -596,7 +626,10 @@ async fn test_dtn_buffer_overflow() {
         priority: 0, // Highest priority
         delivered_to: vec![],
     };
-    assert!(router.store("node_a", msg4).await, "More urgent message must be stored");
+    assert!(
+        router.store("node_a", msg4).await,
+        "More urgent message must be stored"
+    );
 
     // Buffer should still be at max (3), but one was dropped
     assert_eq!(router.buffer_size("node_a").await, 3);
@@ -652,8 +685,7 @@ async fn test_update_flow_between_two_nodes() -> Result<(), String> {
     node_a.reputation.bootstrap(std::slice::from_ref(&b_pubkey));
 
     // 1. Le distributeur annonce la version 2.0.0 (signée par la racine).
-    let announced = node_a
-        .announce_update(Version::new(2, 0, 0), &apk, 1_800_000_000)?;
+    let announced = node_a.announce_update(Version::new(2, 0, 0), &apk, 1_800_000_000)?;
     assert!(matches!(announced.kind, OndeMessageType::UpdateAnnounce));
     assert!(!announced.sig.is_empty(), "announcement must be signed");
 
@@ -691,31 +723,41 @@ async fn test_update_flow_between_two_nodes() -> Result<(), String> {
     );
     assert_eq!(
         installed.apk_sha256,
-        UpdateProtocol::build_announcement(Version::new(2, 0, 0), &apk, &root, 0).0.apk_sha256,
+        UpdateProtocol::build_announcement(Version::new(2, 0, 0), &apk, &root, 0)
+            .0
+            .apk_sha256,
         "installed hash must match the announced hash"
     );
 
     // 5. Une version NON supérieure (égale puis downgrade) est rejetée.
     let equal = node_a.announce_update(Version::new(2, 0, 0), &apk, 1_800_000_001)?;
     let reputation = node_b.reputation.clone();
-    assert!(
-        node_b.gossip.add_event_with_reputation(equal.clone(), &reputation).unwrap()
-    );
+    assert!(node_b
+        .gossip
+        .add_event_with_reputation(equal.clone(), &reputation)
+        .unwrap());
     match node_b.handle_incoming_update(&equal) {
         Ok(UpdateHandlingOutcome::Rejected(reason)) => {
-            assert!(reason.contains("not newer"), "equal version must be rejected: {reason}");
+            assert!(
+                reason.contains("not newer"),
+                "equal version must be rejected: {reason}"
+            );
         }
         other => panic!("equal version must be rejected, got {other:?}"),
     }
 
     let downgrade = node_a.announce_update(Version::new(1, 0, 0), &apk, 1_800_000_002)?;
     let reputation = node_b.reputation.clone();
-    assert!(
-        node_b.gossip.add_event_with_reputation(downgrade.clone(), &reputation).unwrap()
-    );
+    assert!(node_b
+        .gossip
+        .add_event_with_reputation(downgrade.clone(), &reputation)
+        .unwrap());
     match node_b.handle_incoming_update(&downgrade) {
         Ok(UpdateHandlingOutcome::Rejected(reason)) => {
-            assert!(reason.contains("not newer"), "downgrade must be rejected: {reason}");
+            assert!(
+                reason.contains("not newer"),
+                "downgrade must be rejected: {reason}"
+            );
         }
         other => panic!("downgrade must be rejected, got {other:?}"),
     }
@@ -769,23 +811,38 @@ async fn test_update_rejects_tampered_apk() -> Result<(), String> {
     // le manifeste ; livrer le manifeste → B demande le chunk 0.
     for ev in node_a.gossip.get_pending_for_peer(&b_pubkey) {
         let rep = node_b.reputation.clone();
-        if node_b.gossip.add_event_with_reputation(ev.clone(), &rep).unwrap() {
+        if node_b
+            .gossip
+            .add_event_with_reputation(ev.clone(), &rep)
+            .unwrap()
+        {
             node_b.handle_incoming_update(&ev)?;
         }
     }
     for ev in node_b.gossip.get_pending_for_peer(&a_pubkey) {
         let rep = node_a.reputation.clone();
-        if node_a.gossip.add_event_with_reputation(ev.clone(), &rep).unwrap() {
+        if node_a
+            .gossip
+            .add_event_with_reputation(ev.clone(), &rep)
+            .unwrap()
+        {
             node_a.handle_incoming_update(&ev)?;
         }
     }
     for ev in node_a.gossip.get_pending_for_peer(&b_pubkey) {
         let rep = node_b.reputation.clone();
-        if node_b.gossip.add_event_with_reputation(ev.clone(), &rep).unwrap() {
+        if node_b
+            .gossip
+            .add_event_with_reputation(ev.clone(), &rep)
+            .unwrap()
+        {
             node_b.handle_incoming_update(&ev)?;
         }
     }
-    assert!(node_b.update_protocol.has_pending(), "transfer must be initialized");
+    assert!(
+        node_b.update_protocol.has_pending(),
+        "transfer must be initialized"
+    );
     assert_eq!(node_b.update_protocol.chunks_received(), 0);
 
     // Le chunk 0 servi par A est FALSIFIÉ (un octet retourné), mais reste
@@ -805,7 +862,10 @@ async fn test_update_rejects_tampered_apk() -> Result<(), String> {
     )
     .with_pow_difficulty(0); // annonceur de confiance → PoW adaptatif 0
     let rep = node_b.reputation.clone();
-    assert!(node_b.gossip.add_event_with_reputation(evil_event.clone(), &rep).is_ok());
+    assert!(node_b
+        .gossip
+        .add_event_with_reputation(evil_event.clone(), &rep)
+        .is_ok());
     assert_eq!(
         node_b.handle_incoming_update(&evil_event)?,
         UpdateHandlingOutcome::ChunkRequested(1),
@@ -815,13 +875,21 @@ async fn test_update_rejects_tampered_apk() -> Result<(), String> {
     // Livrer la requête chunk 1 à A → A sert le chunk 1 réel ; livrer à B.
     for ev in node_b.gossip.get_pending_for_peer(&a_pubkey) {
         let rep = node_a.reputation.clone();
-        if node_a.gossip.add_event_with_reputation(ev.clone(), &rep).unwrap() {
+        if node_a
+            .gossip
+            .add_event_with_reputation(ev.clone(), &rep)
+            .unwrap()
+        {
             node_a.handle_incoming_update(&ev)?;
         }
     }
     for ev in node_a.gossip.get_pending_for_peer(&b_pubkey) {
         let rep = node_b.reputation.clone();
-        if node_b.gossip.add_event_with_reputation(ev.clone(), &rep).unwrap() {
+        if node_b
+            .gossip
+            .add_event_with_reputation(ev.clone(), &rep)
+            .unwrap()
+        {
             node_b.handle_incoming_update(&ev)?;
         }
     }
@@ -832,15 +900,24 @@ async fn test_update_rejects_tampered_apk() -> Result<(), String> {
     // signé → rejet.
     for ev in node_b.gossip.get_pending_for_peer(&a_pubkey) {
         let rep = node_a.reputation.clone();
-        if node_a.gossip.add_event_with_reputation(ev.clone(), &rep).unwrap() {
+        if node_a
+            .gossip
+            .add_event_with_reputation(ev.clone(), &rep)
+            .unwrap()
+        {
             node_a.handle_incoming_update(&ev)?;
         }
     }
     let mut saw_reject = false;
     for ev in node_a.gossip.get_pending_for_peer(&b_pubkey) {
         let rep = node_b.reputation.clone();
-        if node_b.gossip.add_event_with_reputation(ev.clone(), &rep).unwrap() {
-            if let Ok(UpdateHandlingOutcome::Rejected(reason)) = node_b.handle_incoming_update(&ev) {
+        if node_b
+            .gossip
+            .add_event_with_reputation(ev.clone(), &rep)
+            .unwrap()
+        {
+            if let Ok(UpdateHandlingOutcome::Rejected(reason)) = node_b.handle_incoming_update(&ev)
+            {
                 assert!(
                     reason.contains("verification"),
                     "tampered APK must fail end-to-end verification: {reason}"
@@ -854,7 +931,10 @@ async fn test_update_rejects_tampered_apk() -> Result<(), String> {
         node_b.update_protocol.latest_installed().is_none(),
         "no installation must occur for a tampered APK"
     );
-    assert!(!node_b.update_protocol.has_pending(), "poisoned transfer must be purged");
+    assert!(
+        !node_b.update_protocol.has_pending(),
+        "poisoned transfer must be purged"
+    );
     assert_eq!(
         node_b.update_protocol.current_version(),
         Version::new(1, 0, 0),
@@ -912,11 +992,27 @@ async fn test_endorsement_propagation_three_nodes() -> Result<(), String> {
     assert_eq!(node_a.reputation.endorsement_count(&b_pubkey), 1);
 
     // 2. Propagation A → B (direct), puis relai B → C (cascade).
-    assert_eq!(gossip_sync(&mut node_a, &mut node_b)?, 1, "B receives the endorsement");
-    assert_eq!(node_b.reputation.endorsement_count(&b_pubkey), 1, "B integrates it");
+    assert_eq!(
+        gossip_sync(&mut node_a, &mut node_b)?,
+        1,
+        "B receives the endorsement"
+    );
+    assert_eq!(
+        node_b.reputation.endorsement_count(&b_pubkey),
+        1,
+        "B integrates it"
+    );
 
-    assert_eq!(gossip_sync(&mut node_b, &mut node_c)?, 1, "B relays the endorsement to C");
-    assert_eq!(node_c.reputation.endorsement_count(&b_pubkey), 1, "C integrates it");
+    assert_eq!(
+        gossip_sync(&mut node_b, &mut node_c)?,
+        1,
+        "B relays the endorsement to C"
+    );
+    assert_eq!(
+        node_c.reputation.endorsement_count(&b_pubkey),
+        1,
+        "C integrates it"
+    );
     assert!(
         node_c.reputation.score(&b_pubkey) > 0.0,
         "B's reputation must rise above the unknown threshold (0.0)"
@@ -931,16 +1027,27 @@ async fn test_endorsement_propagation_three_nodes() -> Result<(), String> {
     );
 
     // 3. Un doublon est ignoré : redélivraison du même événement → déduplication.
-    assert_eq!(gossip_sync(&mut node_b, &mut node_c)?, 0, "duplicate event is deduplicated");
+    assert_eq!(
+        gossip_sync(&mut node_b, &mut node_c)?,
+        0,
+        "duplicate event is deduplicated"
+    );
     // Et au niveau application : la ré-application du même endossement est rejetée
     // par la logique `endorse` (anti-doublon).
     match node_c.handle_incoming_endorsement(&event) {
         EndorsementHandlingOutcome::Rejected(reason) => {
-            assert!(reason.contains("Duplicate"), "duplicate must be rejected: {reason}")
+            assert!(
+                reason.contains("Duplicate"),
+                "duplicate must be rejected: {reason}"
+            )
         }
         other => panic!("duplicate endorsement must be rejected, got {other:?}"),
     }
-    assert_eq!(node_c.reputation.endorsement_count(&b_pubkey), 1, "no double counting");
+    assert_eq!(
+        node_c.reputation.endorsement_count(&b_pubkey),
+        1,
+        "no double counting"
+    );
 
     // 4. Un endossement d'un nœud NON de confiance est ignoré.
     let attacker = Identity::generate();
@@ -951,12 +1058,19 @@ async fn test_endorsement_propagation_three_nodes() -> Result<(), String> {
     };
     let evil_content = base64::engine::general_purpose::STANDARD
         .encode(serde_json::to_vec(&evil).map_err(|e| e.to_string())?);
-    let evil_event =
-        MeshEvent::new_signed(&attacker, OndeMessageType::Endorsement, evil_content, vec![]);
+    let evil_event = MeshEvent::new_signed(
+        &attacker,
+        OndeMessageType::Endorsement,
+        evil_content,
+        vec![],
+    );
     // Au niveau gossip : l'inconnu n'a pas payé le PoW adaptatif requis → rejeté.
     let rep = node_c.reputation.clone();
     assert!(
-        node_c.gossip.add_event_with_reputation(evil_event.clone(), &rep).is_err(),
+        node_c
+            .gossip
+            .add_event_with_reputation(evil_event.clone(), &rep)
+            .is_err(),
         "unknown endorser without PoW must be refused at the gossip layer"
     );
     // Au niveau application : l'endosseur n'est pas de confiance → ignoré.
@@ -964,8 +1078,16 @@ async fn test_endorsement_propagation_three_nodes() -> Result<(), String> {
         EndorsementHandlingOutcome::Rejected(_) => {}
         other => panic!("untrusted endorsement must be ignored, got {other:?}"),
     }
-    assert_eq!(node_c.reputation.endorsement_count(&b_pubkey), 1, "nothing applied");
-    assert_eq!(node_c.reputation.score(&b_pubkey), 0.4, "reputation unchanged");
+    assert_eq!(
+        node_c.reputation.endorsement_count(&b_pubkey),
+        1,
+        "nothing applied"
+    );
+    assert_eq!(
+        node_c.reputation.score(&b_pubkey),
+        0.4,
+        "reputation unchanged"
+    );
 
     // 5. Promotion : deux autres fondateurs de confiance (F1, F2) endossent B
     //    par le même gossip. Après 3 endossements qualifiés, C considère B
@@ -1057,7 +1179,10 @@ async fn test_traffic_padding_wire_two_nodes() -> Result<(), String> {
         received[0].content, content,
         "decoded content must be identical to the published alert"
     );
-    assert_eq!(received[0].id, event.id, "decoded event must be the same event");
+    assert_eq!(
+        received[0].id, event.id,
+        "decoded event must be the same event"
+    );
     assert_eq!(received[0].pubkey, event.pubkey);
     assert_eq!(received[0].kind, event.kind);
     assert_eq!(received[0].sig, event.sig);
@@ -1100,7 +1225,10 @@ async fn test_identity_rotation_two_nodes() -> Result<(), String> {
     let key_a0 = node_a.identity_rotator.x25519_public_key_hex();
     let ev0 = node_a.announce_identity_rotation()?;
     assert_eq!(ev0.kind, OndeMessageType::IdentityRotation);
-    assert_eq!(ev0.pubkey, a_pub, "announcement signed by A's stable identity");
+    assert_eq!(
+        ev0.pubkey, a_pub,
+        "announcement signed by A's stable identity"
+    );
 
     // Livraison via le flux réel (wire padé, helper `gossip_sync` qui achemine
     // par `get_pending_for_peer_wire` / `from_wire_bytes`).
@@ -1120,13 +1248,19 @@ async fn test_identity_rotation_two_nodes() -> Result<(), String> {
 
     let ev1 = node_a.announce_identity_rotation()?;
     let key_a1 = {
-        let data = base64::engine::general_purpose::STANDARD.decode(&ev1.content).unwrap();
+        let data = base64::engine::general_purpose::STANDARD
+            .decode(&ev1.content)
+            .unwrap();
         let payload: serde_json::Value = serde_json::from_slice(&data).unwrap();
         payload["x25519"].as_str().unwrap().to_string()
     };
     assert_ne!(key_a0, key_a1, "A rotated to a new X25519 key");
 
-    assert_eq!(gossip_sync(&mut node_a, &mut node_b)?, 1, "B handles the 2nd rotation");
+    assert_eq!(
+        gossip_sync(&mut node_a, &mut node_b)?,
+        1,
+        "B handles the 2nd rotation"
+    );
 
     assert_eq!(
         node_b.peer_x25519_key(&a_pub),
@@ -1147,9 +1281,10 @@ async fn test_identity_rotation_two_nodes() -> Result<(), String> {
     let ev_s = stranger.announce_identity_rotation()?;
     assert_eq!(
         node_b.handle_incoming_rotation(&ev_s),
-        onde_core::node::RotationHandlingOutcome::Rejected(
-            format!("rotation announced by untrusted peer {}", stranger.identity.pubkey_hex())
-        ),
+        onde_core::node::RotationHandlingOutcome::Rejected(format!(
+            "rotation announced by untrusted peer {}",
+            stranger.identity.pubkey_hex()
+        )),
         "untrusted rotation announcement must be rejected"
     );
     assert_eq!(
@@ -1249,7 +1384,12 @@ async fn test_e2e_critical_alert_full_lifecycle() -> Result<(), String> {
             "A stocke l'alerte en mémoire"
         );
         assert_eq!(
-            node_a.persistence.as_ref().unwrap().count().map_err(|e| e.to_string())?,
+            node_a
+                .persistence
+                .as_ref()
+                .unwrap()
+                .count()
+                .map_err(|e| e.to_string())?,
             1,
             "A persiste l'alerte en SQLite"
         );
@@ -1257,8 +1397,16 @@ async fn test_e2e_critical_alert_full_lifecycle() -> Result<(), String> {
         // ── 2. Propagation : B et C reçoivent l'alerte via le gossip. ──
         // Chaque appel `gossip_sync` est une boucle bornée (tous les
         // événements en attente pour le pair, une seule passe).
-        assert_eq!(gossip_sync(&mut node_a, &mut node_b)?, 1, "B reçoit l'alerte");
-        assert_eq!(gossip_sync(&mut node_a, &mut node_c)?, 1, "C reçoit l'alerte");
+        assert_eq!(
+            gossip_sync(&mut node_a, &mut node_b)?,
+            1,
+            "B reçoit l'alerte"
+        );
+        assert_eq!(
+            gossip_sync(&mut node_a, &mut node_c)?,
+            1,
+            "C reçoit l'alerte"
+        );
 
         // B et C la valident (signature + PoW + réputation de l'émetteur) et
         // la stockent localement, avec le bon contenu.
@@ -1266,7 +1414,11 @@ async fn test_e2e_critical_alert_full_lifecycle() -> Result<(), String> {
             event
                 .validate_with_reputation(&node.reputation)
                 .map_err(|e| format!("{name} re-valide signature+PoW+réputation : {e}"))?;
-            assert_eq!(node.gossip.known_count(), 1, "{name} a reçu l'alerte via gossip");
+            assert_eq!(
+                node.gossip.known_count(),
+                1,
+                "{name} a reçu l'alerte via gossip"
+            );
             let payload = node
                 .message_store
                 .get(&event.id)
@@ -1283,7 +1435,10 @@ async fn test_e2e_critical_alert_full_lifecycle() -> Result<(), String> {
             .find(|(t, _)| *t == MessageTier::Critical)
             .map(|(_, n)| *n)
             .unwrap_or(0);
-        assert_eq!(critical_count, 1, "l'alerte est dans le tier Critical (7 jours)");
+        assert_eq!(
+            critical_count, 1,
+            "l'alerte est dans le tier Critical (7 jours)"
+        );
 
         // La ligne existe en base avec le MÊME payload compressé qu'en mémoire
         // et la bonne taille originale.
@@ -1331,7 +1486,9 @@ async fn test_e2e_critical_alert_full_lifecycle() -> Result<(), String> {
         );
 
         // ── 5. Restauration : A' recharge depuis SQLite. ──
-        let restored = node_a2.restore_from_persistence().map_err(|e| e.to_string())?;
+        let restored = node_a2
+            .restore_from_persistence()
+            .map_err(|e| e.to_string())?;
         assert_eq!(restored, 1, "A' restaure l'alerte depuis SQLite");
         let got = node_a2
             .message_store
@@ -1385,7 +1542,8 @@ async fn test_e2e_critical_alert_full_lifecycle() -> Result<(), String> {
             .ok_or_else(|| "D doit stocker l'alerte reçue".to_string())?
             .map_err(|e| e.to_string())?;
         assert_eq!(
-            d_payload, content.as_bytes(),
+            d_payload,
+            content.as_bytes(),
             "D reçoit un contenu identique à l'alerte d'origine"
         );
 

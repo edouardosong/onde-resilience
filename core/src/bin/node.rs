@@ -1,5 +1,5 @@
 //! ONDE Node Binary
-//! 
+//!
 //! Runnable node daemon with CLI arguments.
 //! Usage: onde_node --type mobile --name "MyNode"
 
@@ -74,7 +74,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("  --name <name>            Node display name");
                 println!("  --db <path>              SQLite database path (persistence)");
                 println!("  --battery-saver          Enable battery saver mode (throttled background work)");
-                println!("  --geohash <geohash>       Node geohash position (7 chars, default: u09tunq)");
+                println!(
+                    "  --geohash <geohash>       Node geohash position (7 chars, default: u09tunq)"
+                );
                 println!("  --help, -h               Show this help");
                 return Ok(());
             }
@@ -86,14 +88,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = NodeConfig {
         node_type,
         display_name: name.clone(),
-        available_ram_mb: if node_type == NodeType::DesktopBridge { 32768 } else { 4096 },
-        storage_gb: if node_type == NodeType::DesktopBridge { 512 } else { 64 },
+        available_ram_mb: if node_type == NodeType::DesktopBridge {
+            32768
+        } else {
+            4096
+        },
+        storage_gb: if node_type == NodeType::DesktopBridge {
+            512
+        } else {
+            64
+        },
         ai_model_preference: if node_type == NodeType::DesktopBridge {
             Some("Qwen9B".to_string())
         } else {
             None
         },
-        max_peer_connections: if node_type == NodeType::DesktopBridge { 100 } else { 20 },
+        max_peer_connections: if node_type == NodeType::DesktopBridge {
+            100
+        } else {
+            20
+        },
         sqlite_path,
         battery_saver,
         my_geohash: geohash,
@@ -104,7 +118,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     tracing::info!("ONDE Node v0.1.0 starting...");
-    tracing::info!("Type: {:?} | Name: {}", config.node_type, config.display_name);
+    tracing::info!(
+        "Type: {:?} | Name: {}",
+        config.node_type,
+        config.display_name
+    );
 
     let mut node = Node::new(config);
     node.start().await?;

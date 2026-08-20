@@ -114,12 +114,7 @@ pub struct MeshEvent {
 impl MeshEvent {
     /// Create an UNSIGNED event (sig is empty → rejected by `validate`).
     /// Prefer `new_signed` for events that must pass validation.
-    pub fn new(
-        pubkey: &str,
-        kind: OndeMessageType,
-        content: String,
-        tags: Vec<String>,
-    ) -> Self {
+    pub fn new(pubkey: &str, kind: OndeMessageType, content: String, tags: Vec<String>) -> Self {
         // Horodatage flou ±30 s (Audit #14) : brouille le moment exact
         // d'émission aux observateurs du mesh.
         let created_at = crate::crypto::fuzzy_timestamp_secs();
@@ -182,13 +177,8 @@ impl MeshEvent {
         tags: &[String],
         content: &str,
     ) -> String {
-        let canonical = serde_json::json!([
-            pubkey,
-            created_at,
-            Self::kind_code(kind),
-            tags,
-            content
-        ]);
+        let canonical =
+            serde_json::json!([pubkey, created_at, Self::kind_code(kind), tags, content]);
         let data = serde_json::to_vec(&canonical).unwrap();
         hex::encode(Sha256::digest(&data))
     }
@@ -262,10 +252,7 @@ impl MeshEvent {
         // éviter de tronquer les caractères multioctets (Audit m1).
         if let OndeMessageType::Alert = &self.kind {
             if self.content.chars().count() > MAX_ALERT_SIZE {
-                return Err(format!(
-                    "Alert exceeds {} character limit",
-                    MAX_ALERT_SIZE
-                ));
+                return Err(format!("Alert exceeds {} character limit", MAX_ALERT_SIZE));
             }
         }
 
@@ -291,10 +278,10 @@ impl MeshEvent {
         if self.sig.is_empty() {
             return Err("Missing signature".to_string());
         }
-        let pubkey_bytes = decode_hex_32(&self.pubkey)
-            .map_err(|_| "Invalid pubkey encoding".to_string())?;
-        let sig_bytes = decode_hex_64(&self.sig)
-            .map_err(|_| "Invalid signature encoding".to_string())?;
+        let pubkey_bytes =
+            decode_hex_32(&self.pubkey).map_err(|_| "Invalid pubkey encoding".to_string())?;
+        let sig_bytes =
+            decode_hex_64(&self.sig).map_err(|_| "Invalid signature encoding".to_string())?;
         if !Identity::verify_from_pubkey(&pubkey_bytes, self.id.as_bytes(), &sig_bytes) {
             return Err("Invalid signature".to_string());
         }
@@ -389,8 +376,8 @@ impl MeshEvent {
     /// de panique.
     pub fn to_wire_bytes(&self) -> Result<Vec<u8>, String> {
         let id = decode_hex_32(&self.id).map_err(|_| "wire: invalid event id".to_string())?;
-        let pubkey = decode_hex_32(&self.pubkey)
-            .map_err(|_| "wire: invalid pubkey encoding".to_string())?;
+        let pubkey =
+            decode_hex_32(&self.pubkey).map_err(|_| "wire: invalid pubkey encoding".to_string())?;
         let sig = decode_hex_64(&self.sig).map_err(|_| "wire: invalid signature".to_string())?;
 
         let mut out = Vec::with_capacity(32 + 32 + 8 + 1 + 4 + 4 + self.content.len() + 64 + 8 + 2);
@@ -545,7 +532,8 @@ impl<'a> WireReader<'a> {
 
     fn take_array<const N: usize>(&mut self) -> Result<[u8; N], String> {
         let s = self.take(N)?;
-        s.try_into().map_err(|_| "wire: length mismatch".to_string())
+        s.try_into()
+            .map_err(|_| "wire: length mismatch".to_string())
     }
 
     fn take_u8(&mut self) -> Result<u8, String> {
@@ -665,10 +653,7 @@ impl GossipProtocol {
     /// Un événement reste dans l'outbox jusqu'à éviction (bornée) afin que
     /// les autres pairs puissent aussi le recevoir.
     pub fn get_pending_for_peer(&mut self, peer_id: &str) -> Vec<MeshEvent> {
-        let delivered_set = self
-            .delivered
-            .entry(peer_id.to_string())
-            .or_default();
+        let delivered_set = self.delivered.entry(peer_id.to_string()).or_default();
 
         let mut to_send = Vec::new();
         for event in self.pending_broadcasts.iter() {
@@ -793,7 +778,7 @@ mod tests {
         );
         assert_eq!(event.pubkey, "pubkey123");
         assert!(event.pow_nonce == 0); // Not computed yet
-        // Unsigned events are not valid
+                                       // Unsigned events are not valid
         assert!(event.sig.is_empty());
     }
 
@@ -824,7 +809,10 @@ mod tests {
             vec!["test".to_string()],
         );
         event.pow_difficulty = 2; // above the network minimum, PoW still trivial
-        assert!(event.compute_pow(1_000_000), "PoW nonce must be found at difficulty 2");
+        assert!(
+            event.compute_pow(1_000_000),
+            "PoW nonce must be found at difficulty 2"
+        );
 
         assert!(event.validate().is_ok(), "Signed event must validate");
         assert_eq!(event.sig.len(), 128); // 64 bytes of hex
@@ -847,17 +835,16 @@ mod tests {
         event.pow_difficulty = 0;
         assert!(event.validate().is_err(), "difficulty 0 must be rejected");
         assert!(
-            event.validate().unwrap_err().contains("below network minimum"),
+            event
+                .validate()
+                .unwrap_err()
+                .contains("below network minimum"),
             "error must mention the network minimum"
         );
 
         // The honest floor itself is accepted (PoW trivially satisfiable)
-        let mut event2 = MeshEvent::new_signed(
-            &identity,
-            OndeMessageType::Alert,
-            "ok".to_string(),
-            vec![],
-        );
+        let mut event2 =
+            MeshEvent::new_signed(&identity, OndeMessageType::Alert, "ok".to_string(), vec![]);
         event2.pow_difficulty = 1; // = MeshEvent::MIN_POW_DIFFICULTY (trivially satisfiable)
         assert!(event2.compute_pow(1_000_000));
         assert!(
@@ -893,12 +880,7 @@ mod tests {
     #[test]
     fn test_unsigned_event_rejected() {
         // new() leaves the signature empty → validate() must refuse
-        let event = MeshEvent::new(
-            "key",
-            OndeMessageType::Alert,
-            "hello".to_string(),
-            vec![],
-        );
+        let event = MeshEvent::new("key", OndeMessageType::Alert, "hello".to_string(), vec![]);
         assert!(
             event.validate().is_err(),
             "Event with an empty signature must be rejected"
@@ -941,8 +923,12 @@ mod tests {
 
         // Same author + content + timestamp, different kind → different IDs
         let id_alert = MeshEvent::compute_id(pk, 1_000, &OndeMessageType::Alert, &tags, content);
-        let id_voice = MeshEvent::compute_id(pk, 1_000, &OndeMessageType::VoiceMemo, &tags, content);
-        assert_ne!(id_alert, id_voice, "different kinds must yield different IDs");
+        let id_voice =
+            MeshEvent::compute_id(pk, 1_000, &OndeMessageType::VoiceMemo, &tags, content);
+        assert_ne!(
+            id_alert, id_voice,
+            "different kinds must yield different IDs"
+        );
 
         // Determinism: identical inputs → identical ID
         let id_again = MeshEvent::compute_id(pk, 1_000, &kind, &tags, content);
@@ -952,7 +938,8 @@ mod tests {
     #[test]
     fn test_is_expired_no_underflow() {
         let identity = Identity::generate();
-        let mut event = MeshEvent::new_signed(&identity, OndeMessageType::Alert, "hi".into(), vec![]);
+        let mut event =
+            MeshEvent::new_signed(&identity, OndeMessageType::Alert, "hi".into(), vec![]);
         event.pow_difficulty = 2;
 
         // An event created in the future must not panic (saturating_sub)
@@ -967,7 +954,8 @@ mod tests {
     #[test]
     fn test_future_timestamp_rejected() {
         let identity = Identity::generate();
-        let mut event = MeshEvent::new_signed(&identity, OndeMessageType::Alert, "hi".into(), vec![]);
+        let mut event =
+            MeshEvent::new_signed(&identity, OndeMessageType::Alert, "hi".into(), vec![]);
         event.pow_difficulty = 2;
         assert!(event.compute_pow(1_000_000));
         assert!(event.validate().is_ok());
@@ -984,7 +972,8 @@ mod tests {
     fn test_gossip_dedup() {
         let mut gossip = GossipProtocol::new();
         let identity = Identity::generate();
-        let mut event = MeshEvent::new_signed(&identity, OndeMessageType::Alert, "hello".into(), vec![]);
+        let mut event =
+            MeshEvent::new_signed(&identity, OndeMessageType::Alert, "hello".into(), vec![]);
         event.pow_difficulty = 2;
         assert!(event.compute_pow(1_000_000));
         let id = event.id.clone();
@@ -1090,11 +1079,7 @@ mod tests {
         for _ in 0..5 {
             gossip.get_pending_for_peer(peer);
         }
-        let delivered_len = gossip
-            .delivered
-            .get(peer)
-            .map(|d| d.len())
-            .unwrap_or(0);
+        let delivered_len = gossip.delivered.get(peer).map(|d| d.len()).unwrap_or(0);
         assert!(
             delivered_len <= MAX_DELIVERED_PER_PEER,
             "delivered tracking per peer must be bounded"
@@ -1110,8 +1095,9 @@ mod tests {
         let mut rep = ReputationSystem::new();
         rep.bootstrap(&[identity.pubkey_hex()]);
 
-        let event = MeshEvent::new_signed(&identity, OndeMessageType::Alert, "alerte".into(), vec![])
-            .with_pow_difficulty(0);
+        let event =
+            MeshEvent::new_signed(&identity, OndeMessageType::Alert, "alerte".into(), vec![])
+                .with_pow_difficulty(0);
 
         // validate() standard (plancher réseau) le rejette…
         assert!(event.validate().is_err());
@@ -1131,18 +1117,23 @@ mod tests {
         let identity = Identity::generate();
 
         // Difficulté 1 (plancher réseau) : insuffisante pour un inconnu
-        let mut weak = MeshEvent::new_signed(&identity, OndeMessageType::Alert, "spam".into(), vec![])
-            .with_pow_difficulty(1);
+        let mut weak =
+            MeshEvent::new_signed(&identity, OndeMessageType::Alert, "spam".into(), vec![])
+                .with_pow_difficulty(1);
         assert!(weak.compute_pow(1_000_000));
-        assert!(weak.validate().is_ok(), "standard validate accepts difficulty 1");
+        assert!(
+            weak.validate().is_ok(),
+            "standard validate accepts difficulty 1"
+        );
         assert!(
             weak.validate_with_reputation(&rep).is_err(),
             "unknown node with difficulty 1 must be rejected by reputation"
         );
 
         // Difficulté MAX : acceptable
-        let mut strong = MeshEvent::new_signed(&identity, OndeMessageType::Alert, "spam".into(), vec![])
-            .with_pow_difficulty(crate::reputation::MAX_POW_DIFFICULTY);
+        let mut strong =
+            MeshEvent::new_signed(&identity, OndeMessageType::Alert, "spam".into(), vec![])
+                .with_pow_difficulty(crate::reputation::MAX_POW_DIFFICULTY);
         assert!(strong.compute_pow(10_000_000));
         assert!(
             strong.validate_with_reputation(&rep).is_ok(),
@@ -1195,8 +1186,10 @@ mod tests {
         // (même contenu, même timestamp, même auteur).
         let pk = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
         let tags = vec!["peer=x".to_string()];
-        let id_announce = MeshEvent::compute_id(pk, 42, &OndeMessageType::UpdateAnnounce, &tags, "x");
-        let id_manifest = MeshEvent::compute_id(pk, 42, &OndeMessageType::UpdateManifest, &tags, "x");
+        let id_announce =
+            MeshEvent::compute_id(pk, 42, &OndeMessageType::UpdateAnnounce, &tags, "x");
+        let id_manifest =
+            MeshEvent::compute_id(pk, 42, &OndeMessageType::UpdateManifest, &tags, "x");
         let id_chunk = MeshEvent::compute_id(pk, 42, &OndeMessageType::UpdateChunk, &tags, "x");
         let id_request = MeshEvent::compute_id(pk, 42, &OndeMessageType::UpdateRequest, &tags, "x");
         assert_ne!(id_announce, id_manifest);
@@ -1250,7 +1243,8 @@ mod tests {
 
     fn make_signed_event(content: &str, tags: Vec<String>) -> MeshEvent {
         let identity = Identity::generate();
-        let mut event = MeshEvent::new_signed(&identity, OndeMessageType::Alert, content.to_string(), tags);
+        let mut event =
+            MeshEvent::new_signed(&identity, OndeMessageType::Alert, content.to_string(), tags);
         event.pow_difficulty = 2;
         assert!(event.compute_pow(1_000_000));
         event
@@ -1289,7 +1283,11 @@ mod tests {
         let event = make_signed_event("sans padding", vec![]);
         let padded = event.to_wire_bytes().unwrap();
         let unpadded = TrafficPadding::unpad(&padded);
-        assert_ne!(unpadded.len(), padded.len(), "the test must exercise real padding");
+        assert_ne!(
+            unpadded.len(),
+            padded.len(),
+            "the test must exercise real padding"
+        );
         let decoded = MeshEvent::from_wire_bytes(unpadded).expect("non-padded wire must decode");
         assert_eq!(decoded.content, event.content);
         assert_eq!(decoded.id, event.id);
@@ -1298,7 +1296,10 @@ mod tests {
     #[test]
     fn test_wire_empty_and_truncated_no_panic() {
         // Exigence Phase 1.3 : pas de panique sur entrée vide ou tronquée.
-        assert!(MeshEvent::from_wire_bytes(&[]).is_err(), "empty wire must be an error");
+        assert!(
+            MeshEvent::from_wire_bytes(&[]).is_err(),
+            "empty wire must be an error"
+        );
         let event = make_signed_event("tronqué", vec![]);
         let padded = event.to_wire_bytes().unwrap();
         let full = TrafficPadding::unpad(&padded);
@@ -1311,7 +1312,10 @@ mod tests {
             "truncated wire (into the payload) must be an error"
         );
         // Un paquet entièrement de zéros (padding seul) est aussi une erreur.
-        assert!(MeshEvent::from_wire_bytes(&[0u8; 256]).is_err(), "all-zero wire must be an error");
+        assert!(
+            MeshEvent::from_wire_bytes(&[0u8; 256]).is_err(),
+            "all-zero wire must be an error"
+        );
     }
 
     #[test]
@@ -1322,7 +1326,11 @@ mod tests {
         let event = make_signed_event(&content, vec![]);
         assert_eq!(event.content.len(), 100);
         let wire = event.to_wire_bytes().unwrap();
-        assert_eq!(wire.len(), 256, "100 B content must be padded to the 256 B bucket");
+        assert_eq!(
+            wire.len(),
+            256,
+            "100 B content must be padded to the 256 B bucket"
+        );
         let decoded = MeshEvent::from_wire_bytes(&wire).unwrap();
         assert_eq!(decoded.content, content);
     }
@@ -1341,7 +1349,10 @@ mod tests {
         // zéros de seau — impossible de distinguer « zéro réel » de « zéro
         // padding » sans se fier au format auto-descriptif.
         let decoded = MeshEvent::from_wire_bytes(&wire).expect("ttl=0 event must decode");
-        assert_eq!(decoded.ttl, 0, "a real trailing 0x00 (ttl=0) must not be stripped");
+        assert_eq!(
+            decoded.ttl, 0,
+            "a real trailing 0x00 (ttl=0) must not be stripped"
+        );
         assert_eq!(decoded.content, event.content);
         assert_eq!(decoded.id, event.id);
     }
@@ -1357,10 +1368,17 @@ mod tests {
             .get_pending_for_peer_wire("peer-b")
             .expect("valid outbox event must serialize");
         assert_eq!(wire.len(), 1);
-        assert_eq!(wire[0].len(), 256, "gossip emission is padded to the bucket");
+        assert_eq!(
+            wire[0].len(),
+            256,
+            "gossip emission is padded to the bucket"
+        );
 
         // Livré une fois → plus rien à émettre (tracking par pair conservé).
-        assert!(gossip.get_pending_for_peer_wire("peer-b").unwrap().is_empty());
+        assert!(gossip
+            .get_pending_for_peer_wire("peer-b")
+            .unwrap()
+            .is_empty());
         // Un autre pair reçoit encore l'événement (pas de drain global, Audit M3).
         let other = gossip.get_pending_for_peer_wire("peer-c").unwrap();
         assert_eq!(other.len(), 1);

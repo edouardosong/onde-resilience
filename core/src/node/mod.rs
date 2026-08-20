@@ -4,18 +4,16 @@ use tokio::sync::Mutex;
 
 use base64::Engine as _;
 
-use crate::crypto::{Identity, RotatingIdentity, ZkTransaction, TxPool};
-use crate::network::YggdrasilAddress;
-use crate::protocol::{MeshEvent, OndeMessageType, GossipProtocol};
-use crate::reputation::{Endorsement, ReputationSystem};
 use crate::ai::AiEngine;
+use crate::crypto::{Identity, RotatingIdentity, TxPool, ZkTransaction};
+use crate::network::YggdrasilAddress;
+use crate::protocol::{GossipProtocol, MeshEvent, OndeMessageType};
+use crate::reputation::{Endorsement, ReputationSystem};
 use crate::storage::{
-    ZimReader, MBTilesRenderer, IpfsSeeder, TieredMessageStore, TieredMessage, StoragePolicy,
-    MessageTier, persistence::SqliteStore,
+    persistence::SqliteStore, IpfsSeeder, MBTilesRenderer, MessageTier, StoragePolicy,
+    TieredMessage, TieredMessageStore, ZimReader,
 };
-use crate::update::{
-    UpdateProtocol, UpdateAnnouncement, Version, DEFAULT_CHUNK_SIZE,
-};
+use crate::update::{UpdateAnnouncement, UpdateProtocol, Version, DEFAULT_CHUNK_SIZE};
 
 /// Node type
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -373,8 +371,13 @@ impl Node {
         // de la config (ou du placeholder inoffensif), la version courante de
         // `update_version`, et la clé racine de distribution (seed) est
         // conservée séparément — jamais exposée dans NodeStatus.
-        let update_root_pubkey = config.update_root_pubkey.unwrap_or(DEFAULT_UPDATE_ROOT_PUBKEY);
-        let update_protocol = UpdateProtocol::new(update_root_pubkey, parse_update_version(&config.update_version));
+        let update_root_pubkey = config
+            .update_root_pubkey
+            .unwrap_or(DEFAULT_UPDATE_ROOT_PUBKEY);
+        let update_protocol = UpdateProtocol::new(
+            update_root_pubkey,
+            parse_update_version(&config.update_version),
+        );
         let update_root_signing = config
             .update_root_seed
             .map(|seed| Identity::from_bytes(&seed));
@@ -464,7 +467,9 @@ impl Node {
         }
         self.enforce_publish_throttle()?;
 
-        let difficulty = self.reputation.required_pow_difficulty(&self.identity.pubkey_hex());
+        let difficulty = self
+            .reputation
+            .required_pow_difficulty(&self.identity.pubkey_hex());
         let mut event = MeshEvent::new_signed(
             &self.identity,
             OndeMessageType::Alert,
@@ -481,7 +486,8 @@ impl Node {
         // Validation locale (avec réputation)
         event.validate_with_reputation(&self.reputation)?;
 
-        self.gossip.add_event_with_reputation(event.clone(), &self.reputation)?;
+        self.gossip
+            .add_event_with_reputation(event.clone(), &self.reputation)?;
 
         // Stockage hiérarchique : les alertes sont Critical (7 jours), toujours
         // retenues localement (le sharding géographique garde les urgences).
@@ -494,7 +500,13 @@ impl Node {
             &geohash,
         )? {
             // Persistance SQLite (best-effort) — uniquement si stocké en mémoire
-            self.persist_message(&event.id, MessageTier::Critical, event.content.as_bytes(), event.created_at, &geohash);
+            self.persist_message(
+                &event.id,
+                MessageTier::Critical,
+                event.content.as_bytes(),
+                event.created_at,
+                &geohash,
+            );
         }
 
         self.record_publish();
@@ -511,21 +523,20 @@ impl Node {
             return Err("Mutual aid request must be <= 280 characters".to_string());
         }
         self.enforce_publish_throttle()?;
-        let difficulty = self.reputation.required_pow_difficulty(&self.identity.pubkey_hex());
-        let mut event = MeshEvent::new_signed(
-            &self.identity,
-            OndeMessageType::MutualAid,
-            content,
-            vec![],
-        )
-        .with_pow_difficulty(difficulty);
+        let difficulty = self
+            .reputation
+            .required_pow_difficulty(&self.identity.pubkey_hex());
+        let mut event =
+            MeshEvent::new_signed(&self.identity, OndeMessageType::MutualAid, content, vec![])
+                .with_pow_difficulty(difficulty);
 
         if difficulty > 0 && !event.compute_pow(2_000_000) {
             return Err("PoW computation failed".to_string());
         }
         event.validate_with_reputation(&self.reputation)?;
 
-        self.gossip.add_event_with_reputation(event.clone(), &self.reputation)?;
+        self.gossip
+            .add_event_with_reputation(event.clone(), &self.reputation)?;
 
         // Stockage hiérarchique : les demandes d'entraide sont Important (2 jours)
         let geohash = self.config.my_geohash.clone();
@@ -536,7 +547,13 @@ impl Node {
             event.created_at,
             &geohash,
         )? {
-            self.persist_message(&event.id, MessageTier::Important, event.content.as_bytes(), event.created_at, &geohash);
+            self.persist_message(
+                &event.id,
+                MessageTier::Important,
+                event.content.as_bytes(),
+                event.created_at,
+                &geohash,
+            );
         }
 
         self.record_publish();
@@ -597,7 +614,9 @@ impl Node {
         created_at: u64,
         geohash: &str,
     ) {
-        let Some(persist) = self.persistence.as_mut() else { return };
+        let Some(persist) = self.persistence.as_mut() else {
+            return;
+        };
         let msg = self
             .message_store
             .all_messages()
@@ -709,7 +728,9 @@ impl Node {
         receiver: &str,
         amount_micro: u64,
     ) -> Result<ZkTransaction, String> {
-        let nonce = self.tx_pool.next_expected_nonce(&self.identity.pubkey_hex());
+        let nonce = self
+            .tx_pool
+            .next_expected_nonce(&self.identity.pubkey_hex());
         let tx = ZkTransaction::new(&self.identity.pubkey_hex(), receiver, amount_micro, nonce);
 
         self.tx_pool.submit(tx.clone())?;
@@ -788,8 +809,12 @@ impl Node {
             (TAG_VERSION, version.to_string()),
             (TAG_PEER, self.identity.pubkey_hex()),
         ]);
-        let event =
-            MeshEvent::new_signed(&self.identity, OndeMessageType::UpdateAnnounce, content, tags);
+        let event = MeshEvent::new_signed(
+            &self.identity,
+            OndeMessageType::UpdateAnnounce,
+            content,
+            tags,
+        );
         let published = self.publish_gossip_event(event)?;
 
         // L'offre sert les requêtes manifeste/chunk des receveurs.
@@ -850,8 +875,8 @@ impl Node {
             .map_err(|_| "update payload is not valid base64".to_string())?;
         let sig_hex = tag_get(&event.tags, TAG_ROOT_SIG)
             .ok_or_else(|| "update payload missing root_sig tag".to_string())?;
-        let sig_bytes = hex::decode(sig_hex)
-            .map_err(|_| "root_sig tag is not valid hex".to_string())?;
+        let sig_bytes =
+            hex::decode(sig_hex).map_err(|_| "root_sig tag is not valid hex".to_string())?;
         let sig: [u8; 64] = sig_bytes
             .try_into()
             .map_err(|_| "root_sig must be 64 bytes".to_string())?;
@@ -861,10 +886,7 @@ impl Node {
     /// Receveur — annonce reçue : vérifie la signature racine + version >
     /// locale, mémorise l'annonce, puis émet une requête `manifest` vers
     /// l'annonceur.
-    fn on_update_announce(
-        &mut self,
-        event: &MeshEvent,
-    ) -> Result<UpdateHandlingOutcome, String> {
+    fn on_update_announce(&mut self, event: &MeshEvent) -> Result<UpdateHandlingOutcome, String> {
         let (data, sig) = Self::decode_update_payload(event)?;
         match self.update_protocol.handle_announcement(&data, &sig) {
             Ok(announcement) => {
@@ -874,10 +896,7 @@ impl Node {
                     &self.identity,
                     OndeMessageType::UpdateRequest,
                     String::new(),
-                    build_tags(&[
-                        (TAG_REQ_TYPE, "manifest".to_string()),
-                        (TAG_TO, announcer),
-                    ]),
+                    build_tags(&[(TAG_REQ_TYPE, "manifest".to_string()), (TAG_TO, announcer)]),
                 );
                 self.publish_gossip_event(request)?;
                 Ok(UpdateHandlingOutcome::AnnouncementRequested)
@@ -888,14 +907,10 @@ impl Node {
 
     /// Receveur — manifeste reçu : le lie à l'annonce acceptée
     /// (`handle_manifest`), puis émet une requête `chunk 0` vers l'annonceur.
-    fn on_update_manifest(
-        &mut self,
-        event: &MeshEvent,
-    ) -> Result<UpdateHandlingOutcome, String> {
-        let announcement = self
-            .pending_announcement
-            .clone()
-            .ok_or_else(|| "update manifest received without a prior accepted announcement".to_string())?;
+    fn on_update_manifest(&mut self, event: &MeshEvent) -> Result<UpdateHandlingOutcome, String> {
+        let announcement = self.pending_announcement.clone().ok_or_else(|| {
+            "update manifest received without a prior accepted announcement".to_string()
+        })?;
         let (data, sig) = Self::decode_update_payload(event)?;
         match self
             .update_protocol
@@ -1098,10 +1113,7 @@ impl Node {
     ///    → rejeté).
     /// 4. **Relai** : un endossement intégré est rediffusé vers les pairs qui
     ///    ne l'ont pas encore reçu (tracking "livré par pair" du gossip).
-    pub fn handle_incoming_endorsement(
-        &mut self,
-        event: &MeshEvent,
-    ) -> EndorsementHandlingOutcome {
+    pub fn handle_incoming_endorsement(&mut self, event: &MeshEvent) -> EndorsementHandlingOutcome {
         if event.kind != OndeMessageType::Endorsement {
             return EndorsementHandlingOutcome::Ignored;
         }
@@ -1142,17 +1154,19 @@ impl Node {
             );
         }
         let sig_verified = {
-            let pubkey_ok = hex::decode(&event.pubkey).map(|b| b.len() == 32).unwrap_or(false);
-            let sig_ok = hex::decode(&event.sig).map(|b| b.len() == 64).unwrap_or(false);
-            pubkey_ok
-                && sig_ok
-                && {
-                    let mut pk = [0u8; 32];
-                    let mut sig = [0u8; 64];
-                    pk.copy_from_slice(&hex::decode(&event.pubkey).unwrap_or_default());
-                    sig.copy_from_slice(&hex::decode(&event.sig).unwrap_or_default());
-                    Identity::verify_from_pubkey(&pk, event.id.as_bytes(), &sig)
-                }
+            let pubkey_ok = hex::decode(&event.pubkey)
+                .map(|b| b.len() == 32)
+                .unwrap_or(false);
+            let sig_ok = hex::decode(&event.sig)
+                .map(|b| b.len() == 64)
+                .unwrap_or(false);
+            pubkey_ok && sig_ok && {
+                let mut pk = [0u8; 32];
+                let mut sig = [0u8; 64];
+                pk.copy_from_slice(&hex::decode(&event.pubkey).unwrap_or_default());
+                sig.copy_from_slice(&hex::decode(&event.sig).unwrap_or_default());
+                Identity::verify_from_pubkey(&pk, event.id.as_bytes(), &sig)
+            }
         };
         if !sig_verified {
             return EndorsementHandlingOutcome::Rejected(
@@ -1217,11 +1231,8 @@ impl Node {
 
         // Construction du payload (clé X25519 + compteur de rotation + clé
         // précédente pour la période de grâce) — logique partagée avec les tests.
-        let event = Self::build_rotation_announcement(
-            &self.identity,
-            &self.identity_rotator,
-            &prev_x25519,
-        );
+        let event =
+            Self::build_rotation_announcement(&self.identity, &self.identity_rotator, &prev_x25519);
         self.publish_gossip_event(event)
     }
 
@@ -1242,19 +1253,14 @@ impl Node {
             "prev": prev_x25519,
             "rotation": rotation_count,
         });
-        let content = base64::engine::general_purpose::STANDARD
-            .encode(payload.to_string().into_bytes());
+        let content =
+            base64::engine::general_purpose::STANDARD.encode(payload.to_string().into_bytes());
 
         let tags = build_tags(&[
             (TAG_IDENTITY_ROTATION, new_x25519.clone()),
             ("rotation_count", rotation_count.to_string()),
         ]);
-        MeshEvent::new_signed(
-            identity,
-            OndeMessageType::IdentityRotation,
-            content,
-            tags,
-        )
+        MeshEvent::new_signed(identity, OndeMessageType::IdentityRotation, content, tags)
     }
 
     /// Récepteur — traite une annonce de rotation d'identité X25519 reçue.
@@ -1317,17 +1323,19 @@ impl Node {
         // 2. La signature Ed25519 de l'événement DOIT être valide —
         //    l'annonceur est authentique, pas une pubkey usurpée (Aikido CRIT).
         let sig_verified = {
-            let pubkey_ok = hex::decode(announcer).map(|b| b.len() == 32).unwrap_or(false);
-            let sig_ok = hex::decode(&event.sig).map(|b| b.len() == 64).unwrap_or(false);
-            pubkey_ok
-                && sig_ok
-                && {
-                    let mut pk = [0u8; 32];
-                    let mut sig = [0u8; 64];
-                    pk.copy_from_slice(&hex::decode(announcer).unwrap_or_default());
-                    sig.copy_from_slice(&hex::decode(&event.sig).unwrap_or_default());
-                    crate::crypto::Identity::verify_from_pubkey(&pk, event.id.as_bytes(), &sig)
-                }
+            let pubkey_ok = hex::decode(announcer)
+                .map(|b| b.len() == 32)
+                .unwrap_or(false);
+            let sig_ok = hex::decode(&event.sig)
+                .map(|b| b.len() == 64)
+                .unwrap_or(false);
+            pubkey_ok && sig_ok && {
+                let mut pk = [0u8; 32];
+                let mut sig = [0u8; 64];
+                pk.copy_from_slice(&hex::decode(announcer).unwrap_or_default());
+                sig.copy_from_slice(&hex::decode(&event.sig).unwrap_or_default());
+                crate::crypto::Identity::verify_from_pubkey(&pk, event.id.as_bytes(), &sig)
+            }
         };
         if !sig_verified {
             return RotationHandlingOutcome::Rejected(
@@ -1366,12 +1374,15 @@ impl Node {
         if !prev.is_empty() {
             self.peer_x25519_grace.insert(announcer.clone(), prev);
         }
-        self.peer_x25519.insert(announcer.clone(), new_x25519.clone());
+        self.peer_x25519
+            .insert(announcer.clone(), new_x25519.clone());
         self.peer_rotation_count
             .insert(announcer.clone(), rotation_count);
 
         // 7. Relai dans le gossip (idempotent).
-        let _ = self.gossip.add_event_with_reputation(event.clone(), &self.reputation);
+        let _ = self
+            .gossip
+            .add_event_with_reputation(event.clone(), &self.reputation);
 
         RotationHandlingOutcome::Applied
     }
@@ -1439,7 +1450,12 @@ impl Node {
             local_model: ai.get_local_model().map(|m| format!("{m:?}")),
             // Extensions audits
             identity_rotations: self.identity_rotator.rotation_count(),
-            trusted_peers: self.reputation.summary().iter().filter(|(_, s, _)| *s >= crate::reputation::TRUSTED_THRESHOLD).count(),
+            trusted_peers: self
+                .reputation
+                .summary()
+                .iter()
+                .filter(|(_, s, _)| *s >= crate::reputation::TRUSTED_THRESHOLD)
+                .count(),
             stored_messages: self.message_store.total_count(),
             stored_compressed_bytes: stored_bytes,
             stored_raw_bytes: raw_bytes,
@@ -1488,7 +1504,7 @@ mod tests {
         let config = NodeConfig::default();
         let node = Node::new(config);
         assert!(node.identity.pubkey_hex().len() == 64); // hex 32 bytes
-        // Extensions audits actives par défaut
+                                                         // Extensions audits actives par défaut
         assert_eq!(node.identity_rotator.rotation_count(), 0);
         assert!(node.reputation.is_trusted(&node.identity.pubkey_hex()));
         assert_eq!(node.message_store.total_count(), 0);
@@ -1510,7 +1526,10 @@ mod tests {
     async fn test_node_identity_rotation() {
         let mut node = Node::new(NodeConfig::default());
         let start_pub = node.identity.pubkey_hex();
-        assert!(!node.maybe_rotate_identity(), "no rotation at t=0 (interval 6h)");
+        assert!(
+            !node.maybe_rotate_identity(),
+            "no rotation at t=0 (interval 6h)"
+        );
         assert_eq!(node.identity_rotator.rotation_count(), 0);
 
         // Force une rotation (le champ last_rotation est 0 au premier appel,
@@ -1546,7 +1565,10 @@ mod tests {
             sqlite_path: Some(db_str.clone()),
             ..Default::default()
         });
-        let event = node.publish_alert("persisté en SQLite".to_string()).await.unwrap();
+        let event = node
+            .publish_alert("persisté en SQLite".to_string())
+            .await
+            .unwrap();
         assert!(node.persistence.is_some(), "SQLite store must be open");
         assert_eq!(node.persistence.as_ref().unwrap().count().unwrap(), 1);
 
@@ -1555,10 +1577,17 @@ mod tests {
             sqlite_path: Some(db_str.clone()),
             ..Default::default()
         });
-        assert_eq!(node2.message_store.total_count(), 0, "fresh node starts empty");
+        assert_eq!(
+            node2.message_store.total_count(),
+            0,
+            "fresh node starts empty"
+        );
         let restored = node2.load_persisted_messages().unwrap();
         assert_eq!(restored, 1, "one message restored from SQLite");
-        assert!(node2.message_store.get(&event.id).is_some(), "restored message accessible");
+        assert!(
+            node2.message_store.get(&event.id).is_some(),
+            "restored message accessible"
+        );
 
         // 3. Le sweep SQLite fonctionne aussi
         assert_eq!(node2.sweep_message_store(), 0);
@@ -1632,7 +1661,10 @@ mod tests {
             sqlite_path: Some(db_str.clone()),
             ..Default::default()
         });
-        let event = node.publish_mutual_aid("besoin d'eau potable".to_string()).await.unwrap();
+        let event = node
+            .publish_mutual_aid("besoin d'eau potable".to_string())
+            .await
+            .unwrap();
         // Stocké en tier Important + persisté
         assert_eq!(node.message_store.total_count(), 1);
         assert_eq!(node.persistence.as_ref().unwrap().count().unwrap(), 1);
@@ -1656,7 +1688,10 @@ mod tests {
         assert_eq!(node.throttle_sweep_secs(), 300);
         assert!(node.should_defer_heavy_work());
         let result = node.publish_alert("critique en batterie".to_string()).await;
-        assert!(result.is_ok(), "critical alerts still publish in battery saver");
+        assert!(
+            result.is_ok(),
+            "critical alerts still publish in battery saver"
+        );
 
         // Le statut expose l'état
         let status = node.status().await;
@@ -1715,7 +1750,11 @@ mod tests {
 
         let event = node.announce_identity_rotation().expect("announce ok");
         assert_eq!(event.kind, OndeMessageType::IdentityRotation);
-        assert_eq!(event.pubkey, node.identity.pubkey_hex(), "signed by stable identity");
+        assert_eq!(
+            event.pubkey,
+            node.identity.pubkey_hex(),
+            "signed by stable identity"
+        );
 
         // Le payload JSON contient la clé X25519 du rotateur.
         let data = base64::engine::general_purpose::STANDARD
@@ -1757,10 +1796,11 @@ mod tests {
         let data = b"grace-check";
         let old_key = key_before;
         assert!(
-            node
-                .identity_rotator
-                .verify_with_any(&old_key, data, &node.identity_rotator.current().sign(data))
-                || old_key != node.identity_rotator.current_pubkey_hex(),
+            node.identity_rotator.verify_with_any(
+                &old_key,
+                data,
+                &node.identity_rotator.current().sign(data)
+            ) || old_key != node.identity_rotator.current_pubkey_hex(),
             "grace period keeps the previous key usable"
         );
         // L'annonce porte la NOUVELLE clé.
@@ -1800,9 +1840,16 @@ mod tests {
         // Première annonce → B applique la clé courante de A.
         let ev1 = a.announce_identity_rotation().expect("announce 1 ok");
         let key_a0 = announced_key(&ev1);
-        assert_eq!(b.handle_incoming_rotation(&ev1), RotationHandlingOutcome::Applied);
+        assert_eq!(
+            b.handle_incoming_rotation(&ev1),
+            RotationHandlingOutcome::Applied
+        );
         assert_eq!(b.peer_x25519_key(&a_pub), Some(key_a0.as_str()));
-        assert_eq!(b.peer_x25519_grace_key(&a_pub), None, "first key has no grace yet");
+        assert_eq!(
+            b.peer_x25519_grace_key(&a_pub),
+            None,
+            "first key has no grace yet"
+        );
 
         // A devient "due pour rotation" → la 2e annonce rotite intérieurement
         // et porte une NOUVELLE clé. B reçoit : l'ancienne passe en grâce.
@@ -1814,10 +1861,19 @@ mod tests {
 
         let ev2 = a.announce_identity_rotation().expect("announce 2 ok");
         let key_a1 = announced_key(&ev2);
-        assert_ne!(key_a0, key_a1, "a due rotation must change the announced key");
-        assert!(a.identity_rotator.rotation_count() >= 1, "at least one rotation happened");
+        assert_ne!(
+            key_a0, key_a1,
+            "a due rotation must change the announced key"
+        );
+        assert!(
+            a.identity_rotator.rotation_count() >= 1,
+            "at least one rotation happened"
+        );
 
-        assert_eq!(b.handle_incoming_rotation(&ev2), RotationHandlingOutcome::Applied);
+        assert_eq!(
+            b.handle_incoming_rotation(&ev2),
+            RotationHandlingOutcome::Applied
+        );
         assert_eq!(
             b.peer_x25519_key(&a_pub),
             Some(key_a1.as_str()),
@@ -1861,7 +1917,10 @@ mod tests {
         b.reputation.bootstrap(std::slice::from_ref(&a_pub));
 
         let ev = a.announce_identity_rotation().expect("announce ok");
-        assert_eq!(b.handle_incoming_rotation(&ev), RotationHandlingOutcome::Applied);
+        assert_eq!(
+            b.handle_incoming_rotation(&ev),
+            RotationHandlingOutcome::Applied
+        );
 
         // Replay de la MÊME annonce (même clé) → rejeté.
         let outcome = b.handle_incoming_rotation(&ev);
@@ -1920,14 +1979,20 @@ mod tests {
         // Tour 1 → compteur 1, clé K1.
         rot.set_rotation_count(1);
         let ev_old = Node::build_rotation_announcement(&a.identity, &rot, "");
-        assert_eq!(b.handle_incoming_rotation(&ev_old), RotationHandlingOutcome::Applied);
+        assert_eq!(
+            b.handle_incoming_rotation(&ev_old),
+            RotationHandlingOutcome::Applied
+        );
         let first_key = b.peer_x25519_key(&a_pub).unwrap().to_string();
 
         // Tour 2 → compteur 2, clé K2 ≠ K1.
         rot.maybe_rotate(now); // due → clé K2
         rot.set_rotation_count(2);
         let ev_new = Node::build_rotation_announcement(&a.identity, &rot, "");
-        assert_eq!(b.handle_incoming_rotation(&ev_new), RotationHandlingOutcome::Applied);
+        assert_eq!(
+            b.handle_incoming_rotation(&ev_new),
+            RotationHandlingOutcome::Applied
+        );
         let second_key = b.peer_x25519_key(&a_pub).unwrap().to_string();
         assert_ne!(first_key, second_key, "a due rotation must change the key");
 

@@ -58,11 +58,21 @@ impl WhisperModel {
     /// Model file URL (HuggingFace)
     pub fn model_url(&self) -> &'static str {
         match self {
-            WhisperModel::Tiny => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
-            WhisperModel::Base => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
-            WhisperModel::Small => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
-            WhisperModel::Medium => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin",
-            WhisperModel::Large => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
+            WhisperModel::Tiny => {
+                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin"
+            }
+            WhisperModel::Base => {
+                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
+            }
+            WhisperModel::Small => {
+                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
+            }
+            WhisperModel::Medium => {
+                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin"
+            }
+            WhisperModel::Large => {
+                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin"
+            }
         }
     }
 }
@@ -103,12 +113,12 @@ impl WhisperEngine {
     /// Create a new STT engine
     pub fn new(config: WhisperConfig) -> Result<Self, String> {
         tracing::info!("Initializing WhisperEngine: {:?}", config.model);
-        
+
         // Check RAM availability
         let available_mb = get_available_ram_mb();
         if config.model.ram_mb() > available_mb {
             return Err(format!(
-            "Insufficient RAM: model requires {}MB, only {}MB available",
+                "Insufficient RAM: model requires {}MB, only {}MB available",
                 config.model.ram_mb(),
                 available_mb
             ));
@@ -134,7 +144,8 @@ impl WhisperEngine {
             let model_path = self.config.model_path.clone().unwrap_or_else(|| {
                 // Default path: ~/.local/share/onde/models/
                 let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-                format!("{}/.local/share/onde/models/ggml-{}.bin",
+                format!(
+                    "{}/.local/share/onde/models/ggml-{}.bin",
                     home,
                     match self.config.model {
                         WhisperModel::Tiny => "tiny",
@@ -147,13 +158,16 @@ impl WhisperEngine {
             });
 
             if !std::path::Path::new(&model_path).exists() {
-                return Err(format!("Model file not found: {}. Download from {}", 
-                    model_path, self.config.model.model_url()));
+                return Err(format!(
+                    "Model file not found: {}. Download from {}",
+                    model_path,
+                    self.config.model.model_url()
+                ));
             }
 
             tracing::info!("Loading whisper model: {}", model_path);
             let start = std::time::Instant::now();
-            
+
             // In production: load whisper.cpp context
             // For now, we use mock since model may not be present
             tracing::warn!("Model not loaded (mock mode)");
@@ -165,7 +179,11 @@ impl WhisperEngine {
     }
 
     /// Transcribe audio data (16-bit PCM, 16kHz mono)
-    pub async fn transcribe(&self, audio_data: &[i16], sample_rate: u32) -> Result<TranscriptionResult, String> {
+    pub async fn transcribe(
+        &self,
+        audio_data: &[i16],
+        sample_rate: u32,
+    ) -> Result<TranscriptionResult, String> {
         if !self.loaded {
             return Err("Model not loaded. Call load_model() first.".to_string());
         }
@@ -182,7 +200,11 @@ impl WhisperEngine {
     }
 
     /// Mock transcription for testing
-    pub fn transcribe_mock(&self, _audio_data: &[i16], _sample_rate: u32) -> Result<TranscriptionResult, String> {
+    pub fn transcribe_mock(
+        &self,
+        _audio_data: &[i16],
+        _sample_rate: u32,
+    ) -> Result<TranscriptionResult, String> {
         tracing::warn!("Using MOCK transcription");
         let text = "Ceci est une transcription de test du moteur vocal ONDE.";
         Ok(TranscriptionResult {
@@ -200,9 +222,13 @@ impl WhisperEngine {
 
     /// Real transcription using whisper.cpp
     #[cfg(not(feature = "mock"))]
-    async fn transcribe_real(&self, audio_data: &[i16], sample_rate: u32) -> Result<TranscriptionResult, String> {
+    async fn transcribe_real(
+        &self,
+        audio_data: &[i16],
+        sample_rate: u32,
+    ) -> Result<TranscriptionResult, String> {
         let start = std::time::Instant::now();
-        
+
         // Check duration limit
         let duration_sec = audio_data.len() as f32 / sample_rate as f32;
         if duration_sec > self.config.max_duration_sec as f32 {
@@ -215,7 +241,11 @@ impl WhisperEngine {
         // In production: use whisper-rs for actual transcription
         // whisper-rs converts f32 samples to mel spectrogram,
         // then runs GGML inference
-        tracing::info!("Transcribing {:.1}s of audio at {}Hz", duration_sec, sample_rate);
+        tracing::info!(
+            "Transcribing {:.1}s of audio at {}Hz",
+            duration_sec,
+            sample_rate
+        );
 
         // Placeholder: return mock result
         // In production: full whisper-rs pipeline
@@ -256,7 +286,7 @@ fn get_available_ram_mb() -> u64 {
         }
         2048 // fallback
     }
-    
+
     #[cfg(not(target_os = "android"))]
     {
         // sysinfo crate in production
@@ -268,12 +298,12 @@ fn get_available_ram_mb() -> u64 {
 pub async fn download_model(model: WhisperModel, dest_path: &str) -> Result<String, String> {
     let url = model.model_url();
     tracing::info!("Downloading model {:?} from {}", model, url);
-    
+
     // In production: use tokio::fs + reqwest for download
     // Show progress bar
     std::fs::create_dir_all(std::path::Path::new(dest_path).parent().unwrap())
         .map_err(|e| format!("Failed to create model dir: {}", e))?;
-    
+
     tracing::warn!("Model download not implemented in mock mode");
     Ok(dest_path.to_string())
 }
@@ -293,11 +323,11 @@ mod tests {
     async fn test_mock_transcription() {
         let mut engine = WhisperEngine::new(WhisperConfig::default()).unwrap();
         engine.load_model().await.unwrap();
-        
+
         // 1 second of silence at 16kHz
         let silence = vec![0i16; 16000];
         let result = engine.transcribe(&silence, 16000).await.unwrap();
-        
+
         assert!(!result.text.is_empty());
         assert!(result.confidence > 0.0);
         assert_eq!(result.language, "fr");

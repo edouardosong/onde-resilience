@@ -273,8 +273,11 @@ impl UpdateManifest {
             return Err("Update manifest signature invalid or untrusted".to_string());
         }
         let apk_manifest = parse_signed_manifest(&data[..SIGNED_MANIFEST_LEN])?;
-        let apk_size =
-            u64::from_le_bytes(data[SIGNED_MANIFEST_LEN..SIGNED_MANIFEST_LEN + 8].try_into().unwrap());
+        let apk_size = u64::from_le_bytes(
+            data[SIGNED_MANIFEST_LEN..SIGNED_MANIFEST_LEN + 8]
+                .try_into()
+                .unwrap(),
+        );
         let chunk_size = u32::from_le_bytes(
             data[SIGNED_MANIFEST_LEN + 8..SIGNED_MANIFEST_LEN + 8 + 4]
                 .try_into()
@@ -355,18 +358,27 @@ impl fmt::Display for UpdateError {
         match self {
             Self::InvalidSignature(m) => write!(f, "invalid signature: {m}"),
             Self::NotNewer { current, offered } => {
-                write!(f, "offered version {offered} is not newer than current {current}")
+                write!(
+                    f,
+                    "offered version {offered} is not newer than current {current}"
+                )
             }
             Self::ManifestMismatch => write!(f, "manifest does not match announcement"),
             Self::NoPendingTransfer => write!(f, "no validated manifest before chunks"),
             Self::ChunkIndexOutOfBounds { index, expected } => {
-                write!(f, "chunk {index} out of bounds (expected {expected} chunks)")
+                write!(
+                    f,
+                    "chunk {index} out of bounds (expected {expected} chunks)"
+                )
             }
             Self::ChunkTooLarge { index, len, max } => {
                 write!(f, "chunk {index} too large ({len} bytes, max {max})")
             }
             Self::IncompleteTransfer { received, expected } => {
-                write!(f, "incomplete transfer: {received} bytes received, expected {expected}")
+                write!(
+                    f,
+                    "incomplete transfer: {received} bytes received, expected {expected}"
+                )
             }
             Self::VerificationFailed(m) => write!(f, "APK verification failed: {m}"),
             Self::InstallFailed(m) => write!(f, "install failed: {m}"),
@@ -589,15 +601,15 @@ impl UpdateProtocol {
 
     /// Nombre de chunks reçus et valides.
     pub fn chunks_received(&self) -> usize {
-        self.pending
-            .as_ref()
-            .map(|p| p.chunks.len())
-            .unwrap_or(0)
+        self.pending.as_ref().map(|p| p.chunks.len()).unwrap_or(0)
     }
 
     /// Nombre total de chunks attendus (0 si aucun transfert en cours).
     pub fn total_chunks(&self) -> usize {
-        self.pending.as_ref().map(|p| p.expected_chunks).unwrap_or(0)
+        self.pending
+            .as_ref()
+            .map(|p| p.expected_chunks)
+            .unwrap_or(0)
     }
 
     /// L'identifiant du pair qui fournit le transfert en cours.
@@ -848,7 +860,10 @@ mod tests {
         let (man, sig, bytes) =
             UpdateProtocol::build_manifest(&apk, &root, dev.verifying_key_bytes(), 2000, 1024);
         assert_eq!(man.apk_size, 2048);
-        assert_eq!(man.apk_manifest.apk_hash, UpdateAnnouncement::hash_apk(&apk));
+        assert_eq!(
+            man.apk_manifest.apk_hash,
+            UpdateAnnouncement::hash_apk(&apk)
+        );
         let parsed = UpdateManifest::verify(&root.verifying_key_bytes(), &bytes, &sig).unwrap();
         assert_eq!(parsed, man);
         // Mauvaise racine → rejet
@@ -889,13 +904,19 @@ mod tests {
         // 3. Chunks (avec un doublon pour tester l'idempotence)
         assert_eq!(
             receiver
-                .handle_chunk(0, &UpdateProtocol::chunk(&apk, 0, DEFAULT_CHUNK_SIZE as usize).unwrap())
+                .handle_chunk(
+                    0,
+                    &UpdateProtocol::chunk(&apk, 0, DEFAULT_CHUNK_SIZE as usize).unwrap()
+                )
                 .unwrap(),
             ChunkStatus::Accepted
         );
         assert_eq!(
             receiver
-                .handle_chunk(0, &UpdateProtocol::chunk(&apk, 0, DEFAULT_CHUNK_SIZE as usize).unwrap())
+                .handle_chunk(
+                    0,
+                    &UpdateProtocol::chunk(&apk, 0, DEFAULT_CHUNK_SIZE as usize).unwrap()
+                )
                 .unwrap(),
             ChunkStatus::Duplicate
         );
@@ -960,13 +981,8 @@ mod tests {
         receiver.handle_announcement(&ann_bytes, &ann_sig).unwrap();
 
         // Manifeste annonçant un hash différent (apk_b) → rejet ManifestMismatch
-        let (man, man_sig, man_bytes) = UpdateProtocol::build_manifest(
-            &apk_b,
-            &root,
-            dev.verifying_key_bytes(),
-            6001,
-            1024,
-        );
+        let (man, man_sig, man_bytes) =
+            UpdateProtocol::build_manifest(&apk_b, &root, dev.verifying_key_bytes(), 6001, 1024);
         assert!(matches!(
             receiver.handle_manifest(&ann, &man_bytes, &man_sig, "peer"),
             Err(UpdateError::ManifestMismatch)
@@ -1008,11 +1024,17 @@ mod tests {
         let mut evil_chunk = UpdateProtocol::chunk(&apk, 1, DEFAULT_CHUNK_SIZE as usize).unwrap();
         evil_chunk[0] ^= 0xFF;
         receiver
-            .handle_chunk(0, &UpdateProtocol::chunk(&apk, 0, DEFAULT_CHUNK_SIZE as usize).unwrap())
+            .handle_chunk(
+                0,
+                &UpdateProtocol::chunk(&apk, 0, DEFAULT_CHUNK_SIZE as usize).unwrap(),
+            )
             .unwrap();
         receiver.handle_chunk(1, &evil_chunk).unwrap();
         receiver
-            .handle_chunk(2, &UpdateProtocol::chunk(&apk, 2, DEFAULT_CHUNK_SIZE as usize).unwrap())
+            .handle_chunk(
+                2,
+                &UpdateProtocol::chunk(&apk, 2, DEFAULT_CHUNK_SIZE as usize).unwrap(),
+            )
             .unwrap();
 
         assert!(matches!(
@@ -1039,14 +1061,11 @@ mod tests {
         let (_ann, ann_sig, ann_bytes) =
             UpdateProtocol::build_announcement(Version::new(1, 0, 1), &apk, &root, 8000);
         let ann = receiver.handle_announcement(&ann_bytes, &ann_sig).unwrap();
-        let (_, man_sig, man_bytes) = UpdateProtocol::build_manifest(
-            &apk,
-            &root,
-            dev.verifying_key_bytes(),
-            8001,
-            1024,
-        );
-        receiver.handle_manifest(&ann, &man_bytes, &man_sig, "peer").unwrap();
+        let (_, man_sig, man_bytes) =
+            UpdateProtocol::build_manifest(&apk, &root, dev.verifying_key_bytes(), 8001, 1024);
+        receiver
+            .handle_manifest(&ann, &man_bytes, &man_sig, "peer")
+            .unwrap();
 
         // Index hors bornes
         assert!(matches!(
@@ -1102,13 +1121,8 @@ mod tests {
         // Construire un manifeste dont le blob signé est légitime mais dont la
         // taille annoncée (non signée) est fausse → le transfert devient
         // incohérent et l'assemblage échoue (jamais d'installation).
-        let (_man, man_sig, mut man_bytes) = UpdateProtocol::build_manifest(
-            &apk,
-            &root,
-            dev.verifying_key_bytes(),
-            10001,
-            1024,
-        );
+        let (_man, man_sig, mut man_bytes) =
+            UpdateProtocol::build_manifest(&apk, &root, dev.verifying_key_bytes(), 10001, 1024);
         // Corrompre la métadonnée apk_size (décalage 80..88) sans toucher au
         // blob signé : la signature reste valide (elle ne porte que sur les
         // 80 premiers octets), donc le manifeste corrompu est accepté — mais
@@ -1119,7 +1133,9 @@ mod tests {
         // transfert ne peut jamais être complet → les deux cas sont sûrs.
         let res = receiver.handle_manifest(&ann, &man_bytes, &man_sig, "peer");
         if res.is_ok() {
-            receiver.handle_chunk(0, &UpdateProtocol::chunk(&apk, 0, 1024).unwrap()).unwrap();
+            receiver
+                .handle_chunk(0, &UpdateProtocol::chunk(&apk, 0, 1024).unwrap())
+                .unwrap();
             // 4096 octets annoncés en 1024 → 4 chunks attendus, mais le pair
             // n'a qu'un seul chunk : transfert incomplet → rejet.
             assert!(matches!(

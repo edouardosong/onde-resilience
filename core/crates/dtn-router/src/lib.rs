@@ -112,7 +112,11 @@ impl DtnRouter {
     }
 
     /// Opportunistic forward when two nodes encounter each other
-    pub async fn encounter(&self, node_a: &str, node_b: &str) -> (Vec<DtnMessage>, Vec<DtnMessage>) {
+    pub async fn encounter(
+        &self,
+        node_a: &str,
+        node_b: &str,
+    ) -> (Vec<DtnMessage>, Vec<DtnMessage>) {
         let (to_a, to_b, forwarded, delivered, expired) = {
             // All buffer mutation happens in the synchronous helper below —
             // no `.await` while holding the `buffers` guard.
@@ -325,7 +329,11 @@ mod tests {
         assert_eq!(to_a.len(), 0);
         assert_eq!(to_b.len(), 1, "B must receive the broadcast");
         assert_eq!(to_b[0].id, "bcast-1");
-        assert_eq!(router.buffer_size("A").await, 1, "A must keep the broadcast");
+        assert_eq!(
+            router.buffer_size("A").await,
+            1,
+            "A must keep the broadcast"
+        );
 
         // A meets C → C also receives
         let (_, to_c) = router.encounter("A", "C").await;
@@ -335,7 +343,11 @@ mod tests {
 
         // A meets B again → B already served, must NOT receive it again
         let (_, to_b_again) = router.encounter("A", "B").await;
-        assert_eq!(to_b_again.len(), 0, "B must not receive the broadcast twice");
+        assert_eq!(
+            to_b_again.len(),
+            0,
+            "B must not receive the broadcast twice"
+        );
         assert_eq!(router.buffer_size("A").await, 1);
     }
 
@@ -350,13 +362,21 @@ mod tests {
         router.encounter("A", "B").await;
         router.encounter("A", "C").await;
         router.encounter("A", "D").await;
-        assert_eq!(router.buffer_size("A").await, 1, "deliveries must not remove the broadcast");
+        assert_eq!(
+            router.buffer_size("A").await,
+            1,
+            "deliveries must not remove the broadcast"
+        );
 
         // ttl = 5 → after 5 ticks the broadcast expires
         for _ in 0..5 {
             router.tick("A").await;
         }
-        assert_eq!(router.buffer_size("A").await, 0, "broadcast must die by TTL");
+        assert_eq!(
+            router.buffer_size("A").await,
+            0,
+            "broadcast must die by TTL"
+        );
         assert_eq!(router.stats().await.total_expired, 1);
     }
 
@@ -374,8 +394,14 @@ mod tests {
         let (_, to_b) = router.encounter("A", "B").await;
         assert_eq!(to_b.len(), 1, "B must receive the broadcast");
         // The delivered copy must mark both the new peer (B) and the holder (A)
-        assert!(to_b[0].delivered_to.iter().any(|p| p == "B"), "B marked served");
-        assert!(to_b[0].delivered_to.iter().any(|p| p == "A"), "holder A marked served");
+        assert!(
+            to_b[0].delivered_to.iter().any(|p| p == "B"),
+            "B marked served"
+        );
+        assert!(
+            to_b[0].delivered_to.iter().any(|p| p == "A"),
+            "holder A marked served"
+        );
 
         // B stores the received copy in its own buffer
         assert!(router.store("B", to_b[0].clone()).await);
@@ -389,7 +415,11 @@ mod tests {
         );
 
         // A still holds its own original copy
-        assert_eq!(router.buffer_size("A").await, 1, "A keeps its own broadcast copy");
+        assert_eq!(
+            router.buffer_size("A").await,
+            1,
+            "A keeps its own broadcast copy"
+        );
     }
 
     #[tokio::test]
@@ -438,7 +468,10 @@ mod tests {
         let ids: Vec<&str> = buf.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(buf.len(), 3);
         assert!(ids.contains(&"urgent"), "incoming message must be stored");
-        assert!(!ids.contains(&"p3"), "least urgent message (p3) must be dropped");
+        assert!(
+            !ids.contains(&"p3"),
+            "least urgent message (p3) must be dropped"
+        );
         assert_eq!(router.stats().await.total_dropped, 1);
     }
 
@@ -463,7 +496,10 @@ mod tests {
         let buf = buffers.get("A").unwrap();
         let ids: Vec<&str> = buf.iter().map(|m| m.id.as_str()).collect();
         assert!(ids.contains(&"urgent"));
-        assert!(!ids.contains(&"old"), "oldest equal-priority message must be dropped");
+        assert!(
+            !ids.contains(&"old"),
+            "oldest equal-priority message must be dropped"
+        );
         assert!(ids.contains(&"newer"));
     }
 }
