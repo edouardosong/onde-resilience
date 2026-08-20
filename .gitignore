@@ -58,3 +58,6 @@ onde/simulation/results/
 
 # Briefs de taches (etat dorchestration) - jamais committe
 briefs/
+
+# Agent loop (ONDE) — infra hors versioning; les preuves durables vont dans reports/loop-evidence/
+.agentloop/
