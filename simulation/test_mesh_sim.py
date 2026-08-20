@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import simpy
 import mesh_sim
 from mesh_sim import (
-    Message, MeshNetwork, Node, TechType, TrafficGenerator,
+    Message, MeshNetwork, Node, PoWValidator, TechType, TrafficGenerator,
 )
 
 
@@ -239,6 +239,49 @@ def test_pow_failure_blocks_delivery():
     assert net.send_message(0, msg) is False
     assert net.stats.pow_fail == 1
     assert net.stats.total_messages_delivered == 0
+
+
+# ----------------------------------------------------------------------------
+# 4b. L2-09 : cap d'essais PoW = constante module-level MAX_ATTEMPTS
+#      (comportement borné, documenté — pas un littéral isolé)
+# ----------------------------------------------------------------------------
+
+def test_pow_max_attempts_constant_and_behavior():
+    """L2-09 : le cap d'essais PoW est la constante module-level MAX_ATTEMPTS
+    (valeur de référence 10000, inchangée), et compute_pow() l'honore :
+    avec un target inatteignable (difficulté 8 = 32 bits de zéro), le
+    calcul échoue et consomme EXACTEMENT MAX_ATTEMPTS essais — compteur
+    `total_attempts` observable sur un validateur frais. Le message échoue
+    et n'est pas délivré ; pas de boucle ouverte.
+
+    Déterministe : P(succès/message) = 1-(1-2^(-32))^10000 ≈ 2.3e-6,
+    donc l'échec est quasi-certain et reproductible pour cette entrée.
+    """
+    assert mesh_sim.MAX_ATTEMPTS == 10000, (
+        f"MAX_ATTEMPTS = {mesh_sim.MAX_ATTEMPTS}, attendu 10000 : "
+        "le cap d'essais PoW est un contrat de comportement (L2-09), "
+        "pas un détail interne"
+    )
+
+    v = PoWValidator(difficulty=8, adaptive=False)
+    msg = Message(
+        msg_id="alert-pow-cap",
+        sender_id=0,
+        msg_type="alert",
+        payload_size_bytes=100,
+        ttl=5,
+        timestamp=0.0,
+    )
+    assert v.compute_pow(msg, 0.0) is False, (
+        "prémisse : target d=8 inatteignable sur 10000 essais (P≈2.3e-6)"
+    )
+    # Le compteur d'essais du validateur frais prouve que la boucle est
+    # bornée par MAX_ATTEMPTS (et non par un littéral déconnecté d'elle) :
+    assert v.total_attempts == mesh_sim.MAX_ATTEMPTS, (
+        f"compute_pow a consommé {v.total_attempts} essais, attendu "
+        f"exactement {mesh_sim.MAX_ATTEMPTS} (cap borné : au-delà, le "
+        f"message échoue et n'est pas délivré)"
+    )
 
 
 # ----------------------------------------------------------------------------
