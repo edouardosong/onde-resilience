@@ -301,11 +301,27 @@ class ZKTransactionEngine:
         self.committed_txs: list = []
         self.state_roots: list = []
         self.last_state_root = "genesis"
+        # L2-11 : séquenceur de transactions par expéditeur — même pattern que
+        # L2-08 (msg_id, TrafficGenerator._emission_seq), placé ici car c'est
+        # ZKTransactionEngine qui GÉNÈRE le tx_id : create_transaction peut être
+        # appelée par n'importe quel appelant, pas seulement TrafficGenerator.
+        # Chaque émission reçoit le prochain rang de son expéditeur → le tx_id
+        # devient unique PAR TRANSACTION ÉMISE, même pour deux transactions du
+        # même (sender, receiver, amount) au même tick de simulation (l'horloge
+        # `env.now` ne pouvant plus servir d'identifiant). Déterministe sous
+        # seed : l'ordre des émissions est entièrement décidé par la simulation.
+        self._tx_seq: dict[int, int] = {}
     
     def create_transaction(self, sender: int, receiver: int, amount: float) -> dict:
         """Crée une transaction signée avec proof simulé."""
+        # L2-11 : le rang de l'émission remplace l'horloge dans le hash du tx_id
+        # (même fix que L2-08 sur le msg_id). Le format reste un digest hex de
+        # 12 caractères ; les champs d'émission (sender/receiver/amount/timestamp)
+        # sont inchangés.
+        seq = self._tx_seq.get(sender, 0)
+        self._tx_seq[sender] = seq + 1
         tx = {
-            "tx_id": hashlib.md5(f"{sender}:{receiver}:{amount}:{self.env.now}".encode()).hexdigest()[:12],
+            "tx_id": hashlib.md5(f"{sender}:{receiver}:{amount}:{seq}".encode()).hexdigest()[:12],
             "sender": sender,
             "receiver": receiver,
             "amount": amount,

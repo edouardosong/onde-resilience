@@ -367,3 +367,49 @@ def test_same_sender_same_tick_msg_ids_are_unique():
         f"par le même expéditeur : {len(dup)} id dupliqué(s) {dup[:3]}… "
         "(l'identité doit être unique par message émis, pas par (expéditeur, tick))"
     )
+
+
+# ----------------------------------------------------------------------------
+# 11. L2-11 : tx_id ZK unique par émission (même anti-pattern que l'ancien msg_id)
+# ----------------------------------------------------------------------------
+
+def test_same_sender_same_tick_tx_ids_are_unique():
+    """L2-11 : 2 transactions du même (sender, receiver, amount) au même tick
+    doivent porter 2 tx_id DISTINCTS.
+
+    Cause racine (même anti-pattern que l'ancien msg_id, résolu en L2-08) :
+    `tx_id = md5(f"{sender}:{receiver}:{amount}:{env.now}")[:12]` — l'horloge
+    de simulation `env.now` est la seule composante variable distinguant deux
+    transactions identiques créées au même tick → même tx_id. C'est une
+    LATENCE : aujourd'hui aucun consommateur ne dédup par tx_id, mais dès que
+    ce sera le cas (comme la dédup L2-01/L2-08 sur (sender, msg_id)), le bug
+    ressurgira sur les transactions (2 tx distinctes = 1 tx comptée).
+
+    Contrat attendu : l'identité d'une transaction est unique PAR ÉMISSION
+    (séquenceur par expéditeur, déterministe sous seed), pas par
+    (sender, receiver, amount, tick). Le format reste un digest hex de
+    12 caractères (compatibilité consommateurs).
+    """
+    env, net = make_network()
+    # Deux transactions distinctes, mêmes (sender, receiver, amount), même
+    # tick (env.now = 0.0, horloge non avancée entre les deux créations).
+    tx1 = net.zk_engine.create_transaction(0, 1, 50.0)
+    tx2 = net.zk_engine.create_transaction(0, 1, 50.0)
+
+    # AVANT fix (rouge) : tx1["tx_id"] == tx2["tx_id"] == md5("0:1:50.0:0.0")[:12]
+    assert tx1["tx_id"] != tx2["tx_id"], (
+        f"2 transactions distinctes (sender=0, receiver=1, amount=50.0, même tick) "
+        f"partagent le tx_id {tx1['tx_id']!r} : l'identité doit être unique par "
+        f"émission, pas par (sender, receiver, amount, tick) — même anti-pattern "
+        f"que l'ancien msg_id (L2-08)"
+    )
+    # Compatibilité : format inchangé = digest hexadécimal 12 caractères.
+    for tx in (tx1, tx2):
+        assert len(tx["tx_id"]) == 12 and all(c in "0123456789abcdef" for c in tx["tx_id"]), (
+            f"le format du tx_id doit rester un digest hex de 12 caractères, "
+            f"obtenu {tx['tx_id']!r}"
+        )
+    # Comportement d'émission inchangé : mêmes champs métier, même timestamp.
+    assert (tx1["sender"], tx1["receiver"], tx1["amount"], tx1["timestamp"]) == \
+           (tx2["sender"], tx2["receiver"], tx2["amount"], tx2["timestamp"])
+
