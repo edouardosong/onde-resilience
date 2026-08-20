@@ -22,10 +22,17 @@
    flux, réputation) — pas seulement les tests unitaires.
 
 ## État actuel (baseline, vérifié Hermes)
-- Moteur Rust : 135 tests green, clippy 0 warning, Tauri build OK.
+- Moteur Rust : **163 tests verts, 0 échec** — mesurés le 2026-08-20
+  (`cargo test --workspace` dans `core/`, HEAD `00d03f3`), clippy 0 warning,
+  Tauri build OK. Preuve versionnée :
+  `reports/loop-evidence/cargo-test-workspace-2026-08-20.txt`.
 - Crypto, DTN, WoT, SQLite, sharding Geohash, tiers de rétention, protocole
-  d'update APK (construit, non câblé), bridge Tauri, shell Android.
-- Simulation 11k nœuds (v0.2.5) validée.
+  d'update APK (construit, câblé dans le gossip — Phases 1.1–1.4, tests e2e verts),
+  bridge Tauri, shell Android.
+- Simulation 11k nœuds (v0.2.5) validée — métriques de livraison corrigées (L2-01).
+
+Commits de référence (main) : `28418e4` (merge L2-01 sim) · `d87f8c9` (L2-00 core) ·
+`07a4bd7` (L2-00 CI).
 
 ---
 
@@ -34,7 +41,7 @@
 
 | # | Tâche | Critère d'acceptation | TestSprite |
 |---|-------|----------------------|-----------|
-| 0.1 | Fix README (129→135) + commit propre | README = réalité | — |
+| 0.1 | Fix README (129→135) + commit propre — **FAIT** (2026-08-20 : README aligné sur le compte mesuré, 163 tests) | README = réalité | — |
 | 0.2 | Publication GitHub de la passe "Audit #8–#14" | PR mergée, CI green | — |
 | 0.3 | Configurer TestSprite (clé + skill agent + project) | `testsprite doctor` green | ✅ |
 | 0.4 | Baseline TestSprite : 5 tests UI (démarrage, publish alerte, publish entraide, feed, réputation) | Suite durable green | ✅ |

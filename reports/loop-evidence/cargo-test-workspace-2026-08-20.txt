@@ -1,0 +1,369 @@
+=== DATE: 2026-08-20 04:51:14 ===
+=== REPO: /home/linux/onde-wt/l2-03-docs (branch loop/l2-03, HEAD 00d03f3) ===
+=== CMD: cargo test --workspace (run from core/) ===
+   Compiling libc v0.2.189
+   Compiling cfg-if v1.0.4
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.24
+   Compiling smallvec v1.15.2
+   Compiling serde_core v1.0.229
+   Compiling version_check v0.9.5
+   Compiling parking_lot_core v0.9.12
+   Compiling pin-project-lite v0.2.17
+   Compiling once_cell v1.21.4
+   Compiling scopeguard v1.2.0
+   Compiling typenum v1.20.1
+   Compiling serde v1.0.229
+   Compiling lock_api v0.4.14
+   Compiling generic-array v0.14.7
+   Compiling tracing-core v0.1.36
+   Compiling zmij v1.0.23
+   Compiling bytes v1.12.1
+   Compiling serde_json v1.0.151
+   Compiling itoa v1.0.18
+   Compiling memchr v2.8.3
+   Compiling syn v2.0.119
+   Compiling syn v3.0.3
+   Compiling getrandom v0.2.17
+   Compiling errno v0.3.14
+   Compiling rand_core v0.6.4
+   Compiling parking_lot v0.12.5
+   Compiling signal-hook-registry v1.4.8
+   Compiling socket2 v0.6.5
+   Compiling mio v1.2.2
+   Compiling crypto-common v0.1.7
+   Compiling subtle v2.6.1
+   Compiling block-buffer v0.10.4
+   Compiling cpufeatures v0.2.17
+   Compiling digest v0.10.7
+   Compiling semver v1.0.28
+   Compiling crc32fast v1.5.0
+   Compiling zerocopy v0.8.56
+   Compiling bitflags v2.13.1
+   Compiling thiserror v1.0.69
+   Compiling rustc_version v0.4.1
+   Compiling crc-catalog v2.5.0
+   Compiling simd-adler32 v0.3.10
+   Compiling shlex v2.0.1
+   Compiling adler2 v2.0.1
+   Compiling find-msvc-tools v0.1.11
+   Compiling curve25519-dalek v4.1.3
+   Compiling miniz_oxide v0.8.9
+   Compiling cc v1.4.3
+   Compiling crc v3.4.0
+   Compiling vcpkg v0.2.15
+   Compiling pkg-config v0.3.34
+   Compiling byteorder v1.5.0
+   Compiling lzma-rs v0.3.0
+   Compiling flate2 v1.1.9
+   Compiling inout v0.1.4
+   Compiling regex-syntax v0.8.11
+   Compiling foldhash v0.1.5
+   Compiling universal-hash v0.5.1
+   Compiling signature v2.2.0
+   Compiling hashbrown v0.15.5
+   Compiling log v0.4.33
+   Compiling opaque-debug v0.3.1
+   Compiling lazy_static v1.5.0
+   Compiling libsqlite3-sys v0.35.0
+   Compiling tracing-log v0.2.0
+   Compiling sharded-slab v0.1.7
+   Compiling poly1305 v0.8.0
+   Compiling hashlink v0.10.0
+   Compiling serde_derive v1.0.229
+   Compiling tokio-macros v2.7.2
+   Compiling regex-automata v0.4.18
+   Compiling ed25519 v2.2.3
+   Compiling hmac v0.12.1
+   Compiling sha2 v0.10.9
+   Compiling tracing-attributes v0.1.31
+   Compiling tokio v1.53.1
+   Compiling zeroize_derive v1.5.0
+   Compiling thiserror-impl v1.0.69
+   Compiling zeroize v1.9.0
+   Compiling curve25519-dalek-derive v0.1.1
+   Compiling cipher v0.4.4
+   Compiling tracing v0.1.44
+   Compiling ppv-lite86 v0.2.21
+   Compiling chacha20 v0.9.1
+   Compiling matchers v0.2.0
+   Compiling rand_chacha v0.3.1
+   Compiling aead v0.5.2
+   Compiling thread_local v1.1.10
+   Compiling fallible-streaming-iterator v0.1.9
+   Compiling nu-ansi-term v0.50.3
+   Compiling fallible-iterator v0.3.0
+   Compiling llama-bind v0.2.0 (/home/linux/onde-wt/l2-03-docs/core/crates/llama-bind)
+   Compiling tracing-subscriber v0.3.23
+   Compiling rand v0.8.7
+   Compiling chacha20poly1305 v0.10.1
+   Compiling ed25519-dalek v2.2.0
+   Compiling x25519-dalek v2.0.1
+   Compiling hkdf v0.12.4
+   Compiling async-trait v0.1.92
+   Compiling socket2 v0.5.10
+   Compiling base64 v0.22.1
+   Compiling hex v0.4.3
+   Compiling getrandom v0.4.3
+   Compiling rustix v1.1.4
+   Compiling linux-raw-sys v0.12.1
+   Compiling fastrand v2.5.0
+   Compiling llm-inference v0.1.0 (/home/linux/onde-wt/l2-03-docs/core/crates/llm-inference)
+   Compiling whisper-stt v0.2.0 (/home/linux/onde-wt/l2-03-docs/core/crates/whisper-stt)
+   Compiling zim-parser v0.2.0 (/home/linux/onde-wt/l2-03-docs/core/crates/zim-parser)
+   Compiling dtn-router v0.1.0 (/home/linux/onde-wt/l2-03-docs/core/crates/dtn-router)
+   Compiling tempfile v3.27.0
+   Compiling rusqlite v0.37.0
+   Compiling onde-core v0.2.0 (/home/linux/onde-wt/l2-03-docs/core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 13.25s
+     Running unittests src/lib.rs (target/debug/deps/dtn_router-69c88365d1ea92c9)
+
+running 7 tests
+test tests::test_broadcast_delivered_to_every_peer ... ok
+test tests::test_broadcast_dies_by_ttl_not_delivery ... ok
+test tests::test_broadcast_no_loopback_to_holder ... ok
+test tests::test_buffer_full_rejects_not_more_urgent ... ok
+test tests::test_buffer_full_replaces_least_urgent ... ok
+test tests::test_buffer_full_tie_break_drops_oldest ... ok
+test tests::test_store_and_forward ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/llama_bind-7760830424593e3a)
+
+running 5 tests
+test tests::test_quantization_ram ... ok
+test tests::test_qwen_7b ... ok
+test tests::test_qwen_model_selection ... ok
+test tests::test_mock_generation ... ok
+test tests::test_smol_model ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/llm_inference-1994b70304e2a374)
+
+running 3 tests
+test tests::test_model_ram_check ... ok
+test tests::test_pocket_pal_auto_select ... ok
+test tests::test_local_inference ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/onde_core-2b455a93d8816aa2)
+
+running 123 tests
+test crypto::tests::test_forged_transaction_rejected ... ok
+test crypto::tests::test_envelope_encrypt_decrypt_roundtrip ... ok
+test crypto::tests::test_envelope_tampered_ciphertext_fails ... ok
+test crypto::tests::test_envelope_wrong_recipient_fails ... ok
+test crypto::tests::test_fuzzy_timestamp_within_bounds ... ok
+test crypto::tests::test_identity_x25519_keypair ... ok
+test crypto::tests::test_from_bytes_deterministic_x25519 ... ok
+test crypto::tests::test_traffic_padding_buckets ... ok
+test crypto::tests::test_traffic_padding_empty_message ... ok
+test crypto::tests::test_traffic_padding_sizes ... ok
+test crypto::tests::test_traffic_padding_roundtrip_five_sizes ... ok
+test crypto::tests::test_traffic_padding_unpad_idempotent ... ok
+test crypto::tests::test_traffic_padding_unpad_non_padded_identical ... ok
+test crypto::tests::test_sender_pubkey_swap_detected ... ok
+test crypto::tests::test_rotating_identity_forward_secrecy ... ok
+test crypto::tests::test_tx_pool_stale_and_duplicate_nonces ... ok
+test crypto::tests::test_tx_pool_submit_commit ... ok
+test crypto::tests::test_zk_transaction_creation ... ok
+test network::tests::test_tree_distance_differ_in_last_bit ... ok
+test network::tests::test_transport_ranges ... ok
+test network::tests::test_tree_distance_identical ... ok
+test network::tests::test_tree_distance_no_common_bit ... ok
+test network::tests::test_tree_distance_one_common_bit ... ok
+test network::tests::test_tree_distance_invalid ... ok
+test network::tests::test_tree_distance_same_binary_different_text ... ok
+test network::tests::test_yggdrasil_address_stable_per_identity ... ok
+test network::tests::test_yggdrasil_address_valid_ula ... ok
+test network::tests::test_yggdrasil_address_distinct_per_identity ... ok
+test node::tests::test_node_creation ... ok
+test node::tests::test_node_identity_rotation ... ok
+test crypto::tests::test_identity_sign_verify ... ok
+test crypto::tests::test_apk_manifest_verify_chain ... ok
+test node::tests::test_node_alert_publish ... ok
+test node::tests::test_node_identity_persisted_across_restart ... ok
+test node::tests::test_node_battery_saver_mode ... ok
+test node::tests::test_node_message_store_sweep ... ok
+test crypto::tests::test_verify_apk_signature_full_chain ... ok
+test crypto::tests::test_rotating_identity_rotation_and_grace ... ok
+test node::tests::test_node_mutual_aid_persisted ... ok
+test node::tests::test_rotation_announce_carries_current_x25519 ... ok
+test node::tests::test_node_publish_throttle ... ok
+test protocol::tests::test_alert_size_limit ... ok
+test node::tests::test_rotation_forces_new_key_when_due ... ok
+test protocol::tests::test_canonical_id_distinct ... ok
+test protocol::tests::test_endorsement_kind_has_stable_code ... ok
+test protocol::tests::test_event_creation ... ok
+test node::tests::test_node_sqlite_persistence_roundtrip ... ok
+test node::tests::test_rotation_receive_rejects_bad_signature ... ok
+test protocol::tests::test_future_timestamp_rejected ... ok
+test protocol::tests::test_gossip_pending_wire_pads ... ok
+test protocol::tests::test_is_expired_no_underflow ... ok
+test protocol::tests::test_pow_verify ... ok
+test node::tests::test_rotation_receive_rejects_duplicate_key ... ok
+test node::tests::test_rotation_receive_rejects_untrusted ... ok
+test protocol::tests::test_signed_event_uses_fuzzy_timestamp ... ok
+test protocol::tests::test_gossip_dedup ... ok
+test node::tests::test_rotation_receive_rejects_stale_counter ... ok
+test protocol::tests::test_tampered_content_rejected ... ok
+test protocol::tests::test_unsigned_event_rejected ... ok
+test protocol::tests::test_update_kinds_have_stable_distinct_codes ... ok
+test protocol::tests::test_reputation_adaptive_pow_trusted_no_pow ... ok
+test protocol::tests::test_wire_accepts_non_padded_input ... ok
+test protocol::tests::test_wire_100b_alert_pads_to_256 ... ok
+test protocol::tests::test_signed_event_validates ... ok
+test protocol::tests::test_gossip_per_peer_delivery_no_global_drain ... ok
+test protocol::tests::test_wire_trailing_zero_ttl_survives_roundtrip ... ok
+test reputation::tests::test_activity_bonus_and_penalty ... ok
+test reputation::tests::test_apply_remote_endorsement_reuses_endorse ... ok
+test reputation::tests::test_duplicate_endorsement_rejected ... ok
+test reputation::tests::test_endorsement_chain ... ok
+test reputation::tests::test_genesis_trusted_no_pow ... ok
+test protocol::tests::test_wire_empty_and_truncated_no_panic ... ok
+test reputation::tests::test_pending_endorsements_for_relay ... ok
+test reputation::tests::test_self_endorsement_rejected ... ok
+test reputation::tests::test_untrusted_endorser_rejected ... ok
+test reputation::tests::test_unknown_node_max_pow ... ok
+test protocol::tests::test_wire_roundtrip_signed_event ... ok
+test storage::persistence::tests::test_default_db_path ... ok
+test node::tests::test_rotation_receive_applies_and_keeps_grace ... ok
+test storage::persistence::tests::test_load_all_roundtrip ... ok
+test storage::persistence::tests::test_meta_roundtrip ... ok
+test storage::persistence::tests::test_open_schema_and_store_get ... ok
+test protocol::tests::test_tampered_signature_rejected ... ok
+test storage::tests::test_delegate_threshold ... ok
+test storage::tests::test_geohash ... ok
+test storage::persistence::tests::test_meta_persisted_across_reopen ... ok
+test storage::tests::test_geohash_sharding ... ok
+test storage::tests::test_ipfs_demo_seeds_fit_100gb ... ok
+test storage::persistence::tests::test_sweep_expired ... ok
+test storage::tests::test_ipfs_demo_seeds_partial_1gb ... ok
+test storage::tests::test_ipfs_disabled ... ok
+test storage::tests::test_mbtiles_demo_tiles_are_valid_png ... ok
+test storage::persistence::tests::test_file_backed_persistence_across_reopen ... ok
+test storage::tests::test_ipfs_new_empty_no_auto_demo ... ok
+test storage::tests::test_mbtiles_load_missing_file_errors ... ok
+test storage::tests::test_ipfs_new_invalid_path_errors ... ok
+test storage::tests::test_mbtiles_load_existing_file_no_demo_tiles ... ok
+test storage::tests::test_tier_retention ... ok
+test storage::tests::test_tile_coords ... ok
+test storage::tests::test_store_compress_roundtrip ... ok
+test storage::tests::test_zim_load_demo ... ok
+test storage::tests::test_store_applies_geohash_sharding ... ok
+test storage::tests::test_zim_load_missing_file_errors ... ok
+test storage::tests::test_zim_rejects_old_major_version ... ok
+test storage::tests::test_zim_load_real_header ... ok
+test storage::tests::test_zim_rejects_truncated_header ... ok
+test storage::tests::test_zim_new_is_empty ... ok
+test storage::tests::test_sweep_expired_by_tier ... ok
+test update::tests::chunking_math ... ok
+test protocol::tests::test_zero_pow_difficulty_rejected ... ok
+test update::tests::full_flow_rejects_apk_signed_by_unknown_root ... ok
+test update::tests::announcement_sign_and_verify ... ok
+test update::tests::manifest_sign_and_verify ... ok
+test update::tests::full_flow_announce_manifest_chunks_verify_install ... ok
+test update::tests::manifest_unsigned_metadata_does_not_bypass_verification ... ok
+test update::tests::version_parse_and_ordering ... ok
+test update::tests::reject_announcement_downgrade_or_equal ... ok
+test update::tests::reject_chunk_out_of_bounds_and_incomplete ... ok
+test update::tests::reject_manifest_mismatch ... ok
+test update::tests::reject_tampered_apk ... ok
+test protocol::tests::test_reputation_adaptive_pow_unknown_requires_high ... ok
+test storage::tests::test_store_respects_budget ... ok
+test protocol::tests::test_gossip_bounds_are_enforced ... ok
+
+test result: ok. 123 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.95s
+
+     Running unittests src/bin/node.rs (target/debug/deps/onde_node-522ddbf1fa82662d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/integration_e2e.rs (target/debug/deps/integration_e2e-1e0c9d2145165ab5)
+
+running 18 tests
+test test_ai_query_response ... ok
+test test_dtn_buffer_overflow ... ok
+test test_dtn_store_and_forward ... ok
+test test_dtn_ttl_expiration ... ok
+test test_crypto_sign_verify_chain ... ok
+test test_alert_gossip_reception ... ok
+test test_storage_integration ... ok
+test test_full_node_lifecycle ... ok
+test test_pow_antispam ... ok
+test test_voice_memo_transcription ... ok
+test test_zk_transaction_flow ... ok
+test test_multi_node_gossip ... ok
+test test_traffic_padding_wire_two_nodes ... ok
+test test_identity_rotation_two_nodes ... ok
+test test_e2e_critical_alert_full_lifecycle ... ok
+test test_endorsement_propagation_three_nodes ... ok
+test test_update_flow_between_two_nodes ... ok
+test test_update_rejects_tampered_apk ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
+
+     Running unittests src/lib.rs (target/debug/deps/whisper_stt-9a427db11d5db1a3)
+
+running 4 tests
+test tests::test_model_ram_usage ... ok
+test tests::test_model_recommendation ... ok
+test tests::test_engine_creation ... ok
+test tests::test_mock_transcription ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/zim_parser-b386e358123c06b8)
+
+running 3 tests
+test tests::test_categories ... ok
+test tests::test_recommended_zim ... ok
+test tests::test_zim_open ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests dtn_router
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests llama_bind
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests llm_inference
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests onde_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests whisper_stt
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests zim_parser
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+=== CARGO TEST EXIT CODE: 0 ===
+
+=== TOTAL (somme des « test result: ok. N passed ») : 163 passed, 0 failed ===
