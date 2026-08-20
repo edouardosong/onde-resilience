@@ -100,10 +100,77 @@ class SimStats:
     pow_fail: int = 0
     delivery_latency_samples: list = field(default_factory=list)
     queue_depth_history: list = field(default_factory=list)
-    # L2-01 : livraisons uniques déjà comptées, clé = (sender_id, message_id).
-    # Un message remis à N voisins (ou relayé N fois) ne compte qu'UNE livraison.
+    # =============================================================================
+    # L2-10 — SÉMANTIQUE DES MÉTRIQUES (par-COPIE vs par-MESSAGE)
+    # =============================================================================
+    # Deux FAMILLES de compteurs coexistent, et leur sémantique est volontairement
+    # différente (source historique de confusion — cf. RÉSUMÉ : le bug « 32953% de
+    # délivrance », corrigé en L2-01, venait du fait que `total_messages_delivered`
+    # était compté par COPIE et non par message) :
+    #
+    #   PAR-MESSAGE   : 1 message = 1 unité, quelque soit le nombre de répliques
+    #                   (store-and-forward DTN = N répliques d'un même message).
+    #                   total_messages_sent, total_messages_delivered (dédupliquées
+    #                   par (sender_id, msg_id)), + variantes ci-dessous.
+    #   PAR-COPIE     : incrémenté à CHAQUE réplique visitée/expirée. Reflète le
+    #                   TRAVAIL réseau (hops, expirations de copies), pas le nombre
+    #                   de messages.
+    #                   total_dtn_hops (1 par hop de réplique), total_messages_expired
+    #                   (1 par COPIE expirée).
+    #
+    # Un message DTN est répliqué sur N nœuds (store-and-forward), donc une même
+    # information peut générer N valeurs par-copie alors qu'elle ne vaut qu'1 en
+    # par-message. Utiliser le compteur adapté à la question posée :
+    #   - « combien d'hop le trafic a-t-il fait ? »            → par-COPIE (hops)
+    #   - « combien de messages distincts ont été livrés ? »   → par-MESSAGE (delivered)
+    #   - « l'information a-t-elle atteint sa destination ? »  → par-MESSAGE
+    #
+    # (Référence : simulation/README.md, section « Sémantique des métriques ».)
+    # =============================================================================
+
+    # L2-01 : clés (sender_id, message_id) déjà livrées. Un message remis à N
+    # voisins (ou relayé N fois) ne compte qu'UNE livraison (par-MESSAGE).
     # Mémoire négligeable : 1 tuple par message envoyé (et non par copie).
     delivered_keys: set = field(default_factory=set)
+
+    # L2-10 — VARIANTES PAR-MESSAGE (additives, ne changent pas les compteurs
+    # existants ; voir section « Sémantique des métriques » de simulation/README.md).
+    # `expired_keys` = (sender_id, message_id) dont la PREMIÈRE copie a expiré,
+    # pour dénombrer `expired_unique_messages` (1 par message distinct), alors que
+    # `total_messages_expired` reste par-COPIE (1 par réplique expirée).
+    expired_keys: set = field(default_factory=set)
+    # Compteur par-MESSAGE des messages distincts dont au moins une copie a expiré.
+    expired_unique_messages: int = 0
+
+    @property
+    def delivered_unique_messages(self) -> int:
+        """Par-MESSAGE : nombre de messages DISTINCTS livrés (≥1 copie livrée).
+
+        Égal à ``total_messages_delivered`` (qui est déjà un compteur par-message
+        dédupliqué par (sender_id, msg_id) — c'est register_unique_delivery qui le garantit).
+        Cette propriété n'est qu'un ALIAS ADDITIF à nom explicite, pour lever
+        l'ambiguïté avec les compteurs par-COPIE (total_dtn_hops,
+        total_messages_expired) qui peuvent dépasser le nombre de messages.
+        """
+        return self.total_messages_delivered
+
+    def register_unique_expired(self, sender_id: int, msg_id: str) -> bool:
+        """Par-MESSAGE : compte la PREMIÈRE copie expirée d'un message.
+
+        ``total_messages_expired`` (par-COPIE) et ``expired_unique_messages``
+        (par-MESSAGE) sont ADDITIFS et indépendants : appeler cette méthode ne
+        modifie PAS ``total_messages_expired``. Elle incrémente uniquement le
+        compteur de messages DISTINCTS dont au moins une copie a expiré.
+
+        Retourne True si le message n'avait jamais eu de copie expirée (compté),
+        False sinon (déjà enregistré, ignoré).
+        """
+        key = (sender_id, msg_id)
+        if key in self.expired_keys:
+            return False
+        self.expired_keys.add(key)
+        self.expired_unique_messages += 1
+        return True
 
     def register_unique_delivery(self, sender_id: int, msg_id: str,
                                  latency: float) -> bool:
@@ -227,6 +294,12 @@ class DTNRouter:
                     if msg.hop_count < msg.ttl:
                         msg.hop_count += 1
                         forwarded.append(msg)
+                        # L2-10 — PAR-COPIE : `total_dtn_hops` incrémenté une fois
+                        # par HOP d'une RÉPLIQUE. Store-and-forward = N répliques
+                        # d'un même message → N hops pour un seul message (les
+                        # compteurs par-copie dépassent légitimement le nombre de
+                        # messages ; cf. simulation/README.md « Sémantique des
+                        # métriques »). À ne pas confondre avec un comptage par-message.
                         stats.total_dtn_hops += 1
                         self.forward_count += 1
                         # L2-01 : la première réception du message par le réseau
@@ -237,7 +310,14 @@ class DTNRouter:
                             msg.sender_id, msg.msg_id, self.env.now - msg.timestamp
                         )
                     else:
+                        # L2-10 — PAR-COPIE : `total_messages_expired` incrémenté
+                        # une fois par COPIE qui dépasse son TTL à cet hop. Une même
+                        # information (message) peut voir PLUSIEURS copies expirer
+                        # → compteur par-copie. `register_unique_expired` (aditif)
+                        # compte `expired_unique_messages` par-MESSAGE (1 pour la
+                        # première copie expirée du message).
                         stats.total_messages_expired += 1
+                        stats.register_unique_expired(msg.sender_id, msg.msg_id)
                 else:
                     new_buf.append(msg)
             
@@ -498,6 +578,11 @@ class MeshNetwork:
                     first_delivery_latency = link_latency
 
         if first_delivery_latency is not None:
+            # L2-10 — PAR-MESSAGE : `register_unique_delivery` ne compte qu'UNE
+            # livraison par message distinct (déduplié par (sender_id, msg_id)),
+            # même si le message est livré à plusieurs voisins en direct et/ou
+            # relayé ensuite. Donne `total_messages_delivered` / la propriété
+            # `delivered_unique_messages`.
             self.stats.register_unique_delivery(
                 msg.sender_id, msg.msg_id, first_delivery_latency)
         
@@ -946,6 +1031,11 @@ def run_simulation(
         "network_stats": {
             "total_messages_sent": s.total_messages_sent,
             "total_messages_delivered": s.total_messages_delivered,
+            # L2-10 : variantes par-MESSAGE (additives) — voir simulation/README.md
+            # « Sémantique des métriques ». delivered = par-MESSAGE (dédupliqué) ;
+            # dtn_hops / messages_expired = par-COPIE (peuvent dépasser le nb de messages).
+            "delivered_unique_messages": s.delivered_unique_messages,
+            "expired_unique_messages": s.expired_unique_messages,
             "delivery_rate_percent": round((s.total_messages_delivered / max(1, s.total_messages_sent)) * 100, 2),
             "total_messages_expired": s.total_messages_expired,
             "total_dtn_hops": s.total_dtn_hops,
