@@ -125,11 +125,11 @@ cd core && cargo test --workspace
 ### Sans Docker
 
 ```bash
-# Requiert: Rust 1.75+, Python 3.10+
-pip install simpy numpy
+# Requiert: Rust 1.75+, Python 3.11+, uv
+uv sync --project simulation
 
 # Simulation réseau
-python3 simulation/mesh_sim.py
+uv run --project simulation python simulation/mesh_sim.py
 
 # Moteur (core/)
 cd core
@@ -164,6 +164,16 @@ python3 simulation/mesh_sim.py
 # [t=   3600s] Envoyés: 15,894 | Délivrés: 5,237,664 (multi-hop DTN)
 # DTN hops: 22,896 | PoW OK: 7,731 | Tx committed: 3,141
 # ✅ Simulation terminée avec succès! (165.7s réels)
+```
+
+### Environnement (reproductible — uv)
+
+`simulation/pyproject.toml` + `simulation/uv.lock` (versionné) : Python ≥ 3.11,
+`simpy==4.1.2`, `pytest==9.1.1` (dev) — aucune autre dépendance (numpy n'est pas utilisé).
+
+```bash
+uv sync --project simulation                        # crée simulation/.venv (gitignored)
+uv run --project simulation pytest simulation/ -q   # gate : 11 passed
 ```
 
 ### Technologies simulées :
