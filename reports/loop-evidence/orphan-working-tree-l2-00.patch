@@ -1,0 +1,3566 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 871b3e7..fcf9f12 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -1,30 +1,48 @@
+-name: CI
++name: CI — Rust / Android / UI
+ 
+ on:
+   push:
+     branches: [main]
++    tags: ["v*"]
+   pull_request:
+     branches: [main]
++  schedule:
++    - cron: "0 9 * * 1"   # Qualité hebdomadaire (dépendances / audit)
+ 
+-# Least-privilege token: the CI only reads the repo (no PR write, no packages).
++# Least-privilege : la CI lit le repo ; le write passe par GITHUB_TOKEN explicitement
++# sur les jobs de release uniquement, en élargissant le scope au plus fin (contents: write,
++# seulement lorsque tag v*).
+ permissions:
+   contents: read
+ 
++concurrency:
++  group: ci-${{ github.ref }}
++  cancel-in-progress: true
++
++env:
++  CARGO_TERM_COLOR: always
++  RUST_BACKTRACE: 1
++
+ jobs:
+-  core-tests:
+-    name: Rust core — build + test
++
++  #────────────────────────────────────────────────────────────────────────
++  # JOB 1 — rust (core/) : fmt + clippy + tests + coverage + build release
++  #────────────────────────────────────────────────────────────────────────
++  rust:
++    name: Rust core (fmt · clippy · test · coverage)
+     runs-on: ubuntu-latest
+     steps:
+       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+         with:
+           persist-credentials: false
+ 
+-      - name: Install Rust toolchain
++      - name: Install Rust toolchain (fmt + clippy)
+         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+         with:
+           toolchain: stable
++          components: rustfmt, clippy
+ 
+-      - name: Cache cargo registry
++      - name: Cache cargo
+         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+         with:
+           path: |
+@@ -34,26 +52,156 @@ jobs:
+           key: ${{ runner.os }}-cargo-${{ hashFiles('core/Cargo.lock') }}
+           restore-keys: ${{ runner.os }}-cargo-
+ 
+-      - name: Build
++      # ── Gates de qualité rust ──────────────────────────────────────────
++      - name: Gate — cargo fmt (check)
++        working-directory: core
++        run: cargo fmt --all -- --check
++
++      - name: Gate — cargo clippy (-D warnings)
+         working-directory: core
+-        run: cargo build --workspace
++        run: cargo clippy --workspace --all-targets -- -D warnings
+ 
+-      - name: Test (workspace)
++      - name: Gate — unit + doc tests
+         working-directory: core
+         run: cargo test --workspace
+ 
+-  ui-build:
+-    name: UI web — vite build
++      - name: Gate — integration e2e
++        working-directory: core
++        run: cargo test --test integration_e2e
++
++      # ── Coverage (codecov) ─────────────────────────────────────────────
++      - name: Install cargo-llvm-cov
++        uses: taiki-e/install-action@11af988c3b780511d3d16aa2b0b8bbc7c1bb7f72 # v2
++        with:
++          tool: cargo-llvm-cov
++
++      - name: Generate coverage
++        working-directory: core
++        run: cargo llvm-cov --workspace --all-targets --lcov --output-path lcov.info
++
++      - name: Upload coverage to codecov
++        uses: codecov/codecov-action@eaaf4bedf32dbdc6b720b63067d99c4d77d6047d # v5
++        with:
++          files: core/lcov.info
++          fail_ci_if_error: false
++          verbose: true
++
++      # ── Release (tag v*) ──────────────────────────────────────────────
++      - name: Build release binaries
++        if: startsWith(github.ref, 'refs/tags/v')
++        working-directory: core
++        run: cargo build --release --workspace
++
++      - name: Upload release binaries
++        if: startsWith(github.ref, 'refs/tags/v')
++        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fddac49c9aa69cda4752 # v4.6.0
++        with:
++          name: onde-core-release
++          path: |
++            core/target/release/onde_node
++            core/target/release/*.so
++            core/target/release/*.dylib
++          if-no-files-found: ignore
++
++  #────────────────────────────────────────────────────────────────────────
++  # JOB 2 — android : librust core NDK + gradle build + lint + APK release
++  #────────────────────────────────────────────────────────────────────────
++  android:
++    name: Android (NDK core · gradle build · lint · APK)
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
++        with:
++          persist-credentials: false
++
++      - name: Setup Java 17 (Temurin)
++        uses: actions/setup-java@99b8673ff64fbf99cc8c638810abfc1e9a4461ef # v4.9.0
++        with:
++          distribution: temurin
++          java-version: "17"
++
++      - name: Setup Android SDK (API 34 + NDK 26.2.11394342)
++        uses: android-actions/setup-android@18d40da690b55fe5fdedbd6b7ad88c3b5b2d2ef4 # v3.2.2
++        with:
++          api-level: 34
++          ndk-version: "26.2.11394342"
++
++      - name: Install Rust + Android targets
++        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
++        with:
++          toolchain: stable
++          targets: aarch64-linux-android, armv7-linux-androideabi, x86_64-linux-android
++
++      - name: Cache cargo (NDK)
++        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
++        with:
++          path: |
++            ~/.cargo/registry
++            ~/.cargo/git
++            core/target
++          key: ${{ runner.os }}-cargo-android-${{ hashFiles('core/Cargo.lock') }}
++          restore-keys: ${{ runner.os }}-cargo-android-
++
++      - name: Cache gradle
++        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
++        with:
++          path: |
++            ~/.gradle/caches
++            ~/.gradle/wrapper
++          key: ${{ runner.os }}-gradle-${{ hashFiles('android/**/*.gradle*') }}
++          restore-keys: ${{ runner.os }}-gradle-
++
++      # Le wrapper gradle (jar + gradlew) est absent du repo : on le génère.
++      - name: Generate Gradle wrapper
++        working-directory: android
++        run: |
++          gradle wrapper --gradle-version 8.2
++        env:
++          GRADLE_USER_HOME: ${{ runner.home }}/.gradle
++
++      - name: Build Rust core for Android (NDK)
++        working-directory: core
++        run: cargo build --release --target aarch64-linux-android
++
++      - name: Gate — Android lint (Zero critical)
++        working-directory: android
++        run: ./gradlew lint
++
++      - name: Build debug APK
++        working-directory: android
++        run: ./gradlew assembleDebug
++
++      # ── Gate qualité : APK sig vérifiable (cœur crypto) ──────────────
++      - name: Release APK (assembleRelease)
++        if: startsWith(github.ref, 'refs/tags/v')
++        working-directory: android
++        run: ./gradlew assembleRelease
++
++      - name: Upload APK (release)
++        if: startsWith(github.ref, 'refs/tags/v')
++        uses: actions/upload-artifact@65c4c4a1ddee5b72f698caf2b5a9a5e1a2c1fdee # v4.6.0
++        with:
++          name: onde-android-release
++          path: android/app/build/outputs/apk/release/*.apk
++          if-no-files-found: error
++
++  #────────────────────────────────────────────────────────────────────────
++  # JOB 3 — ui (Tauri + React) : npm ci · build · audit · tauri rust checks
++  #────────────────────────────────────────────────────────────────────────
++  ui:
++    name: UI (vite build · npm audit · tauri rust)
+     runs-on: ubuntu-latest
+     steps:
+       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+         with:
+           persist-credentials: false
+ 
+-      - name: Setup Node
++      - name: Setup Node 20
+         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+         with:
+-          node-version: '20'
++          node-version: "20"
++          cache: npm
++          cache-dependency-path: ui/web/package-lock.json
+ 
+       - name: Cache node_modules
+         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+@@ -62,10 +210,55 @@ jobs:
+           key: ${{ runner.os }}-node-${{ hashFiles('ui/web/package-lock.json') }}
+           restore-keys: ${{ runner.os }}-node-
+ 
+-      - name: Install
++      - name: Install deps
+         working-directory: ui/web
+         run: npm ci
+ 
+-      - name: Build
++      - name: Build (vite)
+         working-directory: ui/web
+         run: npm run build
++
++      # ── Gate qualité ui ──────────────────────────────────────────────
++      - name: Gate — npm audit (high+ = fail)
++        working-directory: ui/web
++        run: npm audit --audit-level=high
++
++      - name: Install Tauri system deps (Linux)
++        run: |
++          sudo apt-get update
++          sudo apt-get install -y libwebkit2gtk-4.0-dev libgtk-3-dev             libayatana-appindicator3-dev librsvg2-dev
++
++      - name: Install Rust (tauri src)
++        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
++        with:
++          toolchain: stable
++          components: rustfmt, clippy
++
++      - name: Gate — tauri clippy
++        working-directory: ui/src-tauri
++        run: cargo clippy --all-targets -- -D warnings
++
++      - name: Gate — tauri tests
++        working-directory: ui/src-tauri
++        run: cargo test
++
++  #────────────────────────────────────────────────────────────────────────
++  # Quality gate hebdomadaire : conflit de dépendances obsolètes
++  #────────────────────────────────────────────────────────────────────────
++  quality-scan:
++    name: Qualité hebdo (cargo audit · npm audit)
++    if: github.event_name == 'schedule'
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
++        with:
++          persist-credentials: false
++
++      - name: cargo audit (rust)
++        uses: rustsec/audit-check@69366f33ea965a0ea4d6c6a9786e04a06b93b8fb # v2.0.0
++        with:
++          token: ${{ secrets.GITHUB_TOKEN }}
++
++      - name: npm audit (ui)
++        working-directory: ui/web
++        run: npm audit --audit-level=high || true   # report non-bloquant hebdo
+diff --git a/core/crates/dtn-router/src/lib.rs b/core/crates/dtn-router/src/lib.rs
+index c6d9394..1701c2d 100644
+--- a/core/crates/dtn-router/src/lib.rs
++++ b/core/crates/dtn-router/src/lib.rs
+@@ -112,7 +112,11 @@ impl DtnRouter {
+     }
+ 
+     /// Opportunistic forward when two nodes encounter each other
+-    pub async fn encounter(&self, node_a: &str, node_b: &str) -> (Vec<DtnMessage>, Vec<DtnMessage>) {
++    pub async fn encounter(
++        &self,
++        node_a: &str,
++        node_b: &str,
++    ) -> (Vec<DtnMessage>, Vec<DtnMessage>) {
+         let (to_a, to_b, forwarded, delivered, expired) = {
+             // All buffer mutation happens in the synchronous helper below —
+             // no `.await` while holding the `buffers` guard.
+@@ -325,7 +329,11 @@ mod tests {
+         assert_eq!(to_a.len(), 0);
+         assert_eq!(to_b.len(), 1, "B must receive the broadcast");
+         assert_eq!(to_b[0].id, "bcast-1");
+-        assert_eq!(router.buffer_size("A").await, 1, "A must keep the broadcast");
++        assert_eq!(
++            router.buffer_size("A").await,
++            1,
++            "A must keep the broadcast"
++        );
+ 
+         // A meets C → C also receives
+         let (_, to_c) = router.encounter("A", "C").await;
+@@ -335,7 +343,11 @@ mod tests {
+ 
+         // A meets B again → B already served, must NOT receive it again
+         let (_, to_b_again) = router.encounter("A", "B").await;
+-        assert_eq!(to_b_again.len(), 0, "B must not receive the broadcast twice");
++        assert_eq!(
++            to_b_again.len(),
++            0,
++            "B must not receive the broadcast twice"
++        );
+         assert_eq!(router.buffer_size("A").await, 1);
+     }
+ 
+@@ -350,13 +362,21 @@ mod tests {
+         router.encounter("A", "B").await;
+         router.encounter("A", "C").await;
+         router.encounter("A", "D").await;
+-        assert_eq!(router.buffer_size("A").await, 1, "deliveries must not remove the broadcast");
++        assert_eq!(
++            router.buffer_size("A").await,
++            1,
++            "deliveries must not remove the broadcast"
++        );
+ 
+         // ttl = 5 → after 5 ticks the broadcast expires
+         for _ in 0..5 {
+             router.tick("A").await;
+         }
+-        assert_eq!(router.buffer_size("A").await, 0, "broadcast must die by TTL");
++        assert_eq!(
++            router.buffer_size("A").await,
++            0,
++            "broadcast must die by TTL"
++        );
+         assert_eq!(router.stats().await.total_expired, 1);
+     }
+ 
+@@ -374,8 +394,14 @@ mod tests {
+         let (_, to_b) = router.encounter("A", "B").await;
+         assert_eq!(to_b.len(), 1, "B must receive the broadcast");
+         // The delivered copy must mark both the new peer (B) and the holder (A)
+-        assert!(to_b[0].delivered_to.iter().any(|p| p == "B"), "B marked served");
+-        assert!(to_b[0].delivered_to.iter().any(|p| p == "A"), "holder A marked served");
++        assert!(
++            to_b[0].delivered_to.iter().any(|p| p == "B"),
++            "B marked served"
++        );
++        assert!(
++            to_b[0].delivered_to.iter().any(|p| p == "A"),
++            "holder A marked served"
++        );
+ 
+         // B stores the received copy in its own buffer
+         assert!(router.store("B", to_b[0].clone()).await);
+@@ -389,7 +415,11 @@ mod tests {
+         );
+ 
+         // A still holds its own original copy
+-        assert_eq!(router.buffer_size("A").await, 1, "A keeps its own broadcast copy");
++        assert_eq!(
++            router.buffer_size("A").await,
++            1,
++            "A keeps its own broadcast copy"
++        );
+     }
+ 
+     #[tokio::test]
+@@ -438,7 +468,10 @@ mod tests {
+         let ids: Vec<&str> = buf.iter().map(|m| m.id.as_str()).collect();
+         assert_eq!(buf.len(), 3);
+         assert!(ids.contains(&"urgent"), "incoming message must be stored");
+-        assert!(!ids.contains(&"p3"), "least urgent message (p3) must be dropped");
++        assert!(
++            !ids.contains(&"p3"),
++            "least urgent message (p3) must be dropped"
++        );
+         assert_eq!(router.stats().await.total_dropped, 1);
+     }
+ 
+@@ -463,7 +496,10 @@ mod tests {
+         let buf = buffers.get("A").unwrap();
+         let ids: Vec<&str> = buf.iter().map(|m| m.id.as_str()).collect();
+         assert!(ids.contains(&"urgent"));
+-        assert!(!ids.contains(&"old"), "oldest equal-priority message must be dropped");
++        assert!(
++            !ids.contains(&"old"),
++            "oldest equal-priority message must be dropped"
++        );
+         assert!(ids.contains(&"newer"));
+     }
+ }
+diff --git a/core/crates/llama-bind/src/lib.rs b/core/crates/llama-bind/src/lib.rs
+index e022f77..db38cbf 100644
+--- a/core/crates/llama-bind/src/lib.rs
++++ b/core/crates/llama-bind/src/lib.rs
+@@ -255,7 +255,10 @@ impl LlamaContext {
+             // 1. llama_model_load_from_file(model_path, params)
+             // 2. llama_new_context(model, ctx_params)
+             // For now: mock mode only
+-            Err("Real llama.cpp bindings not yet implemented. Use 'mock' feature for testing.".to_string())
++            Err(
++                "Real llama.cpp bindings not yet implemented. Use 'mock' feature for testing."
++                    .to_string(),
++            )
+         }
+     }
+ 
+@@ -370,7 +373,9 @@ mod tests {
+ 
+     #[test]
+     fn test_quantization_ram() {
+-        assert!(Quantization::Q4K.ram_per_billion_params() < Quantization::F32.ram_per_billion_params());
++        assert!(
++            Quantization::Q4K.ram_per_billion_params() < Quantization::F32.ram_per_billion_params()
++        );
+         assert_eq!(Quantization::Q2K.ram_per_billion_params(), 450);
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/core/crates/whisper-stt/src/lib.rs b/core/crates/whisper-stt/src/lib.rs
+index 5a13c35..e37de7a 100644
+--- a/core/crates/whisper-stt/src/lib.rs
++++ b/core/crates/whisper-stt/src/lib.rs
+@@ -58,11 +58,21 @@ impl WhisperModel {
+     /// Model file URL (HuggingFace)
+     pub fn model_url(&self) -> &'static str {
+         match self {
+-            WhisperModel::Tiny => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
+-            WhisperModel::Base => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
+-            WhisperModel::Small => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+-            WhisperModel::Medium => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin",
+-            WhisperModel::Large => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
++            WhisperModel::Tiny => {
++                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin"
++            }
++            WhisperModel::Base => {
++                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
++            }
++            WhisperModel::Small => {
++                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
++            }
++            WhisperModel::Medium => {
++                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin"
++            }
++            WhisperModel::Large => {
++                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin"
++            }
+         }
+     }
+ }
+@@ -103,12 +113,12 @@ impl WhisperEngine {
+     /// Create a new STT engine
+     pub fn new(config: WhisperConfig) -> Result<Self, String> {
+         tracing::info!("Initializing WhisperEngine: {:?}", config.model);
+-        
++
+         // Check RAM availability
+         let available_mb = get_available_ram_mb();
+         if config.model.ram_mb() > available_mb {
+             return Err(format!(
+-            "Insufficient RAM: model requires {}MB, only {}MB available",
++                "Insufficient RAM: model requires {}MB, only {}MB available",
+                 config.model.ram_mb(),
+                 available_mb
+             ));
+@@ -134,7 +144,8 @@ impl WhisperEngine {
+             let model_path = self.config.model_path.clone().unwrap_or_else(|| {
+                 // Default path: ~/.local/share/onde/models/
+                 let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+-                format!("{}/.local/share/onde/models/ggml-{}.bin",
++                format!(
++                    "{}/.local/share/onde/models/ggml-{}.bin",
+                     home,
+                     match self.config.model {
+                         WhisperModel::Tiny => "tiny",
+@@ -147,13 +158,16 @@ impl WhisperEngine {
+             });
+ 
+             if !std::path::Path::new(&model_path).exists() {
+-                return Err(format!("Model file not found: {}. Download from {}", 
+-                    model_path, self.config.model.model_url()));
++                return Err(format!(
++                    "Model file not found: {}. Download from {}",
++                    model_path,
++                    self.config.model.model_url()
++                ));
+             }
+ 
+             tracing::info!("Loading whisper model: {}", model_path);
+             let start = std::time::Instant::now();
+-            
++
+             // In production: load whisper.cpp context
+             // For now, we use mock since model may not be present
+             tracing::warn!("Model not loaded (mock mode)");
+@@ -165,7 +179,11 @@ impl WhisperEngine {
+     }
+ 
+     /// Transcribe audio data (16-bit PCM, 16kHz mono)
+-    pub async fn transcribe(&self, audio_data: &[i16], sample_rate: u32) -> Result<TranscriptionResult, String> {
++    pub async fn transcribe(
++        &self,
++        audio_data: &[i16],
++        sample_rate: u32,
++    ) -> Result<TranscriptionResult, String> {
+         if !self.loaded {
+             return Err("Model not loaded. Call load_model() first.".to_string());
+         }
+@@ -182,7 +200,11 @@ impl WhisperEngine {
+     }
+ 
+     /// Mock transcription for testing
+-    pub fn transcribe_mock(&self, _audio_data: &[i16], _sample_rate: u32) -> Result<TranscriptionResult, String> {
++    pub fn transcribe_mock(
++        &self,
++        _audio_data: &[i16],
++        _sample_rate: u32,
++    ) -> Result<TranscriptionResult, String> {
+         tracing::warn!("Using MOCK transcription");
+         let text = "Ceci est une transcription de test du moteur vocal ONDE.";
+         Ok(TranscriptionResult {
+@@ -200,9 +222,13 @@ impl WhisperEngine {
+ 
+     /// Real transcription using whisper.cpp
+     #[cfg(not(feature = "mock"))]
+-    async fn transcribe_real(&self, audio_data: &[i16], sample_rate: u32) -> Result<TranscriptionResult, String> {
++    async fn transcribe_real(
++        &self,
++        audio_data: &[i16],
++        sample_rate: u32,
++    ) -> Result<TranscriptionResult, String> {
+         let start = std::time::Instant::now();
+-        
++
+         // Check duration limit
+         let duration_sec = audio_data.len() as f32 / sample_rate as f32;
+         if duration_sec > self.config.max_duration_sec as f32 {
+@@ -215,7 +241,11 @@ impl WhisperEngine {
+         // In production: use whisper-rs for actual transcription
+         // whisper-rs converts f32 samples to mel spectrogram,
+         // then runs GGML inference
+-        tracing::info!("Transcribing {:.1}s of audio at {}Hz", duration_sec, sample_rate);
++        tracing::info!(
++            "Transcribing {:.1}s of audio at {}Hz",
++            duration_sec,
++            sample_rate
++        );
+ 
+         // Placeholder: return mock result
+         // In production: full whisper-rs pipeline
+@@ -256,7 +286,7 @@ fn get_available_ram_mb() -> u64 {
+         }
+         2048 // fallback
+     }
+-    
++
+     #[cfg(not(target_os = "android"))]
+     {
+         // sysinfo crate in production
+@@ -268,12 +298,12 @@ fn get_available_ram_mb() -> u64 {
+ pub async fn download_model(model: WhisperModel, dest_path: &str) -> Result<String, String> {
+     let url = model.model_url();
+     tracing::info!("Downloading model {:?} from {}", model, url);
+-    
++
+     // In production: use tokio::fs + reqwest for download
+     // Show progress bar
+     std::fs::create_dir_all(std::path::Path::new(dest_path).parent().unwrap())
+         .map_err(|e| format!("Failed to create model dir: {}", e))?;
+-    
++
+     tracing::warn!("Model download not implemented in mock mode");
+     Ok(dest_path.to_string())
+ }
+@@ -293,11 +323,11 @@ mod tests {
+     async fn test_mock_transcription() {
+         let mut engine = WhisperEngine::new(WhisperConfig::default()).unwrap();
+         engine.load_model().await.unwrap();
+-        
++
+         // 1 second of silence at 16kHz
+         let silence = vec![0i16; 16000];
+         let result = engine.transcribe(&silence, 16000).await.unwrap();
+-        
++
+         assert!(!result.text.is_empty());
+         assert!(result.confidence > 0.0);
+         assert_eq!(result.language, "fr");
+@@ -315,4 +345,4 @@ mod tests {
+         assert_eq!(WhisperEngine::recommend_model(2048), WhisperModel::Small);
+         assert_eq!(WhisperEngine::recommend_model(8192), WhisperModel::Large);
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/core/crates/zim-parser/src/lib.rs b/core/crates/zim-parser/src/lib.rs
+index 668a594..c7900d0 100644
+--- a/core/crates/zim-parser/src/lib.rs
++++ b/core/crates/zim-parser/src/lib.rs
+@@ -102,20 +102,22 @@ impl ZimReader {
+ 
+     pub fn get_article(&self, url: &str) -> Option<ZimArticle> {
+         self.title_index.get(url).map(|idx| ZimArticle {
+-                url: url.to_string(),
+-                title: url.replace(['_', '-'], " ").to_string(),
+-                mime_type: "text/html".to_string(),
+-                content: Vec::new(),
+-                content_size: 0,
+-                is_main: false,
+-                namespace: 'A',
+-                index: *idx,
+-            })
++            url: url.to_string(),
++            title: url.replace(['_', '-'], " ").to_string(),
++            mime_type: "text/html".to_string(),
++            content: Vec::new(),
++            content_size: 0,
++            is_main: false,
++            namespace: 'A',
++            index: *idx,
++        })
+     }
+ 
+     pub fn search(&self, query: &str, max_results: usize) -> Vec<SearchResult> {
+         let query_lower = query.to_lowercase();
+-        let mut results: Vec<SearchResult> = self.title_index.keys()
++        let mut results: Vec<SearchResult> = self
++            .title_index
++            .keys()
+             .filter(|url| url.to_lowercase().contains(&query_lower))
+             .take(max_results)
+             .map(|url| SearchResult {
+@@ -126,7 +128,11 @@ impl ZimReader {
+                 namespace: 'A',
+             })
+             .collect();
+-        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
++        results.sort_by(|a, b| {
++            b.score
++                .partial_cmp(&a.score)
++                .unwrap_or(std::cmp::Ordering::Equal)
++        });
+         results
+     }
+ 
+@@ -225,4 +231,4 @@ mod tests {
+         assert!(recommended_zim_url("fr").contains("wikipedia_fr"));
+         assert!(recommended_zim_url("en").contains("wikipedia_en"));
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/core/src/ai/mod.rs b/core/src/ai/mod.rs
+index b3484d3..9157f3f 100644
+--- a/core/src/ai/mod.rs
++++ b/core/src/ai/mod.rs
+@@ -1,10 +1,6 @@
+ /// AI Module — PocketPal integration & Oracle RPC bridge
+ pub use llm_inference::{
+-    InferenceRequest,
+-    InferenceResponse,
+-    ModelSize,
+-    OracleRpcServer,
+-    PocketPalEngine,
++    InferenceRequest, InferenceResponse, ModelSize, OracleRpcServer, PocketPalEngine,
+     VoiceTranscriber,
+ };
+ 
+@@ -46,4 +42,4 @@ impl AiEngine {
+     pub fn get_local_model(&self) -> Option<&ModelSize> {
+         self.local_engine.get_model()
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/core/src/bin/node.rs b/core/src/bin/node.rs
+index 33757b0..ca4e00d 100644
+--- a/core/src/bin/node.rs
++++ b/core/src/bin/node.rs
+@@ -1,5 +1,5 @@
+ //! ONDE Node Binary
+-//! 
++//!
+ //! Runnable node daemon with CLI arguments.
+ //! Usage: onde_node --type mobile --name "MyNode"
+ 
+@@ -74,7 +74,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+                 println!("  --name <name>            Node display name");
+                 println!("  --db <path>              SQLite database path (persistence)");
+                 println!("  --battery-saver          Enable battery saver mode (throttled background work)");
+-                println!("  --geohash <geohash>       Node geohash position (7 chars, default: u09tunq)");
++                println!(
++                    "  --geohash <geohash>       Node geohash position (7 chars, default: u09tunq)"
++                );
+                 println!("  --help, -h               Show this help");
+                 return Ok(());
+             }
+@@ -86,14 +88,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+     let config = NodeConfig {
+         node_type,
+         display_name: name.clone(),
+-        available_ram_mb: if node_type == NodeType::DesktopBridge { 32768 } else { 4096 },
+-        storage_gb: if node_type == NodeType::DesktopBridge { 512 } else { 64 },
++        available_ram_mb: if node_type == NodeType::DesktopBridge {
++            32768
++        } else {
++            4096
++        },
++        storage_gb: if node_type == NodeType::DesktopBridge {
++            512
++        } else {
++            64
++        },
+         ai_model_preference: if node_type == NodeType::DesktopBridge {
+             Some("Qwen9B".to_string())
+         } else {
+             None
+         },
+-        max_peer_connections: if node_type == NodeType::DesktopBridge { 100 } else { 20 },
++        max_peer_connections: if node_type == NodeType::DesktopBridge {
++            100
++        } else {
++            20
++        },
+         sqlite_path,
+         battery_saver,
+         my_geohash: geohash,
+@@ -104,7 +118,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+     };
+ 
+     tracing::info!("ONDE Node v0.1.0 starting...");
+-    tracing::info!("Type: {:?} | Name: {}", config.node_type, config.display_name);
++    tracing::info!(
++        "Type: {:?} | Name: {}",
++        config.node_type,
++        config.display_name
++    );
+ 
+     let mut node = Node::new(config);
+     node.start().await?;
+@@ -121,4 +139,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+     node.stop().await;
+ 
+     Ok(())
+-}
+\ No newline at end of file
++}
+diff --git a/core/src/crypto/mod.rs b/core/src/crypto/mod.rs
+index f8b0d3d..cd38b15 100644
+--- a/core/src/crypto/mod.rs
++++ b/core/src/crypto/mod.rs
+@@ -1,10 +1,7 @@
+-/// Cryptography — Ed25519 identities, X25519 ECDH encryption, ZK transactions
+-use ed25519_dalek::{SigningKey, VerifyingKey, Verifier, Signer};
++use chacha20poly1305::{aead::AeadInPlace, ChaCha20Poly1305, Key, KeyInit, Nonce};
+ use ed25519_dalek::Signature as EdSignature;
+-use chacha20poly1305::{
+-    aead::AeadInPlace,
+-    ChaCha20Poly1305, Key, Nonce, KeyInit,
+-};
++/// Cryptography — Ed25519 identities, X25519 ECDH encryption, ZK transactions
++use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
+ use rand::rngs::OsRng as RandOsRng;
+ use rand::RngCore;
+ use serde::{Deserialize, Serialize};
+@@ -361,10 +358,10 @@ impl RotatingIdentity {
+         if now.saturating_sub(self.last_rotation) < self.rotation_interval_secs {
+             return false;
+         }
+-        self.previous = Some(std::mem::replace(&mut self.current, std::mem::replace(
+-            &mut self.next,
+-            Identity::generate(),
+-        )));
++        self.previous = Some(std::mem::replace(
++            &mut self.current,
++            std::mem::replace(&mut self.next, Identity::generate()),
++        ));
+         self.last_rotation = now;
+         self.rotations += 1;
+         true
+@@ -661,8 +658,7 @@ impl ZkTransaction {
+             .as_bytes(),
+         ));
+         self.zk_proof.commitment == expected_commitment
+-            && self.zk_proof.public_inputs
+-                == [self.sender.clone(), self.receiver.clone()]
++            && self.zk_proof.public_inputs == [self.sender.clone(), self.receiver.clone()]
+     }
+ }
+ 
+@@ -714,7 +710,11 @@ impl TxPool {
+         }
+ 
+         // Reject duplicate (same sender + nonce already pending)
+-        if self.pending.iter().any(|t| t.sender == tx.sender && t.nonce == tx.nonce) {
++        if self
++            .pending
++            .iter()
++            .any(|t| t.sender == tx.sender && t.nonce == tx.nonce)
++        {
+             return Err("Duplicate nonce".to_string());
+         }
+ 
+@@ -744,7 +744,7 @@ impl TxPool {
+             // Update state root
+             let last = self.state_roots.last().unwrap().clone();
+             let new_root = hex::encode(Sha256::digest(
+-                format!("{last}:{}", self.committed.len()).as_bytes()
++                format!("{last}:{}", self.committed.len()).as_bytes(),
+             ));
+             self.state_roots.push(new_root);
+         }
+@@ -771,7 +771,6 @@ impl Default for TxPool {
+     }
+ }
+ 
+-
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+@@ -797,7 +796,10 @@ mod tests {
+         assert_ne!(identity.x25519_secret_key_bytes(), pub_bytes);
+         // Two identities must have distinct X25519 public keys
+         let other = Identity::generate();
+-        assert_ne!(identity.x25519_public_key_hex(), other.x25519_public_key_hex());
++        assert_ne!(
++            identity.x25519_public_key_hex(),
++            other.x25519_public_key_hex()
++        );
+     }
+ 
+     #[test]
+@@ -806,7 +808,8 @@ mod tests {
+         let bob = Identity::generate();
+ 
+         let message = b"Message confidentiel pour Bob";
+-        let envelope = EncryptedEnvelope::encrypt(message, &alice, &bob.x25519_public_key_bytes()).unwrap();
++        let envelope =
++            EncryptedEnvelope::encrypt(message, &alice, &bob.x25519_public_key_bytes()).unwrap();
+ 
+         // Envelope carries the ephemeral public key and the sender's X25519 key
+         assert_eq!(envelope.eph_public_key.len(), 32);
+@@ -828,7 +831,9 @@ mod tests {
+         let bob = Identity::generate();
+         let charlie = Identity::generate();
+ 
+-        let envelope = EncryptedEnvelope::encrypt(b"top secret", &alice, &bob.x25519_public_key_bytes()).unwrap();
++        let envelope =
++            EncryptedEnvelope::encrypt(b"top secret", &alice, &bob.x25519_public_key_bytes())
++                .unwrap();
+ 
+         // Bob (intended recipient) decrypts fine
+         assert!(EncryptedEnvelope::decrypt(&envelope, &bob).is_ok());
+@@ -843,7 +848,8 @@ mod tests {
+         let alice = Identity::generate();
+         let bob = Identity::generate();
+ 
+-        let mut envelope = EncryptedEnvelope::encrypt(b"hello", &alice, &bob.x25519_public_key_bytes()).unwrap();
++        let mut envelope =
++            EncryptedEnvelope::encrypt(b"hello", &alice, &bob.x25519_public_key_bytes()).unwrap();
+         // Flip a bit in the ciphertext — authentication must fail
+         envelope.ciphertext[0] ^= 0x01;
+         assert!(EncryptedEnvelope::decrypt(&envelope, &bob).is_err());
+@@ -860,8 +866,7 @@ mod tests {
+         let eve = Identity::generate();
+ 
+         let mut envelope =
+-            EncryptedEnvelope::encrypt(b"to bob", &alice, &bob.x25519_public_key_bytes())
+-                .unwrap();
++            EncryptedEnvelope::encrypt(b"to bob", &alice, &bob.x25519_public_key_bytes()).unwrap();
+ 
+         // Honest path still works
+         assert_eq!(
+@@ -892,8 +897,9 @@ mod tests {
+ 
+         // E2E across a restore must round-trip
+         let bob = Identity::generate();
+-        let envelope = EncryptedEnvelope::encrypt(b"after restart", &a1, &bob.x25519_public_key_bytes())
+-            .unwrap();
++        let envelope =
++            EncryptedEnvelope::encrypt(b"after restart", &a1, &bob.x25519_public_key_bytes())
++                .unwrap();
+         assert_eq!(
+             EncryptedEnvelope::decrypt(&envelope, &bob).unwrap(),
+             b"after restart"
+@@ -942,7 +948,9 @@ mod tests {
+         );
+ 
+         // La transaction authentique, elle, passe
+-        assert!(pool.submit(ZkTransaction::new("alice", "bob", 100, 0)).is_ok());
++        assert!(pool
++            .submit(ZkTransaction::new("alice", "bob", 100, 0))
++            .is_ok());
+     }
+ 
+     #[test]
+@@ -965,25 +973,35 @@ mod tests {
+         let mut pool = TxPool::new();
+ 
+         // Nonce 0 submitted and committed
+-        pool.submit(ZkTransaction::new("alice", "bob", 100, 0)).unwrap();
++        pool.submit(ZkTransaction::new("alice", "bob", 100, 0))
++            .unwrap();
+         pool.commit_pending(10);
+         assert_eq!(pool.next_expected_nonce("alice"), 1);
+ 
+         // Replay of the committed nonce → rejected (behind the expected sequence)
+         let replay = ZkTransaction::new("alice", "bob", 100, 0);
+-        assert!(pool.submit(replay).is_err(), "Nonce behind expected sequence must be rejected");
++        assert!(
++            pool.submit(replay).is_err(),
++            "Nonce behind expected sequence must be rejected"
++        );
+ 
+         // Nonce 1 is the next expected → accepted
+-        pool.submit(ZkTransaction::new("alice", "bob", 100, 1)).unwrap();
++        pool.submit(ZkTransaction::new("alice", "bob", 100, 1))
++            .unwrap();
+         assert_eq!(pool.next_expected_nonce("alice"), 2);
+ 
+         // Same (sender, nonce) already pending → rejected as duplicate
+         let dup = ZkTransaction::new("alice", "bob", 999, 1);
+-        assert!(pool.submit(dup).is_err(), "Duplicate (sender, nonce) must be rejected");
++        assert!(
++            pool.submit(dup).is_err(),
++            "Duplicate (sender, nonce) must be rejected"
++        );
+ 
+         // Independent nonce sequence per sender
+         assert_eq!(pool.next_expected_nonce("carol"), 0);
+-        assert!(pool.submit(ZkTransaction::new("carol", "alice", 100, 0)).is_ok());
++        assert!(pool
++            .submit(ZkTransaction::new("carol", "alice", 100, 0))
++            .is_ok());
+     }
+ 
+     #[test]
+@@ -1044,8 +1062,8 @@ mod tests {
+             .expect("valid hex")
+             .try_into()
+             .expect("32 bytes");
+-        let envelope = EncryptedEnvelope::encrypt(b"secret to old identity", &sender, &old_pub_bytes)
+-            .unwrap();
++        let envelope =
++            EncryptedEnvelope::encrypt(b"secret to old identity", &sender, &old_pub_bytes).unwrap();
+ 
+         // Déchiffrement avec l'ancienne clé : OK
+         assert!(EncryptedEnvelope::decrypt(&envelope, rot.current()).is_ok());
+@@ -1070,17 +1088,30 @@ mod tests {
+         let (sig, bytes) = manifest.sign(&root);
+ 
+         // Vérification avec la racine épinglée : OK
+-        assert!(ApkManifest::verify(&root.verifying_key_bytes(), &bytes, &sig));
++        assert!(ApkManifest::verify(
++            &root.verifying_key_bytes(),
++            &bytes,
++            &sig
++        ));
+ 
+         // Mauvaise racine → rejeté
+         let other_root = Identity::generate();
+-        assert!(!ApkManifest::verify(&other_root.verifying_key_bytes(), &bytes, &sig));
++        assert!(!ApkManifest::verify(
++            &other_root.verifying_key_bytes(),
++            &bytes,
++            &sig
++        ));
+ 
+         // Manifeste falsifié (APK différent) → rejeté
+         let evil_apk: Vec<u8> = (0..4096u32).map(|i| (i % 249) as u8).collect();
+-        let evil_manifest = ApkManifest::from_apk(&evil_apk, dev.verifying_key_bytes(), 1_800_000_000);
++        let evil_manifest =
++            ApkManifest::from_apk(&evil_apk, dev.verifying_key_bytes(), 1_800_000_000);
+         let (evil_sig, _evil_bytes) = evil_manifest.sign(&root);
+-        assert!(!ApkManifest::verify(&root.verifying_key_bytes(), &bytes, &evil_sig));
++        assert!(!ApkManifest::verify(
++            &root.verifying_key_bytes(),
++            &bytes,
++            &evil_sig
++        ));
+ 
+         // Le hash de l'APK d'origine est bien celui attendu
+         let hash: [u8; 32] = Sha256::digest(&apk).into();
+@@ -1098,24 +1129,35 @@ mod tests {
+         let (sig, manifest_bytes) = manifest.sign(&root);
+ 
+         // APK authentique + signature racine valide → accepté
+-        let verified = verify_apk_signature(&apk, &manifest_bytes, &sig, &root.verifying_key_bytes())
+-            .expect("authentic APK must verify");
++        let verified =
++            verify_apk_signature(&apk, &manifest_bytes, &sig, &root.verifying_key_bytes())
++                .expect("authentic APK must verify");
+         assert_eq!(verified.dev_pubkey, dev.verifying_key_bytes());
+         assert_eq!(verified.timestamp, 1_800_000_000);
+ 
+         // APK falsifié (contenu modifié) → rejeté (hash mismatch)
+         let evil_apk: Vec<u8> = (0..8192u32).map(|i| (i % 251) as u8).collect();
+         assert!(
+-            verify_apk_signature(&evil_apk, &manifest_bytes, &sig, &root.verifying_key_bytes())
+-                .is_err(),
++            verify_apk_signature(
++                &evil_apk,
++                &manifest_bytes,
++                &sig,
++                &root.verifying_key_bytes()
++            )
++            .is_err(),
+             "tampered APK must be rejected"
+         );
+ 
+         // Signature d'une racine inconnue → rejeté (pinning)
+         let other_root = Identity::generate();
+         assert!(
+-            verify_apk_signature(&apk, &manifest_bytes, &sig, &other_root.verifying_key_bytes())
+-                .is_err(),
++            verify_apk_signature(
++                &apk,
++                &manifest_bytes,
++                &sig,
++                &other_root.verifying_key_bytes()
++            )
++            .is_err(),
+             "untrusted root must be rejected"
+         );
+ 
+@@ -1158,7 +1200,11 @@ mod tests {
+         assert_eq!(TrafficPadding::bucket_for(20_000), 16_384);
+         let big = vec![0x03; 20_000];
+         let padded = TrafficPadding::pad(&big);
+-        assert_eq!(padded.len(), 20_000, "oversized messages are never truncated");
++        assert_eq!(
++            padded.len(),
++            20_000,
++            "oversized messages are never truncated"
++        );
+         assert_eq!(TrafficPadding::unpad(&padded), big.as_slice());
+     }
+ 
+diff --git a/core/src/lib.rs b/core/src/lib.rs
+index 4301cfd..5ede911 100644
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -4,16 +4,16 @@
+ //! Provides DTN routing, PoW antispam, Nostr protocol,
+ //! cryptography, AI inference, and offline storage.
+ 
++pub mod ai;
++pub mod crypto;
+ pub mod network;
++pub mod node;
+ pub mod protocol;
+-pub mod crypto;
+ pub mod reputation;
+ pub mod storage;
+ pub mod update;
+-pub mod ai;
+-pub mod node;
+ 
+ // Re-exports for convenience
+ pub use dtn_router as dtn;
+ pub use llm_inference as ai_engine;
+-pub use node::{Node, NodeConfig, NodeType};
+\ No newline at end of file
++pub use node::{Node, NodeConfig, NodeType};
+diff --git a/core/src/network/mod.rs b/core/src/network/mod.rs
+index 1d306a6..46a22d0 100644
+--- a/core/src/network/mod.rs
++++ b/core/src/network/mod.rs
+@@ -180,7 +180,10 @@ mod tests {
+             .parse()
+             .expect("generated address must be a valid IPv6 address");
+         // ULA fd00::/8: starts with "fd", first octet is 0xfd
+-        assert!(ipv6.starts_with("fd"), "ULA address must start with fd, got: {ipv6}");
++        assert!(
++            ipv6.starts_with("fd"),
++            "ULA address must start with fd, got: {ipv6}"
++        );
+         assert_eq!(parsed.octets()[0], 0xfd);
+         assert_eq!(parsed.octets().len(), 16);
+     }
+@@ -201,7 +204,10 @@ mod tests {
+         let a = YggdrasilAddress::new("node-1");
+         let b = YggdrasilAddress::new("node-2");
+         let (addr_a, addr_b) = (a.generate_ipv6(), b.generate_ipv6());
+-        assert_ne!(addr_a, addr_b, "different identities must give different addresses");
++        assert_ne!(
++            addr_a, addr_b,
++            "different identities must give different addresses"
++        );
+         // Both remain valid ULAs
+         assert!(addr_a.starts_with("fd"));
+         assert!(addr_b.starts_with("fd"));
+@@ -210,10 +216,7 @@ mod tests {
+     #[test]
+     fn test_tree_distance_identical() {
+         let addr = "fd00::1";
+-        assert_eq!(
+-            YggdrasilAddress::tree_distance(addr, addr).unwrap(),
+-            128
+-        );
++        assert_eq!(YggdrasilAddress::tree_distance(addr, addr).unwrap(), 128);
+     }
+ 
+     #[test]
+@@ -248,10 +251,7 @@ mod tests {
+     #[test]
+     fn test_tree_distance_no_common_bit() {
+         // 0x00 (0000_0000) vs 0x80 (1000_0000): no common MSB bit
+-        assert_eq!(
+-            YggdrasilAddress::tree_distance("::", "8000::").unwrap(),
+-            0
+-        );
++        assert_eq!(YggdrasilAddress::tree_distance("::", "8000::").unwrap(), 0);
+     }
+ 
+     #[test]
+@@ -265,4 +265,4 @@ mod tests {
+         assert_eq!(TransportType::WifiAware.range_meters(), 200.0);
+         assert_eq!(TransportType::Lora.range_meters(), 5000.0);
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/core/src/node/mod.rs b/core/src/node/mod.rs
+index 4b96a06..f9d21e0 100644
+--- a/core/src/node/mod.rs
++++ b/core/src/node/mod.rs
+@@ -4,18 +4,16 @@ use tokio::sync::Mutex;
+ 
+ use base64::Engine as _;
+ 
+-use crate::crypto::{Identity, RotatingIdentity, ZkTransaction, TxPool};
++use crate::ai::AiEngine;
++use crate::crypto::{Identity, RotatingIdentity, TxPool, ZkTransaction};
+ use crate::network::YggdrasilAddress;
+-use crate::protocol::{MeshEvent, OndeMessageType, GossipProtocol};
++use crate::protocol::{GossipProtocol, MeshEvent, OndeMessageType};
+ use crate::reputation::{Endorsement, ReputationSystem};
+-use crate::ai::AiEngine;
+ use crate::storage::{
+-    ZimReader, MBTilesRenderer, IpfsSeeder, TieredMessageStore, TieredMessage, StoragePolicy,
+-    MessageTier, persistence::SqliteStore,
+-};
+-use crate::update::{
+-    UpdateProtocol, UpdateAnnouncement, Version, DEFAULT_CHUNK_SIZE,
++    persistence::SqliteStore, IpfsSeeder, MBTilesRenderer, MessageTier, StoragePolicy,
++    TieredMessage, TieredMessageStore, ZimReader,
+ };
++use crate::update::{UpdateAnnouncement, UpdateProtocol, Version, DEFAULT_CHUNK_SIZE};
+ 
+ /// Node type
+ #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+@@ -373,8 +371,13 @@ impl Node {
+         // de la config (ou du placeholder inoffensif), la version courante de
+         // `update_version`, et la clé racine de distribution (seed) est
+         // conservée séparément — jamais exposée dans NodeStatus.
+-        let update_root_pubkey = config.update_root_pubkey.unwrap_or(DEFAULT_UPDATE_ROOT_PUBKEY);
+-        let update_protocol = UpdateProtocol::new(update_root_pubkey, parse_update_version(&config.update_version));
++        let update_root_pubkey = config
++            .update_root_pubkey
++            .unwrap_or(DEFAULT_UPDATE_ROOT_PUBKEY);
++        let update_protocol = UpdateProtocol::new(
++            update_root_pubkey,
++            parse_update_version(&config.update_version),
++        );
+         let update_root_signing = config
+             .update_root_seed
+             .map(|seed| Identity::from_bytes(&seed));
+@@ -464,7 +467,9 @@ impl Node {
+         }
+         self.enforce_publish_throttle()?;
+ 
+-        let difficulty = self.reputation.required_pow_difficulty(&self.identity.pubkey_hex());
++        let difficulty = self
++            .reputation
++            .required_pow_difficulty(&self.identity.pubkey_hex());
+         let mut event = MeshEvent::new_signed(
+             &self.identity,
+             OndeMessageType::Alert,
+@@ -481,7 +486,8 @@ impl Node {
+         // Validation locale (avec réputation)
+         event.validate_with_reputation(&self.reputation)?;
+ 
+-        self.gossip.add_event_with_reputation(event.clone(), &self.reputation)?;
++        self.gossip
++            .add_event_with_reputation(event.clone(), &self.reputation)?;
+ 
+         // Stockage hiérarchique : les alertes sont Critical (7 jours), toujours
+         // retenues localement (le sharding géographique garde les urgences).
+@@ -494,7 +500,13 @@ impl Node {
+             &geohash,
+         )? {
+             // Persistance SQLite (best-effort) — uniquement si stocké en mémoire
+-            self.persist_message(&event.id, MessageTier::Critical, event.content.as_bytes(), event.created_at, &geohash);
++            self.persist_message(
++                &event.id,
++                MessageTier::Critical,
++                event.content.as_bytes(),
++                event.created_at,
++                &geohash,
++            );
+         }
+ 
+         self.record_publish();
+@@ -511,21 +523,20 @@ impl Node {
+             return Err("Mutual aid request must be <= 280 characters".to_string());
+         }
+         self.enforce_publish_throttle()?;
+-        let difficulty = self.reputation.required_pow_difficulty(&self.identity.pubkey_hex());
+-        let mut event = MeshEvent::new_signed(
+-            &self.identity,
+-            OndeMessageType::MutualAid,
+-            content,
+-            vec![],
+-        )
+-        .with_pow_difficulty(difficulty);
++        let difficulty = self
++            .reputation
++            .required_pow_difficulty(&self.identity.pubkey_hex());
++        let mut event =
++            MeshEvent::new_signed(&self.identity, OndeMessageType::MutualAid, content, vec![])
++                .with_pow_difficulty(difficulty);
+ 
+         if difficulty > 0 && !event.compute_pow(2_000_000) {
+             return Err("PoW computation failed".to_string());
+         }
+         event.validate_with_reputation(&self.reputation)?;
+ 
+-        self.gossip.add_event_with_reputation(event.clone(), &self.reputation)?;
++        self.gossip
++            .add_event_with_reputation(event.clone(), &self.reputation)?;
+ 
+         // Stockage hiérarchique : les demandes d'entraide sont Important (2 jours)
+         let geohash = self.config.my_geohash.clone();
+@@ -536,7 +547,13 @@ impl Node {
+             event.created_at,
+             &geohash,
+         )? {
+-            self.persist_message(&event.id, MessageTier::Important, event.content.as_bytes(), event.created_at, &geohash);
++            self.persist_message(
++                &event.id,
++                MessageTier::Important,
++                event.content.as_bytes(),
++                event.created_at,
++                &geohash,
++            );
+         }
+ 
+         self.record_publish();
+@@ -597,7 +614,9 @@ impl Node {
+         created_at: u64,
+         geohash: &str,
+     ) {
+-        let Some(persist) = self.persistence.as_mut() else { return };
++        let Some(persist) = self.persistence.as_mut() else {
++            return;
++        };
+         let msg = self
+             .message_store
+             .all_messages()
+@@ -709,7 +728,9 @@ impl Node {
+         receiver: &str,
+         amount_micro: u64,
+     ) -> Result<ZkTransaction, String> {
+-        let nonce = self.tx_pool.next_expected_nonce(&self.identity.pubkey_hex());
++        let nonce = self
++            .tx_pool
++            .next_expected_nonce(&self.identity.pubkey_hex());
+         let tx = ZkTransaction::new(&self.identity.pubkey_hex(), receiver, amount_micro, nonce);
+ 
+         self.tx_pool.submit(tx.clone())?;
+@@ -788,8 +809,12 @@ impl Node {
+             (TAG_VERSION, version.to_string()),
+             (TAG_PEER, self.identity.pubkey_hex()),
+         ]);
+-        let event =
+-            MeshEvent::new_signed(&self.identity, OndeMessageType::UpdateAnnounce, content, tags);
++        let event = MeshEvent::new_signed(
++            &self.identity,
++            OndeMessageType::UpdateAnnounce,
++            content,
++            tags,
++        );
+         let published = self.publish_gossip_event(event)?;
+ 
+         // L'offre sert les requêtes manifeste/chunk des receveurs.
+@@ -850,8 +875,8 @@ impl Node {
+             .map_err(|_| "update payload is not valid base64".to_string())?;
+         let sig_hex = tag_get(&event.tags, TAG_ROOT_SIG)
+             .ok_or_else(|| "update payload missing root_sig tag".to_string())?;
+-        let sig_bytes = hex::decode(sig_hex)
+-            .map_err(|_| "root_sig tag is not valid hex".to_string())?;
++        let sig_bytes =
++            hex::decode(sig_hex).map_err(|_| "root_sig tag is not valid hex".to_string())?;
+         let sig: [u8; 64] = sig_bytes
+             .try_into()
+             .map_err(|_| "root_sig must be 64 bytes".to_string())?;
+@@ -861,10 +886,7 @@ impl Node {
+     /// Receveur — annonce reçue : vérifie la signature racine + version >
+     /// locale, mémorise l'annonce, puis émet une requête `manifest` vers
+     /// l'annonceur.
+-    fn on_update_announce(
+-        &mut self,
+-        event: &MeshEvent,
+-    ) -> Result<UpdateHandlingOutcome, String> {
++    fn on_update_announce(&mut self, event: &MeshEvent) -> Result<UpdateHandlingOutcome, String> {
+         let (data, sig) = Self::decode_update_payload(event)?;
+         match self.update_protocol.handle_announcement(&data, &sig) {
+             Ok(announcement) => {
+@@ -874,10 +896,7 @@ impl Node {
+                     &self.identity,
+                     OndeMessageType::UpdateRequest,
+                     String::new(),
+-                    build_tags(&[
+-                        (TAG_REQ_TYPE, "manifest".to_string()),
+-                        (TAG_TO, announcer),
+-                    ]),
++                    build_tags(&[(TAG_REQ_TYPE, "manifest".to_string()), (TAG_TO, announcer)]),
+                 );
+                 self.publish_gossip_event(request)?;
+                 Ok(UpdateHandlingOutcome::AnnouncementRequested)
+@@ -888,14 +907,10 @@ impl Node {
+ 
+     /// Receveur — manifeste reçu : le lie à l'annonce acceptée
+     /// (`handle_manifest`), puis émet une requête `chunk 0` vers l'annonceur.
+-    fn on_update_manifest(
+-        &mut self,
+-        event: &MeshEvent,
+-    ) -> Result<UpdateHandlingOutcome, String> {
+-        let announcement = self
+-            .pending_announcement
+-            .clone()
+-            .ok_or_else(|| "update manifest received without a prior accepted announcement".to_string())?;
++    fn on_update_manifest(&mut self, event: &MeshEvent) -> Result<UpdateHandlingOutcome, String> {
++        let announcement = self.pending_announcement.clone().ok_or_else(|| {
++            "update manifest received without a prior accepted announcement".to_string()
++        })?;
+         let (data, sig) = Self::decode_update_payload(event)?;
+         match self
+             .update_protocol
+@@ -1098,10 +1113,7 @@ impl Node {
+     ///    → rejeté).
+     /// 4. **Relai** : un endossement intégré est rediffusé vers les pairs qui
+     ///    ne l'ont pas encore reçu (tracking "livré par pair" du gossip).
+-    pub fn handle_incoming_endorsement(
+-        &mut self,
+-        event: &MeshEvent,
+-    ) -> EndorsementHandlingOutcome {
++    pub fn handle_incoming_endorsement(&mut self, event: &MeshEvent) -> EndorsementHandlingOutcome {
+         if event.kind != OndeMessageType::Endorsement {
+             return EndorsementHandlingOutcome::Ignored;
+         }
+@@ -1142,17 +1154,19 @@ impl Node {
+             );
+         }
+         let sig_verified = {
+-            let pubkey_ok = hex::decode(&event.pubkey).map(|b| b.len() == 32).unwrap_or(false);
+-            let sig_ok = hex::decode(&event.sig).map(|b| b.len() == 64).unwrap_or(false);
+-            pubkey_ok
+-                && sig_ok
+-                && {
+-                    let mut pk = [0u8; 32];
+-                    let mut sig = [0u8; 64];
+-                    pk.copy_from_slice(&hex::decode(&event.pubkey).unwrap_or_default());
+-                    sig.copy_from_slice(&hex::decode(&event.sig).unwrap_or_default());
+-                    Identity::verify_from_pubkey(&pk, event.id.as_bytes(), &sig)
+-                }
++            let pubkey_ok = hex::decode(&event.pubkey)
++                .map(|b| b.len() == 32)
++                .unwrap_or(false);
++            let sig_ok = hex::decode(&event.sig)
++                .map(|b| b.len() == 64)
++                .unwrap_or(false);
++            pubkey_ok && sig_ok && {
++                let mut pk = [0u8; 32];
++                let mut sig = [0u8; 64];
++                pk.copy_from_slice(&hex::decode(&event.pubkey).unwrap_or_default());
++                sig.copy_from_slice(&hex::decode(&event.sig).unwrap_or_default());
++                Identity::verify_from_pubkey(&pk, event.id.as_bytes(), &sig)
++            }
+         };
+         if !sig_verified {
+             return EndorsementHandlingOutcome::Rejected(
+@@ -1217,11 +1231,8 @@ impl Node {
+ 
+         // Construction du payload (clé X25519 + compteur de rotation + clé
+         // précédente pour la période de grâce) — logique partagée avec les tests.
+-        let event = Self::build_rotation_announcement(
+-            &self.identity,
+-            &self.identity_rotator,
+-            &prev_x25519,
+-        );
++        let event =
++            Self::build_rotation_announcement(&self.identity, &self.identity_rotator, &prev_x25519);
+         self.publish_gossip_event(event)
+     }
+ 
+@@ -1242,19 +1253,14 @@ impl Node {
+             "prev": prev_x25519,
+             "rotation": rotation_count,
+         });
+-        let content = base64::engine::general_purpose::STANDARD
+-            .encode(payload.to_string().into_bytes());
++        let content =
++            base64::engine::general_purpose::STANDARD.encode(payload.to_string().into_bytes());
+ 
+         let tags = build_tags(&[
+             (TAG_IDENTITY_ROTATION, new_x25519.clone()),
+             ("rotation_count", rotation_count.to_string()),
+         ]);
+-        MeshEvent::new_signed(
+-            identity,
+-            OndeMessageType::IdentityRotation,
+-            content,
+-            tags,
+-        )
++        MeshEvent::new_signed(identity, OndeMessageType::IdentityRotation, content, tags)
+     }
+ 
+     /// Récepteur — traite une annonce de rotation d'identité X25519 reçue.
+@@ -1317,17 +1323,19 @@ impl Node {
+         // 2. La signature Ed25519 de l'événement DOIT être valide —
+         //    l'annonceur est authentique, pas une pubkey usurpée (Aikido CRIT).
+         let sig_verified = {
+-            let pubkey_ok = hex::decode(announcer).map(|b| b.len() == 32).unwrap_or(false);
+-            let sig_ok = hex::decode(&event.sig).map(|b| b.len() == 64).unwrap_or(false);
+-            pubkey_ok
+-                && sig_ok
+-                && {
+-                    let mut pk = [0u8; 32];
+-                    let mut sig = [0u8; 64];
+-                    pk.copy_from_slice(&hex::decode(announcer).unwrap_or_default());
+-                    sig.copy_from_slice(&hex::decode(&event.sig).unwrap_or_default());
+-                    crate::crypto::Identity::verify_from_pubkey(&pk, event.id.as_bytes(), &sig)
+-                }
++            let pubkey_ok = hex::decode(announcer)
++                .map(|b| b.len() == 32)
++                .unwrap_or(false);
++            let sig_ok = hex::decode(&event.sig)
++                .map(|b| b.len() == 64)
++                .unwrap_or(false);
++            pubkey_ok && sig_ok && {
++                let mut pk = [0u8; 32];
++                let mut sig = [0u8; 64];
++                pk.copy_from_slice(&hex::decode(announcer).unwrap_or_default());
++                sig.copy_from_slice(&hex::decode(&event.sig).unwrap_or_default());
++                crate::crypto::Identity::verify_from_pubkey(&pk, event.id.as_bytes(), &sig)
++            }
+         };
+         if !sig_verified {
+             return RotationHandlingOutcome::Rejected(
+@@ -1366,12 +1374,15 @@ impl Node {
+         if !prev.is_empty() {
+             self.peer_x25519_grace.insert(announcer.clone(), prev);
+         }
+-        self.peer_x25519.insert(announcer.clone(), new_x25519.clone());
++        self.peer_x25519
++            .insert(announcer.clone(), new_x25519.clone());
+         self.peer_rotation_count
+             .insert(announcer.clone(), rotation_count);
+ 
+         // 7. Relai dans le gossip (idempotent).
+-        let _ = self.gossip.add_event_with_reputation(event.clone(), &self.reputation);
++        let _ = self
++            .gossip
++            .add_event_with_reputation(event.clone(), &self.reputation);
+ 
+         RotationHandlingOutcome::Applied
+     }
+@@ -1439,7 +1450,12 @@ impl Node {
+             local_model: ai.get_local_model().map(|m| format!("{m:?}")),
+             // Extensions audits
+             identity_rotations: self.identity_rotator.rotation_count(),
+-            trusted_peers: self.reputation.summary().iter().filter(|(_, s, _)| *s >= crate::reputation::TRUSTED_THRESHOLD).count(),
++            trusted_peers: self
++                .reputation
++                .summary()
++                .iter()
++                .filter(|(_, s, _)| *s >= crate::reputation::TRUSTED_THRESHOLD)
++                .count(),
+             stored_messages: self.message_store.total_count(),
+             stored_compressed_bytes: stored_bytes,
+             stored_raw_bytes: raw_bytes,
+@@ -1488,7 +1504,7 @@ mod tests {
+         let config = NodeConfig::default();
+         let node = Node::new(config);
+         assert!(node.identity.pubkey_hex().len() == 64); // hex 32 bytes
+-        // Extensions audits actives par défaut
++                                                         // Extensions audits actives par défaut
+         assert_eq!(node.identity_rotator.rotation_count(), 0);
+         assert!(node.reputation.is_trusted(&node.identity.pubkey_hex()));
+         assert_eq!(node.message_store.total_count(), 0);
+@@ -1510,7 +1526,10 @@ mod tests {
+     async fn test_node_identity_rotation() {
+         let mut node = Node::new(NodeConfig::default());
+         let start_pub = node.identity.pubkey_hex();
+-        assert!(!node.maybe_rotate_identity(), "no rotation at t=0 (interval 6h)");
++        assert!(
++            !node.maybe_rotate_identity(),
++            "no rotation at t=0 (interval 6h)"
++        );
+         assert_eq!(node.identity_rotator.rotation_count(), 0);
+ 
+         // Force une rotation (le champ last_rotation est 0 au premier appel,
+@@ -1546,7 +1565,10 @@ mod tests {
+             sqlite_path: Some(db_str.clone()),
+             ..Default::default()
+         });
+-        let event = node.publish_alert("persisté en SQLite".to_string()).await.unwrap();
++        let event = node
++            .publish_alert("persisté en SQLite".to_string())
++            .await
++            .unwrap();
+         assert!(node.persistence.is_some(), "SQLite store must be open");
+         assert_eq!(node.persistence.as_ref().unwrap().count().unwrap(), 1);
+ 
+@@ -1555,10 +1577,17 @@ mod tests {
+             sqlite_path: Some(db_str.clone()),
+             ..Default::default()
+         });
+-        assert_eq!(node2.message_store.total_count(), 0, "fresh node starts empty");
++        assert_eq!(
++            node2.message_store.total_count(),
++            0,
++            "fresh node starts empty"
++        );
+         let restored = node2.load_persisted_messages().unwrap();
+         assert_eq!(restored, 1, "one message restored from SQLite");
+-        assert!(node2.message_store.get(&event.id).is_some(), "restored message accessible");
++        assert!(
++            node2.message_store.get(&event.id).is_some(),
++            "restored message accessible"
++        );
+ 
+         // 3. Le sweep SQLite fonctionne aussi
+         assert_eq!(node2.sweep_message_store(), 0);
+@@ -1632,7 +1661,10 @@ mod tests {
+             sqlite_path: Some(db_str.clone()),
+             ..Default::default()
+         });
+-        let event = node.publish_mutual_aid("besoin d'eau potable".to_string()).await.unwrap();
++        let event = node
++            .publish_mutual_aid("besoin d'eau potable".to_string())
++            .await
++            .unwrap();
+         // Stocké en tier Important + persisté
+         assert_eq!(node.message_store.total_count(), 1);
+         assert_eq!(node.persistence.as_ref().unwrap().count().unwrap(), 1);
+@@ -1656,7 +1688,10 @@ mod tests {
+         assert_eq!(node.throttle_sweep_secs(), 300);
+         assert!(node.should_defer_heavy_work());
+         let result = node.publish_alert("critique en batterie".to_string()).await;
+-        assert!(result.is_ok(), "critical alerts still publish in battery saver");
++        assert!(
++            result.is_ok(),
++            "critical alerts still publish in battery saver"
++        );
+ 
+         // Le statut expose l'état
+         let status = node.status().await;
+@@ -1715,7 +1750,11 @@ mod tests {
+ 
+         let event = node.announce_identity_rotation().expect("announce ok");
+         assert_eq!(event.kind, OndeMessageType::IdentityRotation);
+-        assert_eq!(event.pubkey, node.identity.pubkey_hex(), "signed by stable identity");
++        assert_eq!(
++            event.pubkey,
++            node.identity.pubkey_hex(),
++            "signed by stable identity"
++        );
+ 
+         // Le payload JSON contient la clé X25519 du rotateur.
+         let data = base64::engine::general_purpose::STANDARD
+@@ -1757,10 +1796,11 @@ mod tests {
+         let data = b"grace-check";
+         let old_key = key_before;
+         assert!(
+-            node
+-                .identity_rotator
+-                .verify_with_any(&old_key, data, &node.identity_rotator.current().sign(data))
+-                || old_key != node.identity_rotator.current_pubkey_hex(),
++            node.identity_rotator.verify_with_any(
++                &old_key,
++                data,
++                &node.identity_rotator.current().sign(data)
++            ) || old_key != node.identity_rotator.current_pubkey_hex(),
+             "grace period keeps the previous key usable"
+         );
+         // L'annonce porte la NOUVELLE clé.
+@@ -1800,9 +1840,16 @@ mod tests {
+         // Première annonce → B applique la clé courante de A.
+         let ev1 = a.announce_identity_rotation().expect("announce 1 ok");
+         let key_a0 = announced_key(&ev1);
+-        assert_eq!(b.handle_incoming_rotation(&ev1), RotationHandlingOutcome::Applied);
++        assert_eq!(
++            b.handle_incoming_rotation(&ev1),
++            RotationHandlingOutcome::Applied
++        );
+         assert_eq!(b.peer_x25519_key(&a_pub), Some(key_a0.as_str()));
+-        assert_eq!(b.peer_x25519_grace_key(&a_pub), None, "first key has no grace yet");
++        assert_eq!(
++            b.peer_x25519_grace_key(&a_pub),
++            None,
++            "first key has no grace yet"
++        );
+ 
+         // A devient "due pour rotation" → la 2e annonce rotite intérieurement
+         // et porte une NOUVELLE clé. B reçoit : l'ancienne passe en grâce.
+@@ -1814,10 +1861,19 @@ mod tests {
+ 
+         let ev2 = a.announce_identity_rotation().expect("announce 2 ok");
+         let key_a1 = announced_key(&ev2);
+-        assert_ne!(key_a0, key_a1, "a due rotation must change the announced key");
+-        assert!(a.identity_rotator.rotation_count() >= 1, "at least one rotation happened");
++        assert_ne!(
++            key_a0, key_a1,
++            "a due rotation must change the announced key"
++        );
++        assert!(
++            a.identity_rotator.rotation_count() >= 1,
++            "at least one rotation happened"
++        );
+ 
+-        assert_eq!(b.handle_incoming_rotation(&ev2), RotationHandlingOutcome::Applied);
++        assert_eq!(
++            b.handle_incoming_rotation(&ev2),
++            RotationHandlingOutcome::Applied
++        );
+         assert_eq!(
+             b.peer_x25519_key(&a_pub),
+             Some(key_a1.as_str()),
+@@ -1861,7 +1917,10 @@ mod tests {
+         b.reputation.bootstrap(std::slice::from_ref(&a_pub));
+ 
+         let ev = a.announce_identity_rotation().expect("announce ok");
+-        assert_eq!(b.handle_incoming_rotation(&ev), RotationHandlingOutcome::Applied);
++        assert_eq!(
++            b.handle_incoming_rotation(&ev),
++            RotationHandlingOutcome::Applied
++        );
+ 
+         // Replay de la MÊME annonce (même clé) → rejeté.
+         let outcome = b.handle_incoming_rotation(&ev);
+@@ -1920,14 +1979,20 @@ mod tests {
+         // Tour 1 → compteur 1, clé K1.
+         rot.set_rotation_count(1);
+         let ev_old = Node::build_rotation_announcement(&a.identity, &rot, "");
+-        assert_eq!(b.handle_incoming_rotation(&ev_old), RotationHandlingOutcome::Applied);
++        assert_eq!(
++            b.handle_incoming_rotation(&ev_old),
++            RotationHandlingOutcome::Applied
++        );
+         let first_key = b.peer_x25519_key(&a_pub).unwrap().to_string();
+ 
+         // Tour 2 → compteur 2, clé K2 ≠ K1.
+         rot.maybe_rotate(now); // due → clé K2
+         rot.set_rotation_count(2);
+         let ev_new = Node::build_rotation_announcement(&a.identity, &rot, "");
+-        assert_eq!(b.handle_incoming_rotation(&ev_new), RotationHandlingOutcome::Applied);
++        assert_eq!(
++            b.handle_incoming_rotation(&ev_new),
++            RotationHandlingOutcome::Applied
++        );
+         let second_key = b.peer_x25519_key(&a_pub).unwrap().to_string();
+         assert_ne!(first_key, second_key, "a due rotation must change the key");
+ 
+@@ -1944,4 +2009,4 @@ mod tests {
+             "the most-recent key must be retained after a stale replay attempt"
+         );
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/core/src/protocol/mod.rs b/core/src/protocol/mod.rs
+index 275b1e4..c35bdb6 100644
+--- a/core/src/protocol/mod.rs
++++ b/core/src/protocol/mod.rs
+@@ -114,12 +114,7 @@ pub struct MeshEvent {
+ impl MeshEvent {
+     /// Create an UNSIGNED event (sig is empty → rejected by `validate`).
+     /// Prefer `new_signed` for events that must pass validation.
+-    pub fn new(
+-        pubkey: &str,
+-        kind: OndeMessageType,
+-        content: String,
+-        tags: Vec<String>,
+-    ) -> Self {
++    pub fn new(pubkey: &str, kind: OndeMessageType, content: String, tags: Vec<String>) -> Self {
+         // Horodatage flou ±30 s (Audit #14) : brouille le moment exact
+         // d'émission aux observateurs du mesh.
+         let created_at = crate::crypto::fuzzy_timestamp_secs();
+@@ -182,13 +177,8 @@ impl MeshEvent {
+         tags: &[String],
+         content: &str,
+     ) -> String {
+-        let canonical = serde_json::json!([
+-            pubkey,
+-            created_at,
+-            Self::kind_code(kind),
+-            tags,
+-            content
+-        ]);
++        let canonical =
++            serde_json::json!([pubkey, created_at, Self::kind_code(kind), tags, content]);
+         let data = serde_json::to_vec(&canonical).unwrap();
+         hex::encode(Sha256::digest(&data))
+     }
+@@ -262,10 +252,7 @@ impl MeshEvent {
+         // éviter de tronquer les caractères multioctets (Audit m1).
+         if let OndeMessageType::Alert = &self.kind {
+             if self.content.chars().count() > MAX_ALERT_SIZE {
+-                return Err(format!(
+-                    "Alert exceeds {} character limit",
+-                    MAX_ALERT_SIZE
+-                ));
++                return Err(format!("Alert exceeds {} character limit", MAX_ALERT_SIZE));
+             }
+         }
+ 
+@@ -291,10 +278,10 @@ impl MeshEvent {
+         if self.sig.is_empty() {
+             return Err("Missing signature".to_string());
+         }
+-        let pubkey_bytes = decode_hex_32(&self.pubkey)
+-            .map_err(|_| "Invalid pubkey encoding".to_string())?;
+-        let sig_bytes = decode_hex_64(&self.sig)
+-            .map_err(|_| "Invalid signature encoding".to_string())?;
++        let pubkey_bytes =
++            decode_hex_32(&self.pubkey).map_err(|_| "Invalid pubkey encoding".to_string())?;
++        let sig_bytes =
++            decode_hex_64(&self.sig).map_err(|_| "Invalid signature encoding".to_string())?;
+         if !Identity::verify_from_pubkey(&pubkey_bytes, self.id.as_bytes(), &sig_bytes) {
+             return Err("Invalid signature".to_string());
+         }
+@@ -389,8 +376,8 @@ impl MeshEvent {
+     /// de panique.
+     pub fn to_wire_bytes(&self) -> Result<Vec<u8>, String> {
+         let id = decode_hex_32(&self.id).map_err(|_| "wire: invalid event id".to_string())?;
+-        let pubkey = decode_hex_32(&self.pubkey)
+-            .map_err(|_| "wire: invalid pubkey encoding".to_string())?;
++        let pubkey =
++            decode_hex_32(&self.pubkey).map_err(|_| "wire: invalid pubkey encoding".to_string())?;
+         let sig = decode_hex_64(&self.sig).map_err(|_| "wire: invalid signature".to_string())?;
+ 
+         let mut out = Vec::with_capacity(32 + 32 + 8 + 1 + 4 + 4 + self.content.len() + 64 + 8 + 2);
+@@ -545,7 +532,8 @@ impl<'a> WireReader<'a> {
+ 
+     fn take_array<const N: usize>(&mut self) -> Result<[u8; N], String> {
+         let s = self.take(N)?;
+-        s.try_into().map_err(|_| "wire: length mismatch".to_string())
++        s.try_into()
++            .map_err(|_| "wire: length mismatch".to_string())
+     }
+ 
+     fn take_u8(&mut self) -> Result<u8, String> {
+@@ -665,10 +653,7 @@ impl GossipProtocol {
+     /// Un événement reste dans l'outbox jusqu'à éviction (bornée) afin que
+     /// les autres pairs puissent aussi le recevoir.
+     pub fn get_pending_for_peer(&mut self, peer_id: &str) -> Vec<MeshEvent> {
+-        let delivered_set = self
+-            .delivered
+-            .entry(peer_id.to_string())
+-            .or_default();
++        let delivered_set = self.delivered.entry(peer_id.to_string()).or_default();
+ 
+         let mut to_send = Vec::new();
+         for event in self.pending_broadcasts.iter() {
+@@ -793,7 +778,7 @@ mod tests {
+         );
+         assert_eq!(event.pubkey, "pubkey123");
+         assert!(event.pow_nonce == 0); // Not computed yet
+-        // Unsigned events are not valid
++                                       // Unsigned events are not valid
+         assert!(event.sig.is_empty());
+     }
+ 
+@@ -824,7 +809,10 @@ mod tests {
+             vec!["test".to_string()],
+         );
+         event.pow_difficulty = 2; // above the network minimum, PoW still trivial
+-        assert!(event.compute_pow(1_000_000), "PoW nonce must be found at difficulty 2");
++        assert!(
++            event.compute_pow(1_000_000),
++            "PoW nonce must be found at difficulty 2"
++        );
+ 
+         assert!(event.validate().is_ok(), "Signed event must validate");
+         assert_eq!(event.sig.len(), 128); // 64 bytes of hex
+@@ -847,17 +835,16 @@ mod tests {
+         event.pow_difficulty = 0;
+         assert!(event.validate().is_err(), "difficulty 0 must be rejected");
+         assert!(
+-            event.validate().unwrap_err().contains("below network minimum"),
++            event
++                .validate()
++                .unwrap_err()
++                .contains("below network minimum"),
+             "error must mention the network minimum"
+         );
+ 
+         // The honest floor itself is accepted (PoW trivially satisfiable)
+-        let mut event2 = MeshEvent::new_signed(
+-            &identity,
+-            OndeMessageType::Alert,
+-            "ok".to_string(),
+-            vec![],
+-        );
++        let mut event2 =
++            MeshEvent::new_signed(&identity, OndeMessageType::Alert, "ok".to_string(), vec![]);
+         event2.pow_difficulty = 1; // = MeshEvent::MIN_POW_DIFFICULTY (trivially satisfiable)
+         assert!(event2.compute_pow(1_000_000));
+         assert!(
+@@ -893,12 +880,7 @@ mod tests {
+     #[test]
+     fn test_unsigned_event_rejected() {
+         // new() leaves the signature empty → validate() must refuse
+-        let event = MeshEvent::new(
+-            "key",
+-            OndeMessageType::Alert,
+-            "hello".to_string(),
+-            vec![],
+-        );
++        let event = MeshEvent::new("key", OndeMessageType::Alert, "hello".to_string(), vec![]);
+         assert!(
+             event.validate().is_err(),
+             "Event with an empty signature must be rejected"
+@@ -941,8 +923,12 @@ mod tests {
+ 
+         // Same author + content + timestamp, different kind → different IDs
+         let id_alert = MeshEvent::compute_id(pk, 1_000, &OndeMessageType::Alert, &tags, content);
+-        let id_voice = MeshEvent::compute_id(pk, 1_000, &OndeMessageType::VoiceMemo, &tags, content);
+-        assert_ne!(id_alert, id_voice, "different kinds must yield different IDs");
++        let id_voice =
++            MeshEvent::compute_id(pk, 1_000, &OndeMessageType::VoiceMemo, &tags, content);
++        assert_ne!(
++            id_alert, id_voice,
++            "different kinds must yield different IDs"
++        );
+ 
+         // Determinism: identical inputs → identical ID
+         let id_again = MeshEvent::compute_id(pk, 1_000, &kind, &tags, content);
+@@ -952,7 +938,8 @@ mod tests {
+     #[test]
+     fn test_is_expired_no_underflow() {
+         let identity = Identity::generate();
+-        let mut event = MeshEvent::new_signed(&identity, OndeMessageType::Alert, "hi".into(), vec![]);
++        let mut event =
++            MeshEvent::new_signed(&identity, OndeMessageType::Alert, "hi".into(), vec![]);
+         event.pow_difficulty = 2;
+ 
+         // An event created in the future must not panic (saturating_sub)
+@@ -967,7 +954,8 @@ mod tests {
+     #[test]
+     fn test_future_timestamp_rejected() {
+         let identity = Identity::generate();
+-        let mut event = MeshEvent::new_signed(&identity, OndeMessageType::Alert, "hi".into(), vec![]);
++        let mut event =
++            MeshEvent::new_signed(&identity, OndeMessageType::Alert, "hi".into(), vec![]);
+         event.pow_difficulty = 2;
+         assert!(event.compute_pow(1_000_000));
+         assert!(event.validate().is_ok());
+@@ -984,7 +972,8 @@ mod tests {
+     fn test_gossip_dedup() {
+         let mut gossip = GossipProtocol::new();
+         let identity = Identity::generate();
+-        let mut event = MeshEvent::new_signed(&identity, OndeMessageType::Alert, "hello".into(), vec![]);
++        let mut event =
++            MeshEvent::new_signed(&identity, OndeMessageType::Alert, "hello".into(), vec![]);
+         event.pow_difficulty = 2;
+         assert!(event.compute_pow(1_000_000));
+         let id = event.id.clone();
+@@ -1090,11 +1079,7 @@ mod tests {
+         for _ in 0..5 {
+             gossip.get_pending_for_peer(peer);
+         }
+-        let delivered_len = gossip
+-            .delivered
+-            .get(peer)
+-            .map(|d| d.len())
+-            .unwrap_or(0);
++        let delivered_len = gossip.delivered.get(peer).map(|d| d.len()).unwrap_or(0);
+         assert!(
+             delivered_len <= MAX_DELIVERED_PER_PEER,
+             "delivered tracking per peer must be bounded"
+@@ -1110,8 +1095,9 @@ mod tests {
+         let mut rep = ReputationSystem::new();
+         rep.bootstrap(&[identity.pubkey_hex()]);
+ 
+-        let event = MeshEvent::new_signed(&identity, OndeMessageType::Alert, "alerte".into(), vec![])
+-            .with_pow_difficulty(0);
++        let event =
++            MeshEvent::new_signed(&identity, OndeMessageType::Alert, "alerte".into(), vec![])
++                .with_pow_difficulty(0);
+ 
+         // validate() standard (plancher réseau) le rejette…
+         assert!(event.validate().is_err());
+@@ -1131,18 +1117,23 @@ mod tests {
+         let identity = Identity::generate();
+ 
+         // Difficulté 1 (plancher réseau) : insuffisante pour un inconnu
+-        let mut weak = MeshEvent::new_signed(&identity, OndeMessageType::Alert, "spam".into(), vec![])
+-            .with_pow_difficulty(1);
++        let mut weak =
++            MeshEvent::new_signed(&identity, OndeMessageType::Alert, "spam".into(), vec![])
++                .with_pow_difficulty(1);
+         assert!(weak.compute_pow(1_000_000));
+-        assert!(weak.validate().is_ok(), "standard validate accepts difficulty 1");
++        assert!(
++            weak.validate().is_ok(),
++            "standard validate accepts difficulty 1"
++        );
+         assert!(
+             weak.validate_with_reputation(&rep).is_err(),
+             "unknown node with difficulty 1 must be rejected by reputation"
+         );
+ 
+         // Difficulté MAX : acceptable
+-        let mut strong = MeshEvent::new_signed(&identity, OndeMessageType::Alert, "spam".into(), vec![])
+-            .with_pow_difficulty(crate::reputation::MAX_POW_DIFFICULTY);
++        let mut strong =
++            MeshEvent::new_signed(&identity, OndeMessageType::Alert, "spam".into(), vec![])
++                .with_pow_difficulty(crate::reputation::MAX_POW_DIFFICULTY);
+         assert!(strong.compute_pow(10_000_000));
+         assert!(
+             strong.validate_with_reputation(&rep).is_ok(),
+@@ -1195,8 +1186,10 @@ mod tests {
+         // (même contenu, même timestamp, même auteur).
+         let pk = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+         let tags = vec!["peer=x".to_string()];
+-        let id_announce = MeshEvent::compute_id(pk, 42, &OndeMessageType::UpdateAnnounce, &tags, "x");
+-        let id_manifest = MeshEvent::compute_id(pk, 42, &OndeMessageType::UpdateManifest, &tags, "x");
++        let id_announce =
++            MeshEvent::compute_id(pk, 42, &OndeMessageType::UpdateAnnounce, &tags, "x");
++        let id_manifest =
++            MeshEvent::compute_id(pk, 42, &OndeMessageType::UpdateManifest, &tags, "x");
+         let id_chunk = MeshEvent::compute_id(pk, 42, &OndeMessageType::UpdateChunk, &tags, "x");
+         let id_request = MeshEvent::compute_id(pk, 42, &OndeMessageType::UpdateRequest, &tags, "x");
+         assert_ne!(id_announce, id_manifest);
+@@ -1250,7 +1243,8 @@ mod tests {
+ 
+     fn make_signed_event(content: &str, tags: Vec<String>) -> MeshEvent {
+         let identity = Identity::generate();
+-        let mut event = MeshEvent::new_signed(&identity, OndeMessageType::Alert, content.to_string(), tags);
++        let mut event =
++            MeshEvent::new_signed(&identity, OndeMessageType::Alert, content.to_string(), tags);
+         event.pow_difficulty = 2;
+         assert!(event.compute_pow(1_000_000));
+         event
+@@ -1289,7 +1283,11 @@ mod tests {
+         let event = make_signed_event("sans padding", vec![]);
+         let padded = event.to_wire_bytes().unwrap();
+         let unpadded = TrafficPadding::unpad(&padded);
+-        assert_ne!(unpadded.len(), padded.len(), "the test must exercise real padding");
++        assert_ne!(
++            unpadded.len(),
++            padded.len(),
++            "the test must exercise real padding"
++        );
+         let decoded = MeshEvent::from_wire_bytes(unpadded).expect("non-padded wire must decode");
+         assert_eq!(decoded.content, event.content);
+         assert_eq!(decoded.id, event.id);
+@@ -1298,7 +1296,10 @@ mod tests {
+     #[test]
+     fn test_wire_empty_and_truncated_no_panic() {
+         // Exigence Phase 1.3 : pas de panique sur entrée vide ou tronquée.
+-        assert!(MeshEvent::from_wire_bytes(&[]).is_err(), "empty wire must be an error");
++        assert!(
++            MeshEvent::from_wire_bytes(&[]).is_err(),
++            "empty wire must be an error"
++        );
+         let event = make_signed_event("tronqué", vec![]);
+         let padded = event.to_wire_bytes().unwrap();
+         let full = TrafficPadding::unpad(&padded);
+@@ -1311,7 +1312,10 @@ mod tests {
+             "truncated wire (into the payload) must be an error"
+         );
+         // Un paquet entièrement de zéros (padding seul) est aussi une erreur.
+-        assert!(MeshEvent::from_wire_bytes(&[0u8; 256]).is_err(), "all-zero wire must be an error");
++        assert!(
++            MeshEvent::from_wire_bytes(&[0u8; 256]).is_err(),
++            "all-zero wire must be an error"
++        );
+     }
+ 
+     #[test]
+@@ -1322,7 +1326,11 @@ mod tests {
+         let event = make_signed_event(&content, vec![]);
+         assert_eq!(event.content.len(), 100);
+         let wire = event.to_wire_bytes().unwrap();
+-        assert_eq!(wire.len(), 256, "100 B content must be padded to the 256 B bucket");
++        assert_eq!(
++            wire.len(),
++            256,
++            "100 B content must be padded to the 256 B bucket"
++        );
+         let decoded = MeshEvent::from_wire_bytes(&wire).unwrap();
+         assert_eq!(decoded.content, content);
+     }
+@@ -1341,7 +1349,10 @@ mod tests {
+         // zéros de seau — impossible de distinguer « zéro réel » de « zéro
+         // padding » sans se fier au format auto-descriptif.
+         let decoded = MeshEvent::from_wire_bytes(&wire).expect("ttl=0 event must decode");
+-        assert_eq!(decoded.ttl, 0, "a real trailing 0x00 (ttl=0) must not be stripped");
++        assert_eq!(
++            decoded.ttl, 0,
++            "a real trailing 0x00 (ttl=0) must not be stripped"
++        );
+         assert_eq!(decoded.content, event.content);
+         assert_eq!(decoded.id, event.id);
+     }
+@@ -1357,10 +1368,17 @@ mod tests {
+             .get_pending_for_peer_wire("peer-b")
+             .expect("valid outbox event must serialize");
+         assert_eq!(wire.len(), 1);
+-        assert_eq!(wire[0].len(), 256, "gossip emission is padded to the bucket");
++        assert_eq!(
++            wire[0].len(),
++            256,
++            "gossip emission is padded to the bucket"
++        );
+ 
+         // Livré une fois → plus rien à émettre (tracking par pair conservé).
+-        assert!(gossip.get_pending_for_peer_wire("peer-b").unwrap().is_empty());
++        assert!(gossip
++            .get_pending_for_peer_wire("peer-b")
++            .unwrap()
++            .is_empty());
+         // Un autre pair reçoit encore l'événement (pas de drain global, Audit M3).
+         let other = gossip.get_pending_for_peer_wire("peer-c").unwrap();
+         assert_eq!(other.len(), 1);
+diff --git a/core/src/reputation/mod.rs b/core/src/reputation/mod.rs
+index 47f8537..7930f7b 100644
+--- a/core/src/reputation/mod.rs
++++ b/core/src/reputation/mod.rs
+@@ -1,3 +1,4 @@
++use serde::{Deserialize, Serialize};
+ /// Reputation / Web-of-Trust — remplacement du PoW CPU fixe (Audit #11)
+ ///
+ /// Principe :
+@@ -13,7 +14,6 @@
+ /// sa propre charge anti-spam — le coût est concentré sur les nœuds qui
+ /// n'ont pas encore prouvé leur fiabilité.
+ use std::collections::HashMap;
+-use serde::{Deserialize, Serialize};
+ 
+ /// Seuil au-dessus duquel un nœud est considéré "de confiance"
+ /// (peut poster sans PoW, peut endosser d'autres nœuds).
+@@ -89,7 +89,12 @@ impl ReputationSystem {
+     ///   new = max(current, endorser_score × ENDORSEMENT_DECAY)
+     /// Après `REQUIRED_ENDORSEMENTS` endossements qualifiés, le nœud
+     /// devient "de confiance" (score >= TRUSTED_THRESHOLD).
+-    pub fn endorse(&mut self, endorser: &str, endorsed: &str, timestamp: u64) -> Result<f64, String> {
++    pub fn endorse(
++        &mut self,
++        endorser: &str,
++        endorsed: &str,
++        timestamp: u64,
++    ) -> Result<f64, String> {
+         if endorser == endorsed {
+             return Err("A node cannot endorse itself".to_string());
+         }
+@@ -118,11 +123,15 @@ impl ReputationSystem {
+ 
+         // Promotion automatique après suffisamment d'endossements qualifiés
+         // (calculé sans garder l'emprunt mutable sur `endorsements`)
+-        let qualified = self.endorsements
++        let qualified = self
++            .endorsements
+             .get(endorsed)
+             .map(|l| {
+                 l.iter()
+-                    .filter(|e| self.scores.get(&e.endorser).copied().unwrap_or(0.0) >= ENDORSEMENT_THRESHOLD)
++                    .filter(|e| {
++                        self.scores.get(&e.endorser).copied().unwrap_or(0.0)
++                            >= ENDORSEMENT_THRESHOLD
++                    })
+                     .count()
+             })
+             .unwrap_or(0);
+@@ -149,8 +158,12 @@ impl ReputationSystem {
+         if !endorser_sig_verified {
+             return Err("Endorsement signature could not be verified".to_string());
+         }
+-        self.endorse(&endorsement.endorser, &endorsement.endorsed, endorsement.timestamp)
+-            .map(|_| ())
++        self.endorse(
++            &endorsement.endorser,
++            &endorsement.endorsed,
++            endorsement.timestamp,
++        )
++        .map(|_| ())
+     }
+ 
+     /// Endossements actuellement intégrés par ce nœud — jeu candidat pour le
+@@ -167,7 +180,10 @@ impl ReputationSystem {
+             .get(pubkey)
+             .map(|l| {
+                 l.iter()
+-                    .filter(|e| self.scores.get(&e.endorser).copied().unwrap_or(0.0) >= ENDORSEMENT_THRESHOLD)
++                    .filter(|e| {
++                        self.scores.get(&e.endorser).copied().unwrap_or(0.0)
++                            >= ENDORSEMENT_THRESHOLD
++                    })
+                     .count()
+             })
+             .unwrap_or(0)
+@@ -190,7 +206,8 @@ impl ReputationSystem {
+     /// Signaler un comportement abusif (spam, signature invalide).
+     pub fn penalize(&mut self, pubkey: &str, amount: f64) {
+         let s = self.score(pubkey);
+-        self.scores.insert(pubkey.to_string(), (s - amount).max(0.0));
++        self.scores
++            .insert(pubkey.to_string(), (s - amount).max(0.0));
+     }
+ 
+     /// Difficulté PoW adaptative requise pour un expéditeur.
+@@ -210,7 +227,8 @@ impl ReputationSystem {
+         // 0 < score < 0.7 : difficulté entre BASE et MAX, inversement
+         // proportionnelle au score. Ex. score 0.35 → ~3.
+         let t = score / TRUSTED_THRESHOLD; // 0..1
+-        let diff_f = MAX_POW_DIFFICULTY as f64 - t * (MAX_POW_DIFFICULTY - BASE_POW_DIFFICULTY) as f64;
++        let diff_f =
++            MAX_POW_DIFFICULTY as f64 - t * (MAX_POW_DIFFICULTY - BASE_POW_DIFFICULTY) as f64;
+         (diff_f.round() as u8).clamp(BASE_POW_DIFFICULTY, MAX_POW_DIFFICULTY)
+     }
+ 
+@@ -393,16 +411,27 @@ mod tests {
+         // Promotion : 3 endossements qualifiés de nœuds de confiance rendent
+         // le nouveau venu "de confiance" — exactement comme `endorse`.
+         rep.apply_remote_endorsement(
+-            &Endorsement { endorser: g2.clone(), endorsed: newcomer.clone(), timestamp: 1_005 },
++            &Endorsement {
++                endorser: g2.clone(),
++                endorsed: newcomer.clone(),
++                timestamp: 1_005,
++            },
+             true,
+         )
+         .unwrap();
+         rep.apply_remote_endorsement(
+-            &Endorsement { endorser: g3.clone(), endorsed: newcomer.clone(), timestamp: 1_006 },
++            &Endorsement {
++                endorser: g3.clone(),
++                endorsed: newcomer.clone(),
++                timestamp: 1_006,
++            },
+             true,
+         )
+         .unwrap();
+-        assert!(rep.is_trusted(&newcomer), "3 qualified endorsements must promote");
++        assert!(
++            rep.is_trusted(&newcomer),
++            "3 qualified endorsements must promote"
++        );
+         assert_eq!(rep.score(&newcomer), TRUSTED_THRESHOLD);
+     }
+ 
+@@ -417,12 +446,20 @@ mod tests {
+         let b = key("b");
+ 
+         rep.apply_remote_endorsement(
+-            &Endorsement { endorser: g1.clone(), endorsed: a.clone(), timestamp: 1 },
++            &Endorsement {
++                endorser: g1.clone(),
++                endorsed: a.clone(),
++                timestamp: 1,
++            },
+             true,
+         )
+         .unwrap();
+         rep.apply_remote_endorsement(
+-            &Endorsement { endorser: g2.clone(), endorsed: b.clone(), timestamp: 2 },
++            &Endorsement {
++                endorser: g2.clone(),
++                endorsed: b.clone(),
++                timestamp: 2,
++            },
+             true,
+         )
+         .unwrap();
+@@ -433,7 +470,11 @@ mod tests {
+         assert!(pending.iter().any(|e| e.endorser == g2 && e.endorsed == b));
+ 
+         // Un doublon rejeté n'ajoute rien au jeu de relai.
+-        let dup = Endorsement { endorser: g1.clone(), endorsed: a.clone(), timestamp: 3 };
++        let dup = Endorsement {
++            endorser: g1.clone(),
++            endorsed: a.clone(),
++            timestamp: 3,
++        };
+         assert!(rep.apply_remote_endorsement(&dup, true).is_err());
+         assert_eq!(rep.pending_endorsements().len(), 2);
+     }
+diff --git a/core/src/storage/mod.rs b/core/src/storage/mod.rs
+index 972ba8b..3b7ee53 100644
+--- a/core/src/storage/mod.rs
++++ b/core/src/storage/mod.rs
+@@ -1,12 +1,12 @@
++use serde::{Deserialize, Serialize};
+ /// Offline Storage — ZIM reader, MBTiles renderer, IPFS seeder
+ ///
+ /// Honest-storage principle (prototype): a missing file fails loudly with an
+ /// `Err`. Demo data is only ever loaded through EXPLICIT methods
+ /// (`load_demo` / `register_demo_seeds`), never silently by default.
+ use std::collections::HashMap;
+-use std::path::PathBuf;
+ use std::fs;
+-use serde::{Deserialize, Serialize};
++use std::path::PathBuf;
+ 
+ use base64::Engine as _;
+ 
+@@ -82,14 +82,27 @@ impl ZimReader {
+         let demo_articles: [(&str, &[u8]); 6] = [
+             ("Premiers_secours", b"Article sur les premiers secours..."),
+             ("Survie", b"Techniques de survie en milieu hostile..."),
+-            ("Purification_de_l_eau", b"Purifier l'eau par ebullition ou filtration..."),
+-            ("Communication_radio", b"Etablir des communications radio de secours..."),
+-            ("Abri_d_urgence", b"Construire un abri d'urgence avec des moyens locaux..."),
+-            ("Orientation_cartographique", b"Se reperer avec carte et boussole..."),
++            (
++                "Purification_de_l_eau",
++                b"Purifier l'eau par ebullition ou filtration...",
++            ),
++            (
++                "Communication_radio",
++                b"Etablir des communications radio de secours...",
++            ),
++            (
++                "Abri_d_urgence",
++                b"Construire un abri d'urgence avec des moyens locaux...",
++            ),
++            (
++                "Orientation_cartographique",
++                b"Se reperer avec carte et boussole...",
++            ),
+         ];
+         self.article_cache.clear();
+         for (title, content) in demo_articles {
+-            self.article_cache.insert(title.to_string(), content.to_vec());
++            self.article_cache
++                .insert(title.to_string(), content.to_vec());
+         }
+         self.total_articles = demo_articles.len() as u64;
+         self.archive_path = None;
+@@ -284,7 +297,7 @@ fn decode_demo_png() -> Vec<u8> {
+ 
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ pub struct SeedInfo {
+-    pub cid: String,               // Content ID
++    pub cid: String, // Content ID
+     pub file_name: String,
+     pub file_size_bytes: u64,
+     pub mime_type: String,
+@@ -340,11 +353,36 @@ impl IpfsSeeder {
+     /// remaining capacity are skipped. Never invoked implicitly.
+     pub fn register_demo_seeds(&mut self) {
+         let demo_seeds = [
+-            ("QmWikipedia", "wikipedia_fr_2024.zim", 90_000_000_000u64, "application/x-zim"),
+-            ("QmOndeAPK", "onde-latest.apk", 45_000_000u64, "application/vnd.android.package-archive"),
+-            ("QmQwen08B", "qwen2-0_5b-q4_k_m.gguf", 530_000_000u64, "application/octet-stream"),
+-            ("QmQwen9B", "qwen2-7b-q4_k_m.gguf", 5_600_000_000u64, "application/octet-stream"),
+-            ("QmMaps", "france_tiles.mbtiles", 2_000_000_000u64, "application/x-sqlite"),
++            (
++                "QmWikipedia",
++                "wikipedia_fr_2024.zim",
++                90_000_000_000u64,
++                "application/x-zim",
++            ),
++            (
++                "QmOndeAPK",
++                "onde-latest.apk",
++                45_000_000u64,
++                "application/vnd.android.package-archive",
++            ),
++            (
++                "QmQwen08B",
++                "qwen2-0_5b-q4_k_m.gguf",
++                530_000_000u64,
++                "application/octet-stream",
++            ),
++            (
++                "QmQwen9B",
++                "qwen2-7b-q4_k_m.gguf",
++                5_600_000_000u64,
++                "application/octet-stream",
++            ),
++            (
++                "QmMaps",
++                "france_tiles.mbtiles",
++                2_000_000_000u64,
++                "application/x-sqlite",
++            ),
+         ];
+ 
+         for (cid, name, size, mime) in demo_seeds {
+@@ -468,8 +506,8 @@ pub enum StoragePolicy {
+ impl StoragePolicy {
+     pub fn max_bytes(self) -> u64 {
+         match self {
+-            StoragePolicy::Mobile => 64 * 1024 * 1024,      // 64 MB
+-            StoragePolicy::Desktop => 2 * 1024 * 1024 * 1024, // 2 GB
++            StoragePolicy::Mobile => 64 * 1024 * 1024,         // 64 MB
++            StoragePolicy::Desktop => 2 * 1024 * 1024 * 1024,  // 2 GB
+             StoragePolicy::Gateway => 16 * 1024 * 1024 * 1024, // 16 GB
+         }
+     }
+@@ -529,7 +567,9 @@ impl TieredMessageStore {
+     /// Compresser un payload (Deflate).
+     fn compress(data: &[u8]) -> Vec<u8> {
+         let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
+-        encoder.write_all(data).expect("in-memory write cannot fail");
++        encoder
++            .write_all(data)
++            .expect("in-memory write cannot fail");
+         encoder.finish().expect("in-memory finish cannot fail")
+     }
+ 
+@@ -585,7 +625,10 @@ impl TieredMessageStore {
+ 
+     /// Récupérer le payload décompressé d'un message.
+     pub fn get(&self, id: &str) -> Option<Result<Vec<u8>, String>> {
+-        self.messages.iter().find(|m| m.id == id).map(|m| Self::decompress(&m.payload))
++        self.messages
++            .iter()
++            .find(|m| m.id == id)
++            .map(|m| Self::decompress(&m.payload))
+     }
+ 
+     /// Accès aux messages stockés (pour la persistance SQLite).
+@@ -611,14 +654,20 @@ impl TieredMessageStore {
+     /// de messages purgés.
+     pub fn sweep_expired(&mut self, now: u64) -> usize {
+         let before = self.messages.len();
+-        self.messages.retain(|m| now.saturating_sub(m.created_at) < m.tier.retention_secs());
++        self.messages
++            .retain(|m| now.saturating_sub(m.created_at) < m.tier.retention_secs());
+         before - self.messages.len()
+     }
+ 
+     /// Décider si un message doit être stocké localement selon le sharding
+     /// Geohash : on garde ce qui est dans notre voisinage (préfixe commun
+     /// >= `prefix_len`) ou les alertes critiques.
+-    pub fn should_store_locally(geohash: &str, my_geohash: &str, tier: MessageTier, prefix_len: usize) -> bool {
++    pub fn should_store_locally(
++        geohash: &str,
++        my_geohash: &str,
++        tier: MessageTier,
++        prefix_len: usize,
++    ) -> bool {
+         if tier == MessageTier::Critical {
+             return true;
+         }
+@@ -652,10 +701,34 @@ impl TieredMessageStore {
+     /// Nombre de messages par tier (stats).
+     pub fn count_by_tier(&self) -> [(MessageTier, usize); 4] {
+         [
+-            (MessageTier::Critical, self.messages.iter().filter(|m| m.tier == MessageTier::Critical).count()),
+-            (MessageTier::Important, self.messages.iter().filter(|m| m.tier == MessageTier::Important).count()),
+-            (MessageTier::Normal, self.messages.iter().filter(|m| m.tier == MessageTier::Normal).count()),
+-            (MessageTier::Low, self.messages.iter().filter(|m| m.tier == MessageTier::Low).count()),
++            (
++                MessageTier::Critical,
++                self.messages
++                    .iter()
++                    .filter(|m| m.tier == MessageTier::Critical)
++                    .count(),
++            ),
++            (
++                MessageTier::Important,
++                self.messages
++                    .iter()
++                    .filter(|m| m.tier == MessageTier::Important)
++                    .count(),
++            ),
++            (
++                MessageTier::Normal,
++                self.messages
++                    .iter()
++                    .filter(|m| m.tier == MessageTier::Normal)
++                    .count(),
++            ),
++            (
++                MessageTier::Low,
++                self.messages
++                    .iter()
++                    .filter(|m| m.tier == MessageTier::Low)
++                    .count(),
++            ),
+         ]
+     }
+ 
+@@ -697,7 +770,7 @@ mod tests {
+     fn test_zim_load_real_header() {
+         // Synthetic openZIM header: >= 70 bytes, major version 5, articleCount = 12345
+         let mut buf = [0u8; 70];
+-        buf[0..2].copy_from_slice(&5u16.to_le_bytes());   // major version
++        buf[0..2].copy_from_slice(&5u16.to_le_bytes()); // major version
+         buf[14..22].copy_from_slice(&12345u64.to_le_bytes()); // article count
+         let path = std::env::temp_dir().join(format!("onde-zim-{}.zim", std::process::id()));
+         std::fs::write(&path, buf).unwrap();
+@@ -714,7 +787,7 @@ mod tests {
+     fn test_zim_rejects_old_major_version() {
+         // >= 70 bytes so the header is fully read, major version 3 (< 5)
+         let mut buf = [0u8; 70];
+-        buf[0..2].copy_from_slice(&3u16.to_le_bytes());   // major version 3
++        buf[0..2].copy_from_slice(&3u16.to_le_bytes()); // major version 3
+         buf[14..22].copy_from_slice(&100u64.to_le_bytes());
+         let path = std::env::temp_dir().join(format!("onde-zim-old-{}.zim", std::process::id()));
+         std::fs::write(&path, buf).unwrap();
+@@ -722,7 +795,10 @@ mod tests {
+         let mut reader = ZimReader::new();
+         let err = reader.load_archive(path.to_str().unwrap()).unwrap_err();
+         assert!(err.contains("not a valid ZIM"), "unexpected error: {err}");
+-        assert!(err.contains("3"), "error must mention the major version: {err}");
++        assert!(
++            err.contains("3"),
++            "error must mention the major version: {err}"
++        );
+ 
+         std::fs::remove_file(&path).ok();
+     }
+@@ -747,7 +823,10 @@ mod tests {
+     fn test_zim_load_demo() {
+         let mut reader = ZimReader::new();
+         let count = reader.load_demo();
+-        assert!(count >= 5, "demo mode must expose at least 5 articles, got {count}");
++        assert!(
++            count >= 5,
++            "demo mode must expose at least 5 articles, got {count}"
++        );
+         assert_eq!(reader.total_articles(), count);
+         assert!(
+             !reader.search("secours").is_empty(),
+@@ -815,7 +894,8 @@ mod tests {
+             );
+             // IEND chunk present
+             assert!(
+-                tile.windows(8).any(|w| w == [0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82]),
++                tile.windows(8)
++                    .any(|w| w == [0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82]),
+                 "tile must contain the IEND chunk"
+             );
+             assert!(tile.len() > 60, "demo tile must be a full PNG");
+@@ -847,7 +927,8 @@ mod tests {
+     #[test]
+     fn test_ipfs_new_empty_no_auto_demo() {
+         let path = std::env::temp_dir().join(format!("onde-ipfs-{}", std::process::id()));
+-        let seeder = IpfsSeeder::new(path.to_str().unwrap(), 100).expect("seeder should initialize");
++        let seeder =
++            IpfsSeeder::new(path.to_str().unwrap(), 100).expect("seeder should initialize");
+         assert!(
+             seeder.list_seeds().is_empty(),
+             "no demo seeds may be auto-registered"
+@@ -916,7 +997,14 @@ mod tests {
+         let mut store = TieredMessageStore::new(StoragePolicy::Mobile);
+         let payload = b"alerte civique : coupure d'eau secteur nord, reservoir 3 rempli".repeat(10);
+ 
+-        let stored = store.store("evt-1", MessageTier::Critical, &payload, 1_800_000_000, "u09tunq")
++        let stored = store
++            .store(
++                "evt-1",
++                MessageTier::Critical,
++                &payload,
++                1_800_000_000,
++                "u09tunq",
++            )
+             .expect("store must accept within budget");
+         assert!(stored);
+ 
+@@ -925,7 +1013,10 @@ mod tests {
+         assert!(compressed < raw, "compression must reduce size");
+ 
+         // Round-trip
+-        let got = store.get("evt-1").expect("message must exist").expect("decompress ok");
++        let got = store
++            .get("evt-1")
++            .expect("message must exist")
++            .expect("decompress ok");
+         assert_eq!(got, payload);
+     }
+ 
+@@ -935,9 +1026,21 @@ mod tests {
+         let now = 2_000_000_000u64;
+         // Messages locaux (geohash du nœud) — le sharding géographique les
+         // retient ; seuls des messages distants non critiques seraient écartés.
+-        store.store("crit", MessageTier::Critical, b"c", now - 2 * 24 * 3600, "u09tunq").unwrap();
+-        store.store("norm", MessageTier::Normal, b"n", now - 7 * 3600, "u09tunq").unwrap();
+-        store.store("low", MessageTier::Low, b"l", now - 7200, "u09tunq").unwrap();
++        store
++            .store(
++                "crit",
++                MessageTier::Critical,
++                b"c",
++                now - 2 * 24 * 3600,
++                "u09tunq",
++            )
++            .unwrap();
++        store
++            .store("norm", MessageTier::Normal, b"n", now - 7 * 3600, "u09tunq")
++            .unwrap();
++        store
++            .store("low", MessageTier::Low, b"l", now - 7200, "u09tunq")
++            .unwrap();
+ 
+         assert_eq!(store.total_count(), 3);
+         let purged = store.sweep_expired(now);
+@@ -951,13 +1054,33 @@ mod tests {
+     #[test]
+     fn test_geohash_sharding() {
+         let my = "u09tunq"; // Paris (Eiffel Tower)
+-        // Même voisinage (préfixe >= 5) → stockage local
+-        assert!(TieredMessageStore::should_store_locally("u09tunx", my, MessageTier::Normal, 5));
++                            // Même voisinage (préfixe >= 5) → stockage local
++        assert!(TieredMessageStore::should_store_locally(
++            "u09tunx",
++            my,
++            MessageTier::Normal,
++            5
++        ));
+         // Zone éloignée → non stocké (sauf alerte critique)
+-        assert!(!TieredMessageStore::should_store_locally("sp05abc", my, MessageTier::Normal, 5));
+-        assert!(TieredMessageStore::should_store_locally("sp05abc", my, MessageTier::Critical, 5));
++        assert!(!TieredMessageStore::should_store_locally(
++            "sp05abc",
++            my,
++            MessageTier::Normal,
++            5
++        ));
++        assert!(TieredMessageStore::should_store_locally(
++            "sp05abc",
++            my,
++            MessageTier::Critical,
++            5
++        ));
+         // prefix_len = 0 → rien n'est stocké localement
+-        assert!(!TieredMessageStore::should_store_locally("u09tunq", my, MessageTier::Normal, 0));
++        assert!(!TieredMessageStore::should_store_locally(
++            "u09tunq",
++            my,
++            MessageTier::Normal,
++            0
++        ));
+     }
+ 
+     #[test]
+@@ -968,40 +1091,67 @@ mod tests {
+         let payload = b"message de test";
+ 
+         // 1. Même geohash (message local) → stocké
+-        assert!(store.store("local", MessageTier::Normal, payload, 1_000, "u09tunq").unwrap());
++        assert!(store
++            .store("local", MessageTier::Normal, payload, 1_000, "u09tunq")
++            .unwrap());
+         // 2. Voisinage proche (préfixe 5 commun : u09tu) → stocké
+-        assert!(store.store("near", MessageTier::Normal, payload, 1_000, "u09tuxx").unwrap());
++        assert!(store
++            .store("near", MessageTier::Normal, payload, 1_000, "u09tuxx")
++            .unwrap());
+         // 3. Zone éloignée en tier Normal → NON stocké (routé seulement)
+-        assert!(!store.store("far", MessageTier::Normal, payload, 1_000, "sp05abc").unwrap());
++        assert!(!store
++            .store("far", MessageTier::Normal, payload, 1_000, "sp05abc")
++            .unwrap());
+         // 4. Zone éloignée mais Critical → toujours stocké (urgence)
+-        assert!(store.store("far-crit", MessageTier::Critical, payload, 1_000, "sp05abc").unwrap());
++        assert!(store
++            .store("far-crit", MessageTier::Critical, payload, 1_000, "sp05abc")
++            .unwrap());
+ 
+         assert_eq!(store.total_count(), 3);
+         assert!(store.get("local").is_some());
+         assert!(store.get("near").is_some());
+-        assert!(store.get("far").is_none(), "far Normal message must not be stored locally");
+-        assert!(store.get("far-crit").is_some(), "critical alerts are always kept");
++        assert!(
++            store.get("far").is_none(),
++            "far Normal message must not be stored locally"
++        );
++        assert!(
++            store.get("far-crit").is_some(),
++            "critical alerts are always kept"
++        );
+     }
+ 
+     #[test]
+     fn test_delegate_threshold() {
+         let mobile = TieredMessageStore::new(StoragePolicy::Mobile);
+-        assert!(mobile.should_delegate(70_000), "mobile delegates payloads > 64 KB");
++        assert!(
++            mobile.should_delegate(70_000),
++            "mobile delegates payloads > 64 KB"
++        );
+         assert!(!mobile.should_delegate(1_000));
+ 
+         let gateway = TieredMessageStore::new(StoragePolicy::Gateway);
+-        assert!(!gateway.should_delegate(70_000), "gateway keeps larger payloads locally");
++        assert!(
++            !gateway.should_delegate(70_000),
++            "gateway keeps larger payloads locally"
++        );
+     }
+ 
+     #[test]
+     fn test_store_respects_budget() {
+         let mut store = TieredMessageStore::new(StoragePolicy::Mobile); // 64 MB
+         let big = vec![0x55u8; 40 * 1024 * 1024];
+-        store.store("a", MessageTier::Important, &big, 1_000, "u09tunq").unwrap();
++        store
++            .store("a", MessageTier::Important, &big, 1_000, "u09tunq")
++            .unwrap();
+         // Deuxième message de 40 Mo : 40+40 = 80 Mo > budget mobile 64 Mo
+         // → refusé localement (le budget compte la taille brute, pas compressée)
+-        let second = store.store("b", MessageTier::Important, &big, 1_001, "u09tunq").unwrap();
+-        assert!(!second, "second 40 MB message must exceed the 64 MB mobile budget");
++        let second = store
++            .store("b", MessageTier::Important, &big, 1_001, "u09tunq")
++            .unwrap();
++        assert!(
++            !second,
++            "second 40 MB message must exceed the 64 MB mobile budget"
++        );
+         assert_eq!(store.total_count(), 1);
+     }
+ }
+diff --git a/core/src/storage/persistence.rs b/core/src/storage/persistence.rs
+index 0a24009..07fe409 100644
+--- a/core/src/storage/persistence.rs
++++ b/core/src/storage/persistence.rs
+@@ -30,7 +30,7 @@
+ use std::path::Path;
+ use std::sync::Mutex;
+ 
+-use rusqlite::{Connection, OptionalExtension, params};
++use rusqlite::{params, Connection, OptionalExtension};
+ 
+ use super::{MessageTier, TieredMessage};
+ 
+@@ -68,7 +68,9 @@ impl SqliteStore {
+              );",
+         )
+         .map_err(|e| format!("SQLite schema init failed: {e}"))?;
+-        Ok(Self { conn: Mutex::new(conn) })
++        Ok(Self {
++            conn: Mutex::new(conn),
++        })
+     }
+ 
+     /// Ouvrir une base en mémoire (tests).
+@@ -77,7 +79,9 @@ impl SqliteStore {
+     }
+ 
+     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>, String> {
+-        self.conn.lock().map_err(|_| "SQLite mutex poisoned".to_string())
++        self.conn
++            .lock()
++            .map_err(|_| "SQLite mutex poisoned".to_string())
+     }
+ 
+     /// Insérer ou remplacer un message.
+@@ -157,7 +161,12 @@ impl SqliteStore {
+         // conservé 7 jours, un Low 1 heure, etc.
+         let conn = self.lock()?;
+         let mut purged = 0usize;
+-        for tier in [MessageTier::Critical, MessageTier::Important, MessageTier::Normal, MessageTier::Low] {
++        for tier in [
++            MessageTier::Critical,
++            MessageTier::Important,
++            MessageTier::Normal,
++            MessageTier::Low,
++        ] {
+             let cutoff = now.saturating_sub(tier.retention_secs()) as i64;
+             let n = conn
+                 .execute(
+@@ -173,7 +182,9 @@ impl SqliteStore {
+     /// Nombre de messages persistés.
+     pub fn count(&self) -> Result<usize, String> {
+         self.lock()?
+-            .query_row("SELECT COUNT(*) FROM messages", [], |row| row.get::<_, i64>(0))
++            .query_row("SELECT COUNT(*) FROM messages", [], |row| {
++                row.get::<_, i64>(0)
++            })
+             .map(|n| n as usize)
+             .map_err(|e| format!("SQLite count failed: {e}"))
+     }
+@@ -252,7 +263,9 @@ mod tests {
+         assert_eq!(got.payload, msg.payload);
+ 
+         // Idempotent : re-store avec le même id remplace (INSERT OR REPLACE)
+-        store.store(&sample("evt-1", MessageTier::Normal, 1_800_000_000)).unwrap();
++        store
++            .store(&sample("evt-1", MessageTier::Normal, 1_800_000_000))
++            .unwrap();
+         let got2 = store.get("evt-1").unwrap().unwrap();
+         assert_eq!(got2.tier, MessageTier::Normal);
+         assert_eq!(store.count().unwrap(), 1);
+@@ -261,9 +274,13 @@ mod tests {
+     #[test]
+     fn test_load_all_roundtrip() {
+         let store = SqliteStore::open_in_memory().unwrap();
+-        store.store(&sample("a", MessageTier::Critical, 100)).unwrap();
++        store
++            .store(&sample("a", MessageTier::Critical, 100))
++            .unwrap();
+         store.store(&sample("b", MessageTier::Low, 200)).unwrap();
+-        store.store(&sample("c", MessageTier::Important, 300)).unwrap();
++        store
++            .store(&sample("c", MessageTier::Important, 300))
++            .unwrap();
+ 
+         let all = store.load_all().unwrap();
+         assert_eq!(all.len(), 3);
+@@ -277,9 +294,15 @@ mod tests {
+     fn test_sweep_expired() {
+         let store = SqliteStore::open_in_memory().unwrap();
+         let now = 2_000_000_000u64;
+-        store.store(&sample("crit", MessageTier::Critical, now - 2 * 24 * 3600)).unwrap();
+-        store.store(&sample("norm", MessageTier::Normal, now - 7 * 3600)).unwrap();
+-        store.store(&sample("low", MessageTier::Low, now - 7200)).unwrap();
++        store
++            .store(&sample("crit", MessageTier::Critical, now - 2 * 24 * 3600))
++            .unwrap();
++        store
++            .store(&sample("norm", MessageTier::Normal, now - 7 * 3600))
++            .unwrap();
++        store
++            .store(&sample("low", MessageTier::Low, now - 7200))
++            .unwrap();
+ 
+         let purged = store.sweep_expired(now).unwrap();
+         assert_eq!(purged, 2, "Normal (7h > 6h) and Low (2h > 1h) expire");
+@@ -305,7 +328,9 @@ mod tests {
+         // Écriture dans une première session
+         {
+             let store = SqliteStore::open(&path_str).unwrap();
+-            store.store(&sample("persist-1", MessageTier::Critical, 1_800_000_000)).unwrap();
++            store
++                .store(&sample("persist-1", MessageTier::Critical, 1_800_000_000))
++                .unwrap();
+         }
+ 
+         // Réouverture : le message est toujours là (résilience aux crashs)
+@@ -367,4 +392,4 @@ mod tests {
+ 
+         let _ = std::fs::remove_dir_all(&dir);
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/core/src/update/mod.rs b/core/src/update/mod.rs
+index 4ab0399..efd9d9e 100644
+--- a/core/src/update/mod.rs
++++ b/core/src/update/mod.rs
+@@ -273,8 +273,11 @@ impl UpdateManifest {
+             return Err("Update manifest signature invalid or untrusted".to_string());
+         }
+         let apk_manifest = parse_signed_manifest(&data[..SIGNED_MANIFEST_LEN])?;
+-        let apk_size =
+-            u64::from_le_bytes(data[SIGNED_MANIFEST_LEN..SIGNED_MANIFEST_LEN + 8].try_into().unwrap());
++        let apk_size = u64::from_le_bytes(
++            data[SIGNED_MANIFEST_LEN..SIGNED_MANIFEST_LEN + 8]
++                .try_into()
++                .unwrap(),
++        );
+         let chunk_size = u32::from_le_bytes(
+             data[SIGNED_MANIFEST_LEN + 8..SIGNED_MANIFEST_LEN + 8 + 4]
+                 .try_into()
+@@ -355,18 +358,27 @@ impl fmt::Display for UpdateError {
+         match self {
+             Self::InvalidSignature(m) => write!(f, "invalid signature: {m}"),
+             Self::NotNewer { current, offered } => {
+-                write!(f, "offered version {offered} is not newer than current {current}")
++                write!(
++                    f,
++                    "offered version {offered} is not newer than current {current}"
++                )
+             }
+             Self::ManifestMismatch => write!(f, "manifest does not match announcement"),
+             Self::NoPendingTransfer => write!(f, "no validated manifest before chunks"),
+             Self::ChunkIndexOutOfBounds { index, expected } => {
+-                write!(f, "chunk {index} out of bounds (expected {expected} chunks)")
++                write!(
++                    f,
++                    "chunk {index} out of bounds (expected {expected} chunks)"
++                )
+             }
+             Self::ChunkTooLarge { index, len, max } => {
+                 write!(f, "chunk {index} too large ({len} bytes, max {max})")
+             }
+             Self::IncompleteTransfer { received, expected } => {
+-                write!(f, "incomplete transfer: {received} bytes received, expected {expected}")
++                write!(
++                    f,
++                    "incomplete transfer: {received} bytes received, expected {expected}"
++                )
+             }
+             Self::VerificationFailed(m) => write!(f, "APK verification failed: {m}"),
+             Self::InstallFailed(m) => write!(f, "install failed: {m}"),
+@@ -589,15 +601,15 @@ impl UpdateProtocol {
+ 
+     /// Nombre de chunks reçus et valides.
+     pub fn chunks_received(&self) -> usize {
+-        self.pending
+-            .as_ref()
+-            .map(|p| p.chunks.len())
+-            .unwrap_or(0)
++        self.pending.as_ref().map(|p| p.chunks.len()).unwrap_or(0)
+     }
+ 
+     /// Nombre total de chunks attendus (0 si aucun transfert en cours).
+     pub fn total_chunks(&self) -> usize {
+-        self.pending.as_ref().map(|p| p.expected_chunks).unwrap_or(0)
++        self.pending
++            .as_ref()
++            .map(|p| p.expected_chunks)
++            .unwrap_or(0)
+     }
+ 
+     /// L'identifiant du pair qui fournit le transfert en cours.
+@@ -848,7 +860,10 @@ mod tests {
+         let (man, sig, bytes) =
+             UpdateProtocol::build_manifest(&apk, &root, dev.verifying_key_bytes(), 2000, 1024);
+         assert_eq!(man.apk_size, 2048);
+-        assert_eq!(man.apk_manifest.apk_hash, UpdateAnnouncement::hash_apk(&apk));
++        assert_eq!(
++            man.apk_manifest.apk_hash,
++            UpdateAnnouncement::hash_apk(&apk)
++        );
+         let parsed = UpdateManifest::verify(&root.verifying_key_bytes(), &bytes, &sig).unwrap();
+         assert_eq!(parsed, man);
+         // Mauvaise racine → rejet
+@@ -889,13 +904,19 @@ mod tests {
+         // 3. Chunks (avec un doublon pour tester l'idempotence)
+         assert_eq!(
+             receiver
+-                .handle_chunk(0, &UpdateProtocol::chunk(&apk, 0, DEFAULT_CHUNK_SIZE as usize).unwrap())
++                .handle_chunk(
++                    0,
++                    &UpdateProtocol::chunk(&apk, 0, DEFAULT_CHUNK_SIZE as usize).unwrap()
++                )
+                 .unwrap(),
+             ChunkStatus::Accepted
+         );
+         assert_eq!(
+             receiver
+-                .handle_chunk(0, &UpdateProtocol::chunk(&apk, 0, DEFAULT_CHUNK_SIZE as usize).unwrap())
++                .handle_chunk(
++                    0,
++                    &UpdateProtocol::chunk(&apk, 0, DEFAULT_CHUNK_SIZE as usize).unwrap()
++                )
+                 .unwrap(),
+             ChunkStatus::Duplicate
+         );
+@@ -960,13 +981,8 @@ mod tests {
+         receiver.handle_announcement(&ann_bytes, &ann_sig).unwrap();
+ 
+         // Manifeste annonçant un hash différent (apk_b) → rejet ManifestMismatch
+-        let (man, man_sig, man_bytes) = UpdateProtocol::build_manifest(
+-            &apk_b,
+-            &root,
+-            dev.verifying_key_bytes(),
+-            6001,
+-            1024,
+-        );
++        let (man, man_sig, man_bytes) =
++            UpdateProtocol::build_manifest(&apk_b, &root, dev.verifying_key_bytes(), 6001, 1024);
+         assert!(matches!(
+             receiver.handle_manifest(&ann, &man_bytes, &man_sig, "peer"),
+             Err(UpdateError::ManifestMismatch)
+@@ -1008,11 +1024,17 @@ mod tests {
+         let mut evil_chunk = UpdateProtocol::chunk(&apk, 1, DEFAULT_CHUNK_SIZE as usize).unwrap();
+         evil_chunk[0] ^= 0xFF;
+         receiver
+-            .handle_chunk(0, &UpdateProtocol::chunk(&apk, 0, DEFAULT_CHUNK_SIZE as usize).unwrap())
++            .handle_chunk(
++                0,
++                &UpdateProtocol::chunk(&apk, 0, DEFAULT_CHUNK_SIZE as usize).unwrap(),
++            )
+             .unwrap();
+         receiver.handle_chunk(1, &evil_chunk).unwrap();
+         receiver
+-            .handle_chunk(2, &UpdateProtocol::chunk(&apk, 2, DEFAULT_CHUNK_SIZE as usize).unwrap())
++            .handle_chunk(
++                2,
++                &UpdateProtocol::chunk(&apk, 2, DEFAULT_CHUNK_SIZE as usize).unwrap(),
++            )
+             .unwrap();
+ 
+         assert!(matches!(
+@@ -1039,14 +1061,11 @@ mod tests {
+         let (_ann, ann_sig, ann_bytes) =
+             UpdateProtocol::build_announcement(Version::new(1, 0, 1), &apk, &root, 8000);
+         let ann = receiver.handle_announcement(&ann_bytes, &ann_sig).unwrap();
+-        let (_, man_sig, man_bytes) = UpdateProtocol::build_manifest(
+-            &apk,
+-            &root,
+-            dev.verifying_key_bytes(),
+-            8001,
+-            1024,
+-        );
+-        receiver.handle_manifest(&ann, &man_bytes, &man_sig, "peer").unwrap();
++        let (_, man_sig, man_bytes) =
++            UpdateProtocol::build_manifest(&apk, &root, dev.verifying_key_bytes(), 8001, 1024);
++        receiver
++            .handle_manifest(&ann, &man_bytes, &man_sig, "peer")
++            .unwrap();
+ 
+         // Index hors bornes
+         assert!(matches!(
+@@ -1102,13 +1121,8 @@ mod tests {
+         // Construire un manifeste dont le blob signé est légitime mais dont la
+         // taille annoncée (non signée) est fausse → le transfert devient
+         // incohérent et l'assemblage échoue (jamais d'installation).
+-        let (_man, man_sig, mut man_bytes) = UpdateProtocol::build_manifest(
+-            &apk,
+-            &root,
+-            dev.verifying_key_bytes(),
+-            10001,
+-            1024,
+-        );
++        let (_man, man_sig, mut man_bytes) =
++            UpdateProtocol::build_manifest(&apk, &root, dev.verifying_key_bytes(), 10001, 1024);
+         // Corrompre la métadonnée apk_size (décalage 80..88) sans toucher au
+         // blob signé : la signature reste valide (elle ne porte que sur les
+         // 80 premiers octets), donc le manifeste corrompu est accepté — mais
+@@ -1119,7 +1133,9 @@ mod tests {
+         // transfert ne peut jamais être complet → les deux cas sont sûrs.
+         let res = receiver.handle_manifest(&ann, &man_bytes, &man_sig, "peer");
+         if res.is_ok() {
+-            receiver.handle_chunk(0, &UpdateProtocol::chunk(&apk, 0, 1024).unwrap()).unwrap();
++            receiver
++                .handle_chunk(0, &UpdateProtocol::chunk(&apk, 0, 1024).unwrap())
++                .unwrap();
+             // 4096 octets annoncés en 1024 → 4 chunks attendus, mais le pair
+             // n'a qu'un seul chunk : transfert incomplet → rejet.
+             assert!(matches!(
+@@ -1129,4 +1145,4 @@ mod tests {
+         }
+         assert!(receiver.latest_installed().is_none());
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/core/tests/integration_e2e.rs b/core/tests/integration_e2e.rs
+index 32f9a13..115e7b7 100644
+--- a/core/tests/integration_e2e.rs
++++ b/core/tests/integration_e2e.rs
+@@ -7,14 +7,16 @@
+ //! - AI Query → Oracle Response
+ //! - DTN Store-and-Forward
+ 
++use base64::Engine as _;
++use dtn_router::{DtnMessage, DtnRouter, MessageType};
+ use onde_core::crypto::Identity;
++use onde_core::node::{
++    EndorsementHandlingOutcome, Node, NodeConfig, NodeType, UpdateHandlingOutcome,
++};
+ use onde_core::protocol::{MeshEvent, OndeMessageType};
+-use onde_core::node::{Node, NodeConfig, NodeType, UpdateHandlingOutcome, EndorsementHandlingOutcome};
+ use onde_core::reputation::{Endorsement, TRUSTED_THRESHOLD};
++use onde_core::storage::{IpfsSeeder, MBTilesRenderer, MessageTier, ZimReader};
+ use onde_core::update::{UpdateProtocol, Version, DEFAULT_CHUNK_SIZE};
+-use onde_core::storage::{ZimReader, MBTilesRenderer, IpfsSeeder, MessageTier};
+-use dtn_router::{DtnRouter, DtnMessage, MessageType};
+-use base64::Engine as _;
+ 
+ /// Déplacer les événements en attente du gossip de `from` vers `to`
+ /// (validation adaptative par réputation), puis les faire traiter par le
+@@ -105,9 +107,7 @@ async fn test_alert_gossip_reception() {
+ 
+     // Node B connaît A comme pair de confiance (Web of Trust) — c'est ce qui
+     // lui permet d'accepter un événement à difficulté 0 sans se faire spammer.
+-    node_b
+-        .reputation
+-        .bootstrap(&[node_a.identity.pubkey_hex()]);
++    node_b.reputation.bootstrap(&[node_a.identity.pubkey_hex()]);
+ 
+     // Node B receives event via gossip (validation adaptative par réputation)
+     assert!(
+@@ -154,7 +154,10 @@ async fn test_zk_transaction_flow() {
+     assert_eq!(tx.sender, node_a.identity.pubkey_hex());
+     assert_eq!(tx.receiver, receiver_pubkey);
+     assert_eq!(tx.amount_micro, 500);
+-    assert!(!tx.zk_proof.commitment.is_empty(), "ZK proof should be generated");
++    assert!(
++        !tx.zk_proof.commitment.is_empty(),
++        "ZK proof should be generated"
++    );
+ 
+     // Check pool state
+     assert_eq!(node_a.tx_pool.pending_count(), 1);
+@@ -177,7 +180,7 @@ async fn test_zk_transaction_flow() {
+  */
+ #[tokio::test]
+ async fn test_voice_memo_transcription() {
+-    use whisper_stt::{WhisperEngine, WhisperConfig};
++    use whisper_stt::{WhisperConfig, WhisperEngine};
+ 
+     // Create voice memo event (simulated) — signed by a real identity so that
+     // gossip validation (signature + PoW) accepts it
+@@ -239,20 +242,30 @@ async fn test_ai_query_response() {
+     });
+ 
+     // Query AI engine directly
+-    let response = node.ai_engine.lock().await.infer(
+-        "Comment faire la RCP (Reanimation Cardio-Pulmonaire) ?",
+-        256,
+-    ).await;
++    let response = node
++        .ai_engine
++        .lock()
++        .await
++        .infer(
++            "Comment faire la RCP (Reanimation Cardio-Pulmonaire) ?",
++            256,
++        )
++        .await;
+ 
+     // Verify response
+     assert!(!response.text.is_empty(), "AI response should not be empty");
+-    assert!(response.tokens_generated > 0, "Should have generated tokens");
++    assert!(
++        response.tokens_generated > 0,
++        "Should have generated tokens"
++    );
+     assert!(response.latency_ms > 0, "Should have latency metric");
+ 
+     // Verify response contains relevant first aid info
+     let text_lower = response.text.to_lowercase();
+     assert!(
+-        text_lower.contains("compression") || text_lower.contains("cardio") || text_lower.contains("reanimation"),
++        text_lower.contains("compression")
++            || text_lower.contains("cardio")
++            || text_lower.contains("reanimation"),
+         "Response should contain first aid related content"
+     );
+ }
+@@ -283,7 +296,10 @@ async fn test_dtn_store_and_forward() {
+     };
+ 
+     // Store message in DTN buffer (Node D is offline)
+-    assert!(router.store("node_a", msg).await, "Message should be stored");
++    assert!(
++        router.store("node_a", msg).await,
++        "Message should be stored"
++    );
+ 
+     // Verify message is buffered
+     assert_eq!(router.buffer_size("node_a").await, 1);
+@@ -326,14 +342,18 @@ async fn test_full_node_lifecycle() {
+     assert!(node.is_running());
+ 
+     // Publish alert
+-    let alert = node.publish_alert("Test alert from desktop".to_string()).await;
++    let alert = node
++        .publish_alert("Test alert from desktop".to_string())
++        .await;
+     assert!(alert.is_ok());
+ 
+     // Query AI
+-    let response = node.ai_engine.lock().await.infer(
+-        "Quelles sont les techniques de survie en foret ?",
+-        128,
+-    ).await;
++    let response = node
++        .ai_engine
++        .lock()
++        .await
++        .infer("Quelles sont les techniques de survie en foret ?", 128)
++        .await;
+     assert!(!response.text.is_empty());
+ 
+     // Check status
+@@ -370,14 +390,18 @@ async fn test_multi_node_gossip() {
+         .collect();
+ 
+     // Node 0 publishes alert (self-trusted → PoW adaptatif = 0)
+-    let alert = nodes[0].publish_alert("Alerte reseau: tremblement de terre".to_string()).await.unwrap();
++    let alert = nodes[0]
++        .publish_alert("Alerte reseau: tremblement de terre".to_string())
++        .await
++        .unwrap();
+ 
+     // Propagation par gossip (simulation de flooding).
+     // Chaque nœud connaît Node 0 comme pair de confiance (WoT), sinon un
+     // événement à difficulté 0 serait (correctement) rejeté comme spam.
+     let publisher_pubkey = nodes[0].identity.pubkey_hex();
+     for (i, node) in nodes.iter_mut().enumerate().skip(1) {
+-        node.reputation.bootstrap(std::slice::from_ref(&publisher_pubkey));
++        node.reputation
++            .bootstrap(std::slice::from_ref(&publisher_pubkey));
+         // Clone de la réputation : emprunt disjoint via index impossible sinon
+         let rep = node.reputation.clone();
+         assert!(
+@@ -412,7 +436,10 @@ async fn test_storage_integration() {
+     let mut zim = ZimReader::new();
+     zim.load_demo();
+     let results = zim.search("secours");
+-    assert!(!results.is_empty(), "demo mode must expose searchable articles");
++    assert!(
++        !results.is_empty(),
++        "demo mode must expose searchable articles"
++    );
+     assert!(zim.total_articles() >= 5);
+ 
+     // MBTiles Renderer — demo mode is explicit
+@@ -538,7 +565,10 @@ async fn test_dtn_ttl_expiration() {
+         delivered_to: vec![],
+     };
+ 
+-    assert!(router.store("node_x", msg).await, "Message should be stored");
++    assert!(
++        router.store("node_x", msg).await,
++        "Message should be stored"
++    );
+     assert_eq!(router.buffer_size("node_x").await, 1);
+ 
+     // First tick: TTL becomes 1
+@@ -596,7 +626,10 @@ async fn test_dtn_buffer_overflow() {
+         priority: 0, // Highest priority
+         delivered_to: vec![],
+     };
+-    assert!(router.store("node_a", msg4).await, "More urgent message must be stored");
++    assert!(
++        router.store("node_a", msg4).await,
++        "More urgent message must be stored"
++    );
+ 
+     // Buffer should still be at max (3), but one was dropped
+     assert_eq!(router.buffer_size("node_a").await, 3);
+@@ -652,8 +685,7 @@ async fn test_update_flow_between_two_nodes() -> Result<(), String> {
+     node_a.reputation.bootstrap(std::slice::from_ref(&b_pubkey));
+ 
+     // 1. Le distributeur annonce la version 2.0.0 (signée par la racine).
+-    let announced = node_a
+-        .announce_update(Version::new(2, 0, 0), &apk, 1_800_000_000)?;
++    let announced = node_a.announce_update(Version::new(2, 0, 0), &apk, 1_800_000_000)?;
+     assert!(matches!(announced.kind, OndeMessageType::UpdateAnnounce));
+     assert!(!announced.sig.is_empty(), "announcement must be signed");
+ 
+@@ -691,31 +723,41 @@ async fn test_update_flow_between_two_nodes() -> Result<(), String> {
+     );
+     assert_eq!(
+         installed.apk_sha256,
+-        UpdateProtocol::build_announcement(Version::new(2, 0, 0), &apk, &root, 0).0.apk_sha256,
++        UpdateProtocol::build_announcement(Version::new(2, 0, 0), &apk, &root, 0)
++            .0
++            .apk_sha256,
+         "installed hash must match the announced hash"
+     );
+ 
+     // 5. Une version NON supérieure (égale puis downgrade) est rejetée.
+     let equal = node_a.announce_update(Version::new(2, 0, 0), &apk, 1_800_000_001)?;
+     let reputation = node_b.reputation.clone();
+-    assert!(
+-        node_b.gossip.add_event_with_reputation(equal.clone(), &reputation).unwrap()
+-    );
++    assert!(node_b
++        .gossip
++        .add_event_with_reputation(equal.clone(), &reputation)
++        .unwrap());
+     match node_b.handle_incoming_update(&equal) {
+         Ok(UpdateHandlingOutcome::Rejected(reason)) => {
+-            assert!(reason.contains("not newer"), "equal version must be rejected: {reason}");
++            assert!(
++                reason.contains("not newer"),
++                "equal version must be rejected: {reason}"
++            );
+         }
+         other => panic!("equal version must be rejected, got {other:?}"),
+     }
+ 
+     let downgrade = node_a.announce_update(Version::new(1, 0, 0), &apk, 1_800_000_002)?;
+     let reputation = node_b.reputation.clone();
+-    assert!(
+-        node_b.gossip.add_event_with_reputation(downgrade.clone(), &reputation).unwrap()
+-    );
++    assert!(node_b
++        .gossip
++        .add_event_with_reputation(downgrade.clone(), &reputation)
++        .unwrap());
+     match node_b.handle_incoming_update(&downgrade) {
+         Ok(UpdateHandlingOutcome::Rejected(reason)) => {
+-            assert!(reason.contains("not newer"), "downgrade must be rejected: {reason}");
++            assert!(
++                reason.contains("not newer"),
++                "downgrade must be rejected: {reason}"
++            );
+         }
+         other => panic!("downgrade must be rejected, got {other:?}"),
+     }
+@@ -769,23 +811,38 @@ async fn test_update_rejects_tampered_apk() -> Result<(), String> {
+     // le manifeste ; livrer le manifeste → B demande le chunk 0.
+     for ev in node_a.gossip.get_pending_for_peer(&b_pubkey) {
+         let rep = node_b.reputation.clone();
+-        if node_b.gossip.add_event_with_reputation(ev.clone(), &rep).unwrap() {
++        if node_b
++            .gossip
++            .add_event_with_reputation(ev.clone(), &rep)
++            .unwrap()
++        {
+             node_b.handle_incoming_update(&ev)?;
+         }
+     }
+     for ev in node_b.gossip.get_pending_for_peer(&a_pubkey) {
+         let rep = node_a.reputation.clone();
+-        if node_a.gossip.add_event_with_reputation(ev.clone(), &rep).unwrap() {
++        if node_a
++            .gossip
++            .add_event_with_reputation(ev.clone(), &rep)
++            .unwrap()
++        {
+             node_a.handle_incoming_update(&ev)?;
+         }
+     }
+     for ev in node_a.gossip.get_pending_for_peer(&b_pubkey) {
+         let rep = node_b.reputation.clone();
+-        if node_b.gossip.add_event_with_reputation(ev.clone(), &rep).unwrap() {
++        if node_b
++            .gossip
++            .add_event_with_reputation(ev.clone(), &rep)
++            .unwrap()
++        {
+             node_b.handle_incoming_update(&ev)?;
+         }
+     }
+-    assert!(node_b.update_protocol.has_pending(), "transfer must be initialized");
++    assert!(
++        node_b.update_protocol.has_pending(),
++        "transfer must be initialized"
++    );
+     assert_eq!(node_b.update_protocol.chunks_received(), 0);
+ 
+     // Le chunk 0 servi par A est FALSIFIÉ (un octet retourné), mais reste
+@@ -805,7 +862,10 @@ async fn test_update_rejects_tampered_apk() -> Result<(), String> {
+     )
+     .with_pow_difficulty(0); // annonceur de confiance → PoW adaptatif 0
+     let rep = node_b.reputation.clone();
+-    assert!(node_b.gossip.add_event_with_reputation(evil_event.clone(), &rep).is_ok());
++    assert!(node_b
++        .gossip
++        .add_event_with_reputation(evil_event.clone(), &rep)
++        .is_ok());
+     assert_eq!(
+         node_b.handle_incoming_update(&evil_event)?,
+         UpdateHandlingOutcome::ChunkRequested(1),
+@@ -815,13 +875,21 @@ async fn test_update_rejects_tampered_apk() -> Result<(), String> {
+     // Livrer la requête chunk 1 à A → A sert le chunk 1 réel ; livrer à B.
+     for ev in node_b.gossip.get_pending_for_peer(&a_pubkey) {
+         let rep = node_a.reputation.clone();
+-        if node_a.gossip.add_event_with_reputation(ev.clone(), &rep).unwrap() {
++        if node_a
++            .gossip
++            .add_event_with_reputation(ev.clone(), &rep)
++            .unwrap()
++        {
+             node_a.handle_incoming_update(&ev)?;
+         }
+     }
+     for ev in node_a.gossip.get_pending_for_peer(&b_pubkey) {
+         let rep = node_b.reputation.clone();
+-        if node_b.gossip.add_event_with_reputation(ev.clone(), &rep).unwrap() {
++        if node_b
++            .gossip
++            .add_event_with_reputation(ev.clone(), &rep)
++            .unwrap()
++        {
+             node_b.handle_incoming_update(&ev)?;
+         }
+     }
+@@ -832,15 +900,24 @@ async fn test_update_rejects_tampered_apk() -> Result<(), String> {
+     // signé → rejet.
+     for ev in node_b.gossip.get_pending_for_peer(&a_pubkey) {
+         let rep = node_a.reputation.clone();
+-        if node_a.gossip.add_event_with_reputation(ev.clone(), &rep).unwrap() {
++        if node_a
++            .gossip
++            .add_event_with_reputation(ev.clone(), &rep)
++            .unwrap()
++        {
+             node_a.handle_incoming_update(&ev)?;
+         }
+     }
+     let mut saw_reject = false;
+     for ev in node_a.gossip.get_pending_for_peer(&b_pubkey) {
+         let rep = node_b.reputation.clone();
+-        if node_b.gossip.add_event_with_reputation(ev.clone(), &rep).unwrap() {
+-            if let Ok(UpdateHandlingOutcome::Rejected(reason)) = node_b.handle_incoming_update(&ev) {
++        if node_b
++            .gossip
++            .add_event_with_reputation(ev.clone(), &rep)
++            .unwrap()
++        {
++            if let Ok(UpdateHandlingOutcome::Rejected(reason)) = node_b.handle_incoming_update(&ev)
++            {
+                 assert!(
+                     reason.contains("verification"),
+                     "tampered APK must fail end-to-end verification: {reason}"
+@@ -854,7 +931,10 @@ async fn test_update_rejects_tampered_apk() -> Result<(), String> {
+         node_b.update_protocol.latest_installed().is_none(),
+         "no installation must occur for a tampered APK"
+     );
+-    assert!(!node_b.update_protocol.has_pending(), "poisoned transfer must be purged");
++    assert!(
++        !node_b.update_protocol.has_pending(),
++        "poisoned transfer must be purged"
++    );
+     assert_eq!(
+         node_b.update_protocol.current_version(),
+         Version::new(1, 0, 0),
+@@ -912,11 +992,27 @@ async fn test_endorsement_propagation_three_nodes() -> Result<(), String> {
+     assert_eq!(node_a.reputation.endorsement_count(&b_pubkey), 1);
+ 
+     // 2. Propagation A → B (direct), puis relai B → C (cascade).
+-    assert_eq!(gossip_sync(&mut node_a, &mut node_b)?, 1, "B receives the endorsement");
+-    assert_eq!(node_b.reputation.endorsement_count(&b_pubkey), 1, "B integrates it");
++    assert_eq!(
++        gossip_sync(&mut node_a, &mut node_b)?,
++        1,
++        "B receives the endorsement"
++    );
++    assert_eq!(
++        node_b.reputation.endorsement_count(&b_pubkey),
++        1,
++        "B integrates it"
++    );
+ 
+-    assert_eq!(gossip_sync(&mut node_b, &mut node_c)?, 1, "B relays the endorsement to C");
+-    assert_eq!(node_c.reputation.endorsement_count(&b_pubkey), 1, "C integrates it");
++    assert_eq!(
++        gossip_sync(&mut node_b, &mut node_c)?,
++        1,
++        "B relays the endorsement to C"
++    );
++    assert_eq!(
++        node_c.reputation.endorsement_count(&b_pubkey),
++        1,
++        "C integrates it"
++    );
+     assert!(
+         node_c.reputation.score(&b_pubkey) > 0.0,
+         "B's reputation must rise above the unknown threshold (0.0)"
+@@ -931,16 +1027,27 @@ async fn test_endorsement_propagation_three_nodes() -> Result<(), String> {
+     );
+ 
+     // 3. Un doublon est ignoré : redélivraison du même événement → déduplication.
+-    assert_eq!(gossip_sync(&mut node_b, &mut node_c)?, 0, "duplicate event is deduplicated");
++    assert_eq!(
++        gossip_sync(&mut node_b, &mut node_c)?,
++        0,
++        "duplicate event is deduplicated"
++    );
+     // Et au niveau application : la ré-application du même endossement est rejetée
+     // par la logique `endorse` (anti-doublon).
+     match node_c.handle_incoming_endorsement(&event) {
+         EndorsementHandlingOutcome::Rejected(reason) => {
+-            assert!(reason.contains("Duplicate"), "duplicate must be rejected: {reason}")
++            assert!(
++                reason.contains("Duplicate"),
++                "duplicate must be rejected: {reason}"
++            )
+         }
+         other => panic!("duplicate endorsement must be rejected, got {other:?}"),
+     }
+-    assert_eq!(node_c.reputation.endorsement_count(&b_pubkey), 1, "no double counting");
++    assert_eq!(
++        node_c.reputation.endorsement_count(&b_pubkey),
++        1,
++        "no double counting"
++    );
+ 
+     // 4. Un endossement d'un nœud NON de confiance est ignoré.
+     let attacker = Identity::generate();
+@@ -951,12 +1058,19 @@ async fn test_endorsement_propagation_three_nodes() -> Result<(), String> {
+     };
+     let evil_content = base64::engine::general_purpose::STANDARD
+         .encode(serde_json::to_vec(&evil).map_err(|e| e.to_string())?);
+-    let evil_event =
+-        MeshEvent::new_signed(&attacker, OndeMessageType::Endorsement, evil_content, vec![]);
++    let evil_event = MeshEvent::new_signed(
++        &attacker,
++        OndeMessageType::Endorsement,
++        evil_content,
++        vec![],
++    );
+     // Au niveau gossip : l'inconnu n'a pas payé le PoW adaptatif requis → rejeté.
+     let rep = node_c.reputation.clone();
+     assert!(
+-        node_c.gossip.add_event_with_reputation(evil_event.clone(), &rep).is_err(),
++        node_c
++            .gossip
++            .add_event_with_reputation(evil_event.clone(), &rep)
++            .is_err(),
+         "unknown endorser without PoW must be refused at the gossip layer"
+     );
+     // Au niveau application : l'endosseur n'est pas de confiance → ignoré.
+@@ -964,8 +1078,16 @@ async fn test_endorsement_propagation_three_nodes() -> Result<(), String> {
+         EndorsementHandlingOutcome::Rejected(_) => {}
+         other => panic!("untrusted endorsement must be ignored, got {other:?}"),
+     }
+-    assert_eq!(node_c.reputation.endorsement_count(&b_pubkey), 1, "nothing applied");
+-    assert_eq!(node_c.reputation.score(&b_pubkey), 0.4, "reputation unchanged");
++    assert_eq!(
++        node_c.reputation.endorsement_count(&b_pubkey),
++        1,
++        "nothing applied"
++    );
++    assert_eq!(
++        node_c.reputation.score(&b_pubkey),
++        0.4,
++        "reputation unchanged"
++    );
+ 
+     // 5. Promotion : deux autres fondateurs de confiance (F1, F2) endossent B
+     //    par le même gossip. Après 3 endossements qualifiés, C considère B
+@@ -1057,7 +1179,10 @@ async fn test_traffic_padding_wire_two_nodes() -> Result<(), String> {
+         received[0].content, content,
+         "decoded content must be identical to the published alert"
+     );
+-    assert_eq!(received[0].id, event.id, "decoded event must be the same event");
++    assert_eq!(
++        received[0].id, event.id,
++        "decoded event must be the same event"
++    );
+     assert_eq!(received[0].pubkey, event.pubkey);
+     assert_eq!(received[0].kind, event.kind);
+     assert_eq!(received[0].sig, event.sig);
+@@ -1100,7 +1225,10 @@ async fn test_identity_rotation_two_nodes() -> Result<(), String> {
+     let key_a0 = node_a.identity_rotator.x25519_public_key_hex();
+     let ev0 = node_a.announce_identity_rotation()?;
+     assert_eq!(ev0.kind, OndeMessageType::IdentityRotation);
+-    assert_eq!(ev0.pubkey, a_pub, "announcement signed by A's stable identity");
++    assert_eq!(
++        ev0.pubkey, a_pub,
++        "announcement signed by A's stable identity"
++    );
+ 
+     // Livraison via le flux réel (wire padé, helper `gossip_sync` qui achemine
+     // par `get_pending_for_peer_wire` / `from_wire_bytes`).
+@@ -1120,13 +1248,19 @@ async fn test_identity_rotation_two_nodes() -> Result<(), String> {
+ 
+     let ev1 = node_a.announce_identity_rotation()?;
+     let key_a1 = {
+-        let data = base64::engine::general_purpose::STANDARD.decode(&ev1.content).unwrap();
++        let data = base64::engine::general_purpose::STANDARD
++            .decode(&ev1.content)
++            .unwrap();
+         let payload: serde_json::Value = serde_json::from_slice(&data).unwrap();
+         payload["x25519"].as_str().unwrap().to_string()
+     };
+     assert_ne!(key_a0, key_a1, "A rotated to a new X25519 key");
+ 
+-    assert_eq!(gossip_sync(&mut node_a, &mut node_b)?, 1, "B handles the 2nd rotation");
++    assert_eq!(
++        gossip_sync(&mut node_a, &mut node_b)?,
++        1,
++        "B handles the 2nd rotation"
++    );
+ 
+     assert_eq!(
+         node_b.peer_x25519_key(&a_pub),
+@@ -1147,9 +1281,10 @@ async fn test_identity_rotation_two_nodes() -> Result<(), String> {
+     let ev_s = stranger.announce_identity_rotation()?;
+     assert_eq!(
+         node_b.handle_incoming_rotation(&ev_s),
+-        onde_core::node::RotationHandlingOutcome::Rejected(
+-            format!("rotation announced by untrusted peer {}", stranger.identity.pubkey_hex())
+-        ),
++        onde_core::node::RotationHandlingOutcome::Rejected(format!(
++            "rotation announced by untrusted peer {}",
++            stranger.identity.pubkey_hex()
++        )),
+         "untrusted rotation announcement must be rejected"
+     );
+     assert_eq!(
+@@ -1249,7 +1384,12 @@ async fn test_e2e_critical_alert_full_lifecycle() -> Result<(), String> {
+             "A stocke l'alerte en mémoire"
+         );
+         assert_eq!(
+-            node_a.persistence.as_ref().unwrap().count().map_err(|e| e.to_string())?,
++            node_a
++                .persistence
++                .as_ref()
++                .unwrap()
++                .count()
++                .map_err(|e| e.to_string())?,
+             1,
+             "A persiste l'alerte en SQLite"
+         );
+@@ -1257,8 +1397,16 @@ async fn test_e2e_critical_alert_full_lifecycle() -> Result<(), String> {
+         // ── 2. Propagation : B et C reçoivent l'alerte via le gossip. ──
+         // Chaque appel `gossip_sync` est une boucle bornée (tous les
+         // événements en attente pour le pair, une seule passe).
+-        assert_eq!(gossip_sync(&mut node_a, &mut node_b)?, 1, "B reçoit l'alerte");
+-        assert_eq!(gossip_sync(&mut node_a, &mut node_c)?, 1, "C reçoit l'alerte");
++        assert_eq!(
++            gossip_sync(&mut node_a, &mut node_b)?,
++            1,
++            "B reçoit l'alerte"
++        );
++        assert_eq!(
++            gossip_sync(&mut node_a, &mut node_c)?,
++            1,
++            "C reçoit l'alerte"
++        );
+ 
+         // B et C la valident (signature + PoW + réputation de l'émetteur) et
+         // la stockent localement, avec le bon contenu.
+@@ -1266,7 +1414,11 @@ async fn test_e2e_critical_alert_full_lifecycle() -> Result<(), String> {
+             event
+                 .validate_with_reputation(&node.reputation)
+                 .map_err(|e| format!("{name} re-valide signature+PoW+réputation : {e}"))?;
+-            assert_eq!(node.gossip.known_count(), 1, "{name} a reçu l'alerte via gossip");
++            assert_eq!(
++                node.gossip.known_count(),
++                1,
++                "{name} a reçu l'alerte via gossip"
++            );
+             let payload = node
+                 .message_store
+                 .get(&event.id)
+@@ -1283,7 +1435,10 @@ async fn test_e2e_critical_alert_full_lifecycle() -> Result<(), String> {
+             .find(|(t, _)| *t == MessageTier::Critical)
+             .map(|(_, n)| *n)
+             .unwrap_or(0);
+-        assert_eq!(critical_count, 1, "l'alerte est dans le tier Critical (7 jours)");
++        assert_eq!(
++            critical_count, 1,
++            "l'alerte est dans le tier Critical (7 jours)"
++        );
+ 
+         // La ligne existe en base avec le MÊME payload compressé qu'en mémoire
+         // et la bonne taille originale.
+@@ -1331,7 +1486,9 @@ async fn test_e2e_critical_alert_full_lifecycle() -> Result<(), String> {
+         );
+ 
+         // ── 5. Restauration : A' recharge depuis SQLite. ──
+-        let restored = node_a2.restore_from_persistence().map_err(|e| e.to_string())?;
++        let restored = node_a2
++            .restore_from_persistence()
++            .map_err(|e| e.to_string())?;
+         assert_eq!(restored, 1, "A' restaure l'alerte depuis SQLite");
+         let got = node_a2
+             .message_store
+@@ -1385,7 +1542,8 @@ async fn test_e2e_critical_alert_full_lifecycle() -> Result<(), String> {
+             .ok_or_else(|| "D doit stocker l'alerte reçue".to_string())?
+             .map_err(|e| e.to_string())?;
+         assert_eq!(
+-            d_payload, content.as_bytes(),
++            d_payload,
++            content.as_bytes(),
+             "D reçoit un contenu identique à l'alerte d'origine"
+         );
+ 
