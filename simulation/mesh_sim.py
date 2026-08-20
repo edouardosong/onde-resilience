@@ -513,6 +513,26 @@ class TrafficGenerator:
     def __init__(self, env: simpy.Environment, network: MeshNetwork):
         self.env = env
         self.network = network
+        # L2-08 : séquenceur par expéditeur (bundle-ID DTN : « nœud + rang »).
+        # Chaque émission reçoit le prochain rang de son expéditeur → le couple
+        # (sender_id, msg_id) devient unique PAR MESSAGE ÉMIS, même pour deux
+        # messages du même expéditeur au même tick de simulation (l'horloge
+        # `env.now` ne pouvant plus servir d'identifiant). Déterministe sous
+        # seed : l'ordre des émissions est entièrement décidé par la simulation.
+        self._emission_seq: dict[int, int] = {}
+    
+    def next_msg_id(self, sender: int, type_tag: str) -> str:
+        """Prochain msg_id de `sender` (unique par émission, déterministe).
+
+        `type_tag` reprend les préfixes historiques (« aid: », « voice: »,
+        « ai: », vide pour alert). Le msg_id reste un digest hexadécimal de
+        12 caractères (format d'ID inchangé pour les consommateurs) ; seule
+        l'entrée du hash change : le rang de l'émission remplace l'horloge.
+        """
+        seq = self._emission_seq.get(sender, 0)
+        self._emission_seq[sender] = seq + 1
+        return hashlib.md5(f"{type_tag}{sender}:{seq}".encode()).hexdigest()[:12]
+    
     
     def generate_alerts(self, interval: float = 5.0, max_nodes_alert: int = 50):
         """Génère des alertes publiques (280 car max)."""
@@ -530,7 +550,7 @@ class TrafficGenerator:
                     break
                 sender = random.choice(mobile_ids)
                 msg = Message(
-                    msg_id=hashlib.md5(f"{sender}:{self.env.now}".encode()).hexdigest()[:12],
+                    msg_id=self.next_msg_id(sender, ""),
                     sender_id=sender,
                     msg_type="alert",
                     payload_size_bytes=random.randint(50, 280),
@@ -551,7 +571,7 @@ class TrafficGenerator:
                     break
                 sender = random.choice(mobile_ids)
                 msg = Message(
-                    msg_id=hashlib.md5(f"aid:{sender}:{self.env.now}".encode()).hexdigest()[:12],
+                    msg_id=self.next_msg_id(sender, "aid:"),
                     sender_id=sender,
                     msg_type="mutual_aid",
                     payload_size_bytes=random.randint(100, 500),
@@ -576,7 +596,7 @@ class TrafficGenerator:
                 duration = random.uniform(5, 30)
                 size = int(duration * 1000)
                 msg = Message(
-                    msg_id=hashlib.md5(f"voice:{sender}:{self.env.now}".encode()).hexdigest()[:12],
+                    msg_id=self.next_msg_id(sender, "voice:"),
                     sender_id=sender,
                     msg_type="voice",
                     payload_size_bytes=size,
@@ -619,7 +639,7 @@ class TrafficGenerator:
                 sender = random.choice(mobile_ids)
                 oracle = random.choice(oracle_ids)
                 msg = Message(
-                    msg_id=hashlib.md5(f"ai:{sender}:{self.env.now}".encode()).hexdigest()[:12],
+                    msg_id=self.next_msg_id(sender, "ai:"),
                     sender_id=sender,
                     msg_type="ai_query",
                     payload_size_bytes=random.randint(100, 2000),
