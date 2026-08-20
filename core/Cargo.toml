@@ -84,6 +84,11 @@ zim-parser = { path = "crates/zim-parser" }
 llama-bind = { path = "crates/llama-bind", features = ["mock"] }
 
 # Feature flags
+[dev-dependencies]
+# Isolation des tests (L2-13) : répertoire temporaire UNIQUE par test
+# (déjà dans le lockfile via zim-parser — aucune nouvelle crate téléchargée).
+tempfile = "3"
+
 [features]
 default = ["mobile"]
 mobile = []       # Mobile device profile

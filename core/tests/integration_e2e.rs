@@ -1325,16 +1325,19 @@ async fn test_identity_rotation_two_nodes() -> Result<(), String> {
  *      sync) — l'alerte continue d'atteindre C directement d'A', le gossip ne
  *      dépend pas de B.
  *
- * Déterminisme : aucune attente, boucles bornées, cleanup du répertoire
- * temporaire en début ET fin de test.
+ * Déterminisme : aucune attente, boucles bornées, isolation stricte : le
+ * répertoire temporaire est UNIQUE AU TEST (tempfile::TempDir — nettoyage
+ * RAII à la sortie du scope, y compris en cas de panic d'assertion).
  */
 #[tokio::test]
 async fn test_e2e_critical_alert_full_lifecycle() -> Result<(), String> {
-    // Répertoire SQLite temporaire unique au processus, nettoyé au début ET à
-    // la fin (résilience aux restes d'une exécution précédente).
-    let base = std::env::temp_dir().join(format!("onde_e2e_{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
-    std::fs::create_dir_all(&base).map_err(|e| e.to_string())?;
+    // Isolation stricte (fix L2-13) : un TempDir unique par test (nom
+    // aléatoire, nettoyage RAII à la sortie du scope — même si une assertion
+    // panique). Plus de dir `onde_e2e_{pid}` partagée entre tests tournant en
+    // parallèle dans le même binaire : aucun test ne peut effacer la base
+    // SQLite d'un autre test en cours.
+    let tmp = tempfile::TempDir::new().map_err(|e| e.to_string())?;
+    let base = tmp.path();
     let db_a = base.join("a.sqlite3").to_string_lossy().into_owned();
     let db_b = base.join("b.sqlite3").to_string_lossy().into_owned();
     let db_c = base.join("c.sqlite3").to_string_lossy().into_owned();
@@ -1569,8 +1572,8 @@ async fn test_e2e_critical_alert_full_lifecycle() -> Result<(), String> {
         Ok(())
     }
 
-    // Cleanup : la base temporaire est supprimée en fin de test.
-    let result = run_scenario(db_a, db_b, db_c).await;
-    let _ = std::fs::remove_dir_all(&base);
-    result
+    // Cleanup : le `TempDir` créé en tête de test est supprimé
+    // automatiquement à la sortie du scope (drop RAII — y compris en cas de
+    // panic d'assertion), plus de remove_dir_all manuel.
+    run_scenario(db_a, db_b, db_c).await
 }
