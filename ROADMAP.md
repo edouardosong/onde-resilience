@@ -6,7 +6,7 @@
 >
 > Ce document est le **contraint directeur** de l'orchestration. Chaque
 > tâche doit être **testable, isolée, et vérifiable** (tests unitaires +
-> TestSprite pour le frontend). Hermes orchestre, opencode implémente.
+> Playwright (open source) pour le frontend). Hermes orchestre, opencode implémente.
 
 ## Principes non négociables
 1. **Honnêteté technique** : un module mock est étiqueté `MOCK` et n'est
@@ -18,8 +18,8 @@
 4. **Zéro secret en clair** sauf documenté et assumé (cf. seed SQLite).
 5. **Tout est testé** : `cargo test --workspace` green + clippy 0 warning
    avant tout merge.
-6. **TestSprite** valide le comportement UI réel (démarrage nœud, publication,
-   flux, réputation) — pas seulement les tests unitaires.
+6. **Playwright** (open source, MIT) valide le comportement UI réel (démarrage
+   nœud, publication, flux, réputation) — pas seulement les tests unitaires.
 
 ## État actuel (baseline, vérifié Hermes)
 - Moteur Rust : **163 tests verts, 0 échec** — mesurés le 2026-08-20
@@ -39,12 +39,12 @@ Commits de référence (main) : `28418e4` (merge L2-01 sim) · `d87f8c9` (L2-00 
 ## PHASE 0 — Consolidation de la baseline (Sprint 1)
 > Objectif : figer le socle, corriger les écarts, tout publier.
 
-| # | Tâche | Critère d'acceptation | TestSprite |
+| # | Tâche | Critère d'acceptation | E2E (Playwright) |
 |---|-------|----------------------|-----------|
 | 0.1 | Fix README (129→135) + commit propre — **FAIT** (2026-08-20 : README aligné sur le compte mesuré, 163 tests) | README = réalité | — |
 | 0.2 | Publication GitHub de la passe "Audit #8–#14" | PR mergée, CI green | — |
-| 0.3 | Configurer TestSprite (clé + skill agent + project) | `testsprite doctor` green | ✅ |
-| 0.4 | Baseline TestSprite : 5 tests UI (démarrage, publish alerte, publish entraide, feed, réputation) | Suite durable green | ✅ |
+| 0.3 | Configurer Playwright (open source, sans clé API) | config + `npx playwright test` exécutable | ✅ |
+| 0.4 | Baseline Playwright : 5 tests UI (démarrage, publish alerte, publish entraide, feed, réputation) | Suite durable green | ✅ |
 
 ---
 
@@ -74,8 +74,8 @@ une alerte hors-ligne, avec mise à jour d'APK signée.
 |---|-------|----------------------|
 | 2.1 | **LLM local réel** : `llama-bind` → décodeur GGUF (llama.cpp), inférence sur-device | Question → réponse cohérente, RAM bornée |
 | 2.2 | **STT réel** : `whisper-stt` → moteur Whisper.cpp | Audio → transcription (test sur corpus) |
-| 2.3 | **ZIM/Wikipedia offline** : chargement ZIM réel, recherche + affichage | Consultation hors-ligne (TestSprite) |
-| 2.4 | **Cartes MBTiles offline** : rendu tuiles réelles | Affichage carte hors-ligne (TestSprite) |
+| 2.3 | **ZIM/Wikipedia offline** : chargement ZIM réel, recherche + affichage | Consultation hors-ligne (Playwright) |
+| 2.4 | **Cartes MBTiles offline** : rendu tuiles réelles | Affichage carte hors-ligne (Playwright) |
 | 2.5 | **Mode batterie** : profils mobile/desktop/gateway adaptatifs (déjà présent) + vérif conso | Bench charge/décharge |
 | 2.6 | **Compression + budget mémoire** : validation sur gros volume | Pas d'OOM à 100k messages |
 | 2.7 | **Réputation anti-abus** : pénalités propagées, détection de spam | Attaque de spam contenue (test) |
@@ -111,12 +111,12 @@ audité, testé à grande échelle, auto-réparateur, multi-plateforme.
 - **Qualité** : 100% tests green, 0 clippy warning, 0 secret en clair,
   0 finding critique audit.
 - **Performance** : 11k nœuds stables, RAM bornée, latence < seuil.
-- **UX** : démo end-to-end fluide (TestSprite 100% green).
+- **UX** : démo end-to-end fluide (Playwright 100% green).
 - **Confiance** : crypto réelle, WoT décentralisé, audit indépendant.
 
 ## Rôles
 - **Hermes** : orchestration, revue de code, tests, publication,
-  arbitrage, TestSprite, planification, mémoire de projet.
+  arbitrage, Playwright, planification, mémoire de projet.
 - **opencode** : implémentation de chaque tâche, tests unitaires,
   itérations locales.
 

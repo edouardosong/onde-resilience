@@ -4,9 +4,11 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org)
-[![Tests](https://img.shields.io/badge/tests-163%20passing-brightgreen.svg)]()
+[![CI](https://github.com/edouardosong/onde-resilience/actions/workflows/ci.yml/badge.svg)](https://github.com/edouardosong/onde-resilience/actions)
+[![Tests core](https://img.shields.io/badge/tests%20core-163%20passing-brightgreen.svg)](#-tests)
+[![Simulation](https://img.shields.io/badge/simulation-12%20passing-brightgreen.svg)](#-tests)
+[![E2E UI](https://img.shields.io/badge/e2e%20ui-playwright-blue.svg)](#-tests)
 [![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)]()
-[![Build](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
 [![Release](https://img.shields.io/github/v/release/edouardosong/onde-resilience?label=latest)](https://github.com/edouardosong/onde-resilience/releases)
 
 ---
@@ -173,7 +175,7 @@ python3 simulation/mesh_sim.py
 
 ```bash
 uv sync --project simulation                        # crée simulation/.venv (gitignored)
-uv run --project simulation pytest simulation/ -q   # gate : 11 passed
+uv run --project simulation pytest simulation/ -q   # gate : 12 passed
 ```
 
 ### Technologies simulées :
@@ -395,6 +397,30 @@ cd core && cargo test --workspace
 # zim-parser       :   3 tests ✅ Extraction HTML, catégories, URL ZIM
 # llm-inference    :   3 tests ✅ Inférence locale, auto-sélection de modèle
 # integration_e2e  :  18 tests ✅ Scénarios end-to-end complets
+```
+
+### Simulation mesh (`simulation/`) — 12 tests, 0 échec
+
+```bash
+uv sync --project simulation
+uv run --project simulation pytest simulation/ -q   # 12 passed
+```
+
+Déterminisme garanti : `run_simulation(seed=42)` produit des rapports byte-identiques
+(tests dédiés, seed par défaut = 42).
+
+### E2E UI — Playwright (open source, MIT)
+
+5 scénarios de bout en bout couvrant le flux citoyen : **démarrage nœud, publication
+d'une alerte, publication d'une demande d'entraide, feed, réputation WoT**.
+
+Stack **100 % gratuite et open source** (décision projet) : Playwright remplace le
+service TestSprite (payant, clé API). Baseline en cours (ROADMAP 0.4) — les 5
+scénarios sont définis (plans legacy dans `testsprite/`), **en cours de portage** en specs Playwright (futur dossier `e2e/`) avec capture d'évidence (screenshots + traces).
+
+```bash
+npx playwright install chromium   # une fois
+npx playwright test              # suite e2e (baseline ROADMAP 0.4)
 ```
 
 ### Scénario de bout en bout (Phase 1.7) — `test_e2e_critical_alert_full_lifecycle`
