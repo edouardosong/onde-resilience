@@ -43,8 +43,8 @@ Commits de référence (main) : `28418e4` (merge L2-01 sim) · `d87f8c9` (L2-00 
 |---|-------|----------------------|-----------|
 | 0.1 | Fix README (129→135) + commit propre — **FAIT** (2026-08-20 : README aligné sur le compte mesuré, 163 tests) | README = réalité | — |
 | 0.2 | Publication GitHub de la passe "Audit #8–#14" | PR mergée, CI green | — |
-| 0.3 | Configurer Playwright (open source, sans clé API) | config + `npx playwright test` exécutable | ✅ |
-| 0.4 | Baseline Playwright : 5 tests UI (démarrage, publish alerte, publish entraide, feed, réputation) | Suite durable green | ✅ |
+| 0.3 | Configurer Playwright (open source, sans clé API) | config + `npx playwright test` exécutable | ✅ **FAIT** (2026-08-20 : `ui/web/playwright.config.ts`, Playwright 1.62.1, 0 vuln.) |
+| 0.4 | Baseline Playwright : 5 tests UI (démarrage, publish alerte, publish entraide, feed, réputation) | Suite durable green | ✅ **FAIT** (2026-08-20 : `ui/web/e2e/` 5 specs, 5 passed + 1 skip documenté [WoT UI absente], 4 runs verts consécutifs) |
 
 ---
 

@@ -415,12 +415,16 @@ Déterminisme garanti : `run_simulation(seed=42)` produit des rapports byte-iden
 d'une alerte, publication d'une demande d'entraide, feed, réputation WoT**.
 
 Stack **100 % gratuite et open source** (décision projet) : Playwright remplace le
-service TestSprite (payant, clé API). Baseline en cours (ROADMAP 0.4) — les 5
-scénarios sont définis (plans legacy dans `testsprite/`), **en cours de portage** en specs Playwright (futur dossier `e2e/`) avec capture d'évidence (screenshots + traces).
+service TestSprite (payant, clé API). **Baseline opérationnelle** : 5 specs dans
+`ui/web/e2e/`, chacune avec capture d'évidence (screenshots + traces) —
+**5 passed + 1 skip documenté** (écran réputation WoT absent de l'UI web ; test
+prêt à ré-activation, ROADMAP 1.2/2.7).
 
 ```bash
-npx playwright install chromium   # une fois
-npx playwright test              # suite e2e (baseline ROADMAP 0.4)
+cd ui/web
+npx playwright install chromium   # une fois (browsers)
+npx playwright test               # suite e2e : 5 passed + 1 skip (webServer auto)
+npx playwright show-report        # rapport HTML + traces
 ```
 
 ### Scénario de bout en bout (Phase 1.7) — `test_e2e_critical_alert_full_lifecycle`
