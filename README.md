@@ -6,7 +6,7 @@
 [![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org)
 [![CI](https://github.com/edouardosong/onde-resilience/actions/workflows/ci.yml/badge.svg)](https://github.com/edouardosong/onde-resilience/actions)
 [![Tests core](https://img.shields.io/badge/tests%20core-163%20passing-brightgreen.svg)](#-tests)
-[![Simulation](https://img.shields.io/badge/simulation-12%20passing-brightgreen.svg)](#-tests)
+[![Simulation](https://img.shields.io/badge/simulation-23%20passing-brightgreen.svg)](#-tests)
 [![E2E UI](https://img.shields.io/badge/e2e%20ui-playwright-blue.svg)](#-tests)
 [![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)]()
 [![Release](https://img.shields.io/github/v/release/edouardosong/onde-resilience?label=latest)](https://github.com/edouardosong/onde-resilience/releases)
@@ -175,7 +175,7 @@ python3 simulation/mesh_sim.py
 
 ```bash
 uv sync --project simulation                        # crée simulation/.venv (gitignored)
-uv run --project simulation pytest simulation/ -q   # gate : 12 passed
+uv run --project simulation pytest simulation/ -q   # gate : 23 passed (mesuré 2026-08-21)
 ```
 
 ### Technologies simulées :
@@ -399,11 +399,11 @@ cd core && cargo test --workspace
 # integration_e2e  :  18 tests ✅ Scénarios end-to-end complets
 ```
 
-### Simulation mesh (`simulation/`) — 12 tests, 0 échec
+### Simulation mesh (`simulation/`) — 23 tests, 0 échec (mesuré 2026-08-21)
 
 ```bash
 uv sync --project simulation
-uv run --project simulation pytest simulation/ -q   # 12 passed
+uv run --project simulation pytest simulation/ -q   # 23 passed (mesuré 2026-08-21)
 ```
 
 Déterminisme garanti : `run_simulation(seed=42)` produit des rapports byte-identiques
