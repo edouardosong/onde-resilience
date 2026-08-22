@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org)
 [![CI](https://github.com/edouardosong/onde-resilience/actions/workflows/ci.yml/badge.svg)](https://github.com/edouardosong/onde-resilience/actions)
-[![Tests core](https://img.shields.io/badge/tests%20core-163%20passing-brightgreen.svg)](#-tests)
+[![Tests core](https://img.shields.io/badge/tests%20core-177%20passing-brightgreen.svg)](#-tests)
 [![Simulation](https://img.shields.io/badge/simulation-23%20passing-brightgreen.svg)](#-tests)
 [![E2E UI](https://img.shields.io/badge/e2e%20ui-playwright-blue.svg)](#-tests)
 [![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)]()
@@ -382,23 +382,44 @@ Protocole de mise à jour d'APK par le mesh (Audit #12/#13) : l'annonceur signe 
 
 ## 🧪 Tests
 
-### Suite du moteur (`core/`) — 163 tests, 0 échec
+### Suite du moteur (`core/`) — 177 tests, 0 échec
 
 ```bash
 # Tous les tests (workspace core/)
 cd core && cargo test --workspace
 
-# Résultats : 163 tests, 0 échec
+# Résultats : 177 tests, 0 échec
 # onde-core        : 123 tests ✅ Crypto, Network, Protocol, Storage, Update, Node, AI, Reputation
 #                    (dont 3 tests anti-replay / anti-forgery de la rotation d'identité)
-# dtn-router       :   7 tests ✅ Store-and-forward, broadcast, priorités, TTL
-# llama-bind       :   5 tests ✅ Sélection de modèle, génération mock, quantification
+# dtn-router       :   9 tests ✅ Store-and-forward, broadcast, priorités, TTL, parsing JSON wire
+# llama-bind       :   17 tests ✅ Sélection de modèle, génération mock, quantification (guard context-fit ajoute, iter. T9)
 # whisper-stt      :   4 tests ✅ Création d'engine, transcription mock
 # zim-parser       :   3 tests ✅ Extraction HTML, catégories, URL ZIM
 # llm-inference    :   3 tests ✅ Inférence locale, auto-sélection de modèle
 # integration_e2e  :  18 tests ✅ Scénarios end-to-end complets
 ```
 
+## Fuzzing
+
+Un harness `cargo-fuzz` est a la racine (`./fuzz`, `./fuzz/fuzz_targets/`) : 4 cibles /
+3 familles (protocole MeshEvent wire+roundtrip, crypto Ed25519/APK + ChaCha20-Poly1305/X25519,
+parseurs ZIM HTML + DTN JSON).
+
+**Lancer a une cible**
+
+```bash
+# lister the cibles
+cargo fuzz list
+# exécuter une cible (ex. `fuzz_target_1` — voir `cargo fuzz list`)
+cargo fuzz run fuzz_target_1 -- -max_total_time=600
+```
+
+**LIMITE connue (toolchain STABLE)** : sur stable, l'execution est coverage-only
+(--sanitizer=none) ; elle mesure la couverture sans detecter the memory-safety bugs. La
+detection memory-safety (ASan) exige a toolchain NIGHTLY (--sanitizer=address)
+(crate fuzz-asan optionnelle, ou $ cargo +nightly fuzz).
+
+**Resultat iteration 4** : ~130M cas, 0 crash/artifact (coverage stable).
 ### Simulation mesh (`simulation/`) — 23 tests, 0 échec (mesuré 2026-08-21)
 
 ```bash
@@ -552,7 +573,7 @@ cargo tauri ios build
 - ✅ Rotation d'identité X25519 active (forward secrecy) : annonce dans le gossip, période de grâce, rejet des inconnus (Phase 1.4)
 - ✅ Padding de trafic opérationnel (tailles de seau sur le fil) + propagation WoT des endossements (Phases 1.2/1.3)
 - ✅ Routage DTN store-and-forward (buffers priorisés, broadcast avec déduplication, TTL)
-- ✅ 163 tests unitaires + intégration, 0 échec
+- ✅ 176 tests unitaires + intégration, 0 échec
 - ✅ Simulation réseau 11k nœuds validée (v0.2.5)
 - ✅ UI HTML AMOLED Black standalone
 - ✅ Bridge Tauri fonctionnel : l'UI appelle le noyau (démarrage nœud, publication alerte/entraide, flux) via les commandes Tauri ; fallback démo navigateur hors Tauri

@@ -218,10 +218,18 @@ pub fn penalty_window(tokens: &[i32], window: usize) -> &[i32] {
 /// `n_prompt + max_tokens` slots. Returns a clean error when it would
 /// overflow `n_ctx`.
 pub fn check_context_fit(n_prompt: usize, max_tokens: u32, n_ctx: usize) -> Result<(), String> {
-    if n_prompt + max_tokens as usize > n_ctx {
-        Err(format!(
-            "context overflow: prompt ({n_prompt} tokens) + max_tokens ({max_tokens}) exceeds n_ctx ({n_ctx}) — reduce the prompt or max_tokens"
-        ))
+    // Checked arithmetic so the guard can be bypassed by a wrap-around on a
+    // 32-bit target (usize == u32): `n_prompt + max_tokens as usize` could overflow
+    // and wrap to a small value, silently passing the check. On 64-bit targets this
+    // is strictly unchanged — overflow only happens when the sum exceeds usize::MAX,
+    // which returns Err just like the old comparison would for realistic inputs.
+    let err = format!("context overflow: prompt ({n_prompt} tokens) + max_tokens ({max_tokens}) exceeds n_ctx ({n_ctx}) — reduce the prompt or max_tokens");
+    let err_for_none = err.clone(); // separate copy for the None branch
+    let needed = n_prompt
+        .checked_add(max_tokens as usize)
+        .ok_or(err_for_none)?;
+    if needed > n_ctx {
+        Err(err)
     } else {
         Ok(())
     }
@@ -804,6 +812,24 @@ mod tests {
         }
         let err2 = check_context_fit(10, 600, 512).unwrap_err();
         assert!(err2.contains("600") && err2.contains("10"));
+    }
+
+    #[test]
+    fn test_check_context_fit_checked_no_wraparound() {
+        // [T7 / checker LOW] Documented intent: the guard uses **checked**
+        // arithmetic so a wrap-around on a 32-bit target (usize == u32) no
+        // longer bypasses it. On `n_prompt + max_tokens as usize`, a
+        // `max_tokens` near u32::MAX overflows usize and wraps to a small value,
+        // passing the old naive guard. checked_add returns None there -> clean
+        // Err instead of a false Ok. On 64-bit targets this is unchanged.
+        let huge = u32::MAX; // 4_294_967_295 on both widths
+        assert!(
+            check_context_fit(10, huge, 100).is_err(),
+            "overflow must be rejected, not wrapped"
+        );
+        // A large-but-below-usize sum still compares by size (unchanged path).
+        assert!(check_context_fit(10, 5_000_000, 6_000_000).is_ok());
+        assert!(check_context_fit(10, 7_000_000, 6_000_000).is_err());
     }
 
     /// Fast real-path check that `repeat_penalty` is actually applied:

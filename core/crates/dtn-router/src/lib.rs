@@ -30,8 +30,7 @@ impl DtnMessage {
     /// feed). Returns `Err` on malformed JSON or wrong shape — never panics, so
     /// it is safe as a cargo-fuzz entry point.
     pub fn from_wire_bytes(bytes: &[u8]) -> Result<DtnMessage, String> {
-        serde_json::from_slice(bytes)
-            .map_err(|e| format!("dtn wire parse failed: {e}"))
+        serde_json::from_slice(bytes).map_err(|e| format!("dtn wire parse failed: {e}"))
     }
 }
 
