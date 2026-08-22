@@ -9,10 +9,18 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"
 tokio = { version = "1", features = ["full"] }
+thiserror = "1"
+
+# Real whisper.cpp FFI (compiled only when the `whisper-cpp` feature is enabled;
+# vendored sources live in ../whisper_cpp_sys — same pattern as llama_cpp_sys)
+whisper_cpp_sys = { path = "../whisper_cpp_sys", optional = true }
 
 [features]
 default = ["mock"]
 mock = []  # Simulated STT for testing without model
+whisper-cpp = ["dep:whisper_cpp_sys"]  # Real whisper.cpp FFI (GGML transcription)
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "macros"] }
+# Isolation des tests : modèle incompatible généré dans un fichier temporaire
+tempfile = "3"
