@@ -1,0 +1,4 @@
+# Toolchain épinglée pour que CI et développement local partagent exactement
+# les mêmes gates (fmt/clippy/test). Toute montée de version = itération dédiée.
+[toolchain]
+channel = "1.96.0"

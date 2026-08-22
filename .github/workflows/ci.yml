@@ -39,7 +39,7 @@ jobs:
       - name: Install Rust toolchain (fmt + clippy)
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
         with:
-          toolchain: stable
+          toolchain: "1.96.0"
           components: rustfmt, clippy
 
       - name: Cache cargo
@@ -129,7 +129,7 @@ jobs:
       - name: Install Rust + Android targets
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
         with:
-          toolchain: stable
+          toolchain: "1.96.0"
           targets: aarch64-linux-android, armv7-linux-androideabi, x86_64-linux-android
 
       - name: Cache cargo (NDK)
@@ -155,7 +155,14 @@ jobs:
 
       - name: Build Rust core for Android (NDK)
         working-directory: core
-        run: cargo build --release --target aarch64-linux-android
+        shell: bash
+        run: |
+          NDK="$ANDROID_SDK_ROOT/ndk/26.2.11394342"
+          [ -d "$NDK" ] || NDK="$(ls -d "$ANDROID_SDK_ROOT"/ndk/* 2>/dev/null | head -1)"
+          echo "NDK utilisé: $NDK"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_AR="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+          cargo build --release --target aarch64-linux-android
 
       - name: Gate — Android lint (Zero critical)
         working-directory: android
@@ -225,7 +232,7 @@ jobs:
       - name: Install Rust (tauri src)
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
         with:
-          toolchain: stable
+          toolchain: "1.96.0"
           components: rustfmt, clippy
 
       - name: Gate — tauri clippy
