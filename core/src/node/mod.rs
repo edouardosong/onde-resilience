@@ -8,7 +8,15 @@ use crate::ai::AiEngine;
 use crate::crypto::{Identity, RotatingIdentity, TxPool, ZkTransaction};
 use crate::network::YggdrasilAddress;
 use crate::protocol::{GossipProtocol, MeshEvent, OndeMessageType};
-use crate::reputation::{Endorsement, ReputationSystem};
+// Constantes anti-abus utilisées par les scénarios de test Phase 2.7.
+use crate::reputation::{
+    AbuseReason, AbuseReport, Endorsement, ReputationSystem, SpamGuard, TrustAction,
+    SPAM_BUDGET_PER_WINDOW, SPAM_WINDOW_SECS,
+};
+#[cfg(test)]
+use crate::reputation::{
+    ABUSE_IGNORE_THRESHOLD, MAX_POW_DIFFICULTY, PENALTY_REMOTE_REPORT, SECS_PER_HOUR,
+};
 use crate::storage::{
     persistence::SqliteStore, IpfsSeeder, MBTilesRenderer, MessageTier, StoragePolicy,
     TieredMessage, TieredMessageStore, ZimReader,
@@ -252,6 +260,52 @@ pub enum RotationHandlingOutcome {
     Rejected(String),
 }
 
+/// Décision du **gate d'admission** anti-abus (Phase 2.7) appliqué à tout
+/// événement entrant avant routage vers les handlers métier.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdmissionDecision {
+    /// Événement admis — poursuit son traitement normal.
+    Admitted,
+    /// Événement refusé AVANT tout traitement coûteux (validation, stockage,
+    /// relai). La raison est explicite pour l'observabilité et les métriques.
+    Rejected(String),
+}
+
+/// Résultat du traitement d'un événement de pair par le dispatcher
+/// [`Node::receive_peer_event`] (gate + routage + classification des abus).
+#[derive(Debug, Clone, PartialEq)]
+pub enum PeerEventOutcome {
+    /// Refusé par le gate anti-abus (signature invalide, auteur ignoré,
+    /// budget dépassé) ou événement signé mais invalide (violation enregistrée).
+    Rejected(String),
+    /// Alerte vérifiée et stockée localement (+relai).
+    AlertStored,
+    /// Alerte valide mais non retenue (déjà connue, budget/sharding).
+    AlertNotStored,
+    /// Endossement vérifié et intégré à la réputation locale.
+    EndorsementApplied,
+    /// Endossement rejeté (payload, politique, doublon…).
+    EndorsementRejected(String),
+    /// Signalement d'abus intégré — nouveau niveau d'abus du dénoncé.
+    AbuseReportApplied(f64),
+    /// Signalement d'abus rejeté (voir [`AbuseReportOutcome`]).
+    AbuseReportRejected(String),
+    /// Kind non géré par ce dispatcher.
+    Other,
+}
+
+/// Résultat du traitement d'un signalement d'abus entrant (Phase 2.7).
+#[derive(Debug, Clone, PartialEq)]
+pub enum AbuseReportOutcome {
+    /// Message non lié aux signalements (ignoré).
+    Ignored,
+    /// Signalement qualifié intégré — nouveau niveau d'abus du dénoncé.
+    Applied(f64),
+    /// Signalement rejeté (payload invalide, signature invalide, rapporteur
+    /// ≠ signataire, rapporteur non de confiance, raison inconnue, doublon).
+    Rejected(String),
+}
+
 /// The main ONDE node
 pub struct Node {
     pub config: NodeConfig,
@@ -299,6 +353,9 @@ pub struct Node {
     /// inférieur est rejetée : on ne recule jamais vers une clé X25519
     /// antérieure, même si l'événement est signé par un pair de confiance.
     peer_rotation_count: std::collections::HashMap<String, u64>,
+    /// Phase 2.7 — garde-fou anti-spam : fenêtre glissante par auteur
+    /// appliquée à l'entrée du nœud (voir [`SpamGuard`]).
+    pub spam_guard: SpamGuard,
 }
 
 impl Node {
@@ -405,6 +462,7 @@ impl Node {
             peer_x25519: std::collections::HashMap::new(),
             peer_x25519_grace: std::collections::HashMap::new(),
             peer_rotation_count: std::collections::HashMap::new(),
+            spam_guard: SpamGuard::new(SPAM_WINDOW_SECS, SPAM_BUDGET_PER_WINDOW),
         }
     }
 
@@ -1187,6 +1245,201 @@ impl Node {
                 EndorsementHandlingOutcome::Applied
             }
             Err(e) => EndorsementHandlingOutcome::Rejected(e),
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 2.7 — Réputation anti-abus : gate d'admission, dispatcher de
+    // réception, signalements d'abus propagés (endossements négatifs).
+    // ------------------------------------------------------------------
+
+    /// Gate d'admission appliqué à TOUT événement entrant avant routage.
+    ///
+    /// Ordre des filtres (du moins coûteux au plus structurant) :
+    /// 1. **Signature** : invalide → rejet SANS pénalité — n'importe qui peut
+    ///    forger un événement au nom d'autrui, l'auteur n'est pas attribuable.
+    /// 2. **Auto-relais** : nos propres événements revenant via les pairs sont
+    ///    admis sans comptage (sinon un nœud honnête s'auto-throttlrait).
+    /// 3. **Déduplication** : un événement déjà connu ne compte pas une seconde
+    ///    fois contre son auteur (coût marginal nul, lookup HashSet).
+    /// 4. **Auteur ignoré** (abus saturé) → rejet immédiat, contenu total.
+    /// 5. **Fenêtre glissante** ([`SpamGuard`]) : budget dépassé → violation
+    ///    `ExcessiveRate` enregistrée + rejet AVANT validation/PoW/stockage —
+    ///    le coût du flood pour le receveur reste borné au budget.
+    ///
+    /// Temps explicite (`now`, unix secs) : décision déterministe et testable.
+    pub fn admit_peer_event(&mut self, now: u64, event: &MeshEvent) -> AdmissionDecision {
+        if !event.signature_valid() {
+            return AdmissionDecision::Rejected(
+                "invalid signature — dropped without penalty (author not attributable)".to_string(),
+            );
+        }
+        let author = &event.pubkey;
+        if author == &self.identity.pubkey_hex() {
+            return AdmissionDecision::Admitted;
+        }
+        if self.gossip.is_known(&event.id) {
+            return AdmissionDecision::Admitted;
+        }
+        if self.reputation.action_for(author, now) == TrustAction::Ignore {
+            return AdmissionDecision::Rejected(format!(
+                "author ignored (abuse level {:.2})",
+                self.reputation.abuse_level(author, now)
+            ));
+        }
+        if !self.spam_guard.admit(author, now) {
+            self.reputation
+                .record_violation(author, AbuseReason::ExcessiveRate, now);
+            return AdmissionDecision::Rejected(
+                "rate limited: sliding-window budget exceeded for this author".to_string(),
+            );
+        }
+        AdmissionDecision::Admitted
+    }
+
+    /// Point d'entrée unique d'un événement reçu d'un pair : gate anti-abus
+    /// puis routage vers le handler métier, avec classification des violations
+    /// **attribuables** (l'événement est signé par son auteur réel).
+    ///
+    /// Les rejets « politiques » des endossements (doublon relayé par le
+    /// gossip, endosseur non qualifié) NE sont PAS des abus : c'est du bruit
+    /// normal du réseau, ils ne pénalisent personne. Seuls les payloads
+    /// malformés signés par leur auteur (`InvalidEvent`) et les PoW
+    /// insuffisants (`InsufficientPow`) pèsent sur la réputation.
+    pub fn receive_peer_event(&mut self, now: u64, event: &MeshEvent) -> PeerEventOutcome {
+        if let AdmissionDecision::Rejected(reason) = self.admit_peer_event(now, event) {
+            return PeerEventOutcome::Rejected(reason);
+        }
+        match &event.kind {
+            OndeMessageType::Alert => match self.handle_incoming_alert(event) {
+                Ok(true) => PeerEventOutcome::AlertStored,
+                Ok(false) => PeerEventOutcome::AlertNotStored,
+                Err(e) => {
+                    let reason = if e.contains("PoW") {
+                        AbuseReason::InsufficientPow
+                    } else {
+                        AbuseReason::InvalidEvent
+                    };
+                    self.reputation.record_violation(&event.pubkey, reason, now);
+                    PeerEventOutcome::Rejected(format!("invalid signed event: {e}"))
+                }
+            },
+            OndeMessageType::Endorsement => match self.handle_incoming_endorsement(event) {
+                EndorsementHandlingOutcome::Applied => PeerEventOutcome::EndorsementApplied,
+                EndorsementHandlingOutcome::Ignored => PeerEventOutcome::Other,
+                EndorsementHandlingOutcome::Rejected(e) => {
+                    let political_noise = e.contains("Duplicate")
+                        || e.contains("not trusted")
+                        || e.contains("cannot endorse itself");
+                    if !political_noise {
+                        self.reputation.record_violation(
+                            &event.pubkey,
+                            AbuseReason::InvalidEvent,
+                            now,
+                        );
+                    }
+                    PeerEventOutcome::EndorsementRejected(e)
+                }
+            },
+            OndeMessageType::AbuseReport => match self.handle_incoming_abuse_report(event) {
+                AbuseReportOutcome::Applied(level) => PeerEventOutcome::AbuseReportApplied(level),
+                AbuseReportOutcome::Ignored => PeerEventOutcome::Other,
+                AbuseReportOutcome::Rejected(e) => PeerEventOutcome::AbuseReportRejected(e),
+            },
+            _ => PeerEventOutcome::Other,
+        }
+    }
+
+    /// Signaler l'abus constaté LOCALEMENT sur `offender` et propager le
+    /// signalement signé dans le gossip (endossement négatif).
+    ///
+    /// Miroir exact de [`Node::endorse`] : application locale implicite via
+    /// la publication qualifiée (le nœud se fait confiance), payload JSON
+    /// base64 dans le `content` d'un kind `AbuseReport` (code wire 15),
+    /// signature Ed25519 du rapporteur, PoW adaptatif. Chaque receveur décide
+    /// souverainement d'intégrer ou non le signalement selon SA confiance en
+    ///vers le rapporteur ([`ReputationSystem::apply_remote_abuse_report`]).
+    pub fn report_abuse(
+        &mut self,
+        offender: &str,
+        reason: AbuseReason,
+        timestamp: u64,
+    ) -> Result<MeshEvent, String> {
+        if offender == self.identity.pubkey_hex() {
+            return Err("A node cannot report itself".to_string());
+        }
+        let report = AbuseReport {
+            reporter: self.identity.pubkey_hex(),
+            offender: offender.to_string(),
+            reason: reason.code(),
+            timestamp,
+        };
+        let payload = serde_json::to_vec(&report).map_err(|e| e.to_string())?;
+        let content = base64::engine::general_purpose::STANDARD.encode(&payload);
+        let event = MeshEvent::new_signed(
+            &self.identity,
+            OndeMessageType::AbuseReport,
+            content,
+            vec![],
+        );
+        self.publish_gossip_event(event)
+    }
+
+    /// Traiter un signalement d'abus reçu du gossip.
+    ///
+    /// 1. Décodage du payload (`content` = base64 du JSON [`AbuseReport`],
+    ///    borné comme un endossement).
+    /// 2. Le rapporteur annoncé doit être l'auteur signé de l'événement ET la
+    ///    signature doit être valide (pas d'usurpation de rapporteur).
+    /// 3. Intégration souveraine via
+    ///    [`ReputationSystem::apply_remote_abuse_report`] — le receveur
+    ///    n'intègre que les signalements de rapporteurs qu'il considère lui-
+    ///    même de confiance, dédupliqués par (rapporteur, dénoncé, raison).
+    /// 4. **Relai** : un signalement intégré entre dans l'outbox du gossip
+    ///    (idempotent) pour atteindre les pairs qui ne le connaissent pas.
+    pub fn handle_incoming_abuse_report(&mut self, event: &MeshEvent) -> AbuseReportOutcome {
+        if event.kind != OndeMessageType::AbuseReport {
+            return AbuseReportOutcome::Ignored;
+        }
+        if event.content.len() > 1024 {
+            return AbuseReportOutcome::Rejected(
+                "abuse report payload too large (max 1024 bytes)".to_string(),
+            );
+        }
+        let data = match base64::engine::general_purpose::STANDARD.decode(&event.content) {
+            Ok(d) => d,
+            Err(e) => {
+                return AbuseReportOutcome::Rejected(format!(
+                    "abuse report payload is not valid base64: {e}"
+                ))
+            }
+        };
+        let report: AbuseReport = match serde_json::from_slice(&data) {
+            Ok(r) => r,
+            Err(e) => {
+                return AbuseReportOutcome::Rejected(format!(
+                    "abuse report payload is not valid JSON: {e}"
+                ))
+            }
+        };
+        if report.reporter != event.pubkey {
+            return AbuseReportOutcome::Rejected(
+                "abuse reporter does not match the event signer".to_string(),
+            );
+        }
+        if !event.signature_valid() {
+            return AbuseReportOutcome::Rejected(
+                "abuse report signature could not be verified".to_string(),
+            );
+        }
+        match self.reputation.apply_remote_abuse_report(&report, true) {
+            Ok(level) => {
+                let _ = self
+                    .gossip
+                    .add_event_with_reputation(event.clone(), &self.reputation);
+                AbuseReportOutcome::Applied(level)
+            }
+            Err(e) => AbuseReportOutcome::Rejected(e),
         }
     }
 
@@ -2008,5 +2261,423 @@ mod tests {
             Some(second_key.as_str()),
             "the most-recent key must be retained after a stale replay attempt"
         );
+    }
+    // ────────────────────────────────────────────────────────────────────
+    // Phase 2.7 — Réputation anti-abus : gate d'admission, propagation des
+    // signalements, attaque de spam CONTENUE (critère ROADMAP 2.7).
+    //
+    // Déterminisme : toutes les décisions passent par des méthodes à temps
+    // explicite (`now` en secondes unix injecté) — aucune horloge système,
+    // aucun sleep. Les événements sont signés par des identités de test.
+    // ────────────────────────────────────────────────────────────────────
+
+    /// Base temporelle fixe des scénarios anti-abus (unix secs arbitraire).
+    const T0: u64 = 1_700_000_000;
+
+    /// Identité de test déterministe depuis une graine.
+    fn test_identity(seed: u8) -> Identity {
+        Identity::from_bytes(&[seed; 32])
+    }
+
+    /// Événement Alert signé par `identity` avec la difficulté PoW demandée.
+    fn signed_spam_alert(identity: &Identity, content: &str, difficulty: u8) -> MeshEvent {
+        let mut ev = MeshEvent::new_signed(
+            identity,
+            OndeMessageType::Alert,
+            content.to_string(),
+            vec![],
+        )
+        .with_pow_difficulty(difficulty);
+        if difficulty > 0 {
+            assert!(ev.compute_pow(4_000_000), "test PoW must succeed");
+        }
+        ev
+    }
+
+    /// CRITÈRE ROADMAP 2.7 — une attaque de spam est **contenue** :
+    /// 100 messages malveillants d'un même auteur dans une fenêtre →
+    /// rejet/throttling effectif au-delà du budget, réputation de
+    /// l'attaquant effondrée, impact sur les honnêtes NUL.
+    #[tokio::test]
+    async fn test_spam_attack_is_contained() {
+        let mut receiver = Node::new(NodeConfig::default());
+        let attacker = test_identity(1);
+        let honest = test_identity(2);
+        let attacker_pub = attacker.pubkey_hex();
+        let honest_pub = honest.pubkey_hex();
+
+        // Mise en situation : l'attaquant avait UNE once de confiance
+        // (endossé 0.8 × 0.5 = 0.4) et le pair honnête est fondateur (0.8).
+        receiver.endorse(&attacker_pub).expect("endorse attacker");
+        receiver
+            .reputation
+            .set_trusted(&honest_pub, crate::reputation::GENESIS_TRUST);
+        assert!((receiver.reputation.effective_score(&attacker_pub, T0) - 0.4).abs() < 1e-9);
+
+        // ATTAQUE : 100 messages DISTINCTS signés, tous dans la même fenêtre
+        // de 60 s. L'attaquant (score 0.4) paie la difficulté adaptative qui
+        // lui est exigée (3) — les messages admis doivent passer la validation
+        // complète, sinon la contention serait triviale.
+        let flood = 100usize;
+        let mut admitted = 0usize;
+        let mut rejected_rate = 0usize;
+        let mut rejected_ignored = 0usize;
+        for i in 0..flood {
+            let ev = signed_spam_alert(&attacker, &format!("SPAM #{i}"), 3);
+            let now = T0 + (i as u64) / 2; // étalés sur 50 s < fenêtre
+            match receiver.receive_peer_event(now, &ev) {
+                PeerEventOutcome::AlertStored => admitted += 1,
+                PeerEventOutcome::Rejected(r) if r.contains("rate limited") => rejected_rate += 1,
+                PeerEventOutcome::Rejected(r) if r.contains("ignored") => rejected_ignored += 1,
+                other => panic!("unexpected outcome for spam #{i}: {other:?}"),
+            }
+        }
+
+        // CONTENTION 1 — rejet/throttling effectif : seul le budget passe.
+        assert_eq!(
+            admitted, SPAM_BUDGET_PER_WINDOW,
+            "only the sliding-window budget may be admitted"
+        );
+        assert_eq!(
+            rejected_rate + rejected_ignored,
+            flood - SPAM_BUDGET_PER_WINDOW,
+            "everything beyond the budget must be contained"
+        );
+        assert!(rejected_rate >= 1, "budget overflow must be rate-limited");
+        assert!(
+            rejected_ignored >= 1,
+            "sustained flooding must escalate to ignore"
+        );
+
+        // CONTENTION 2 — réputation de l'attaquant effondrée :
+        // niveau d'abus saturé, action Ignore, score effectif 0.4 → 0.0.
+        let t_end = T0 + 60;
+        let abuse = receiver.reputation.abuse_level(&attacker_pub, t_end);
+        assert!(
+            abuse >= ABUSE_IGNORE_THRESHOLD,
+            "abuse level {abuse} must reach the ignore threshold"
+        );
+        assert_eq!(
+            receiver.reputation.action_for(&attacker_pub, t_end),
+            TrustAction::Ignore
+        );
+        assert_eq!(
+            receiver.reputation.effective_score(&attacker_pub, t_end),
+            0.0,
+            "attacker effective reputation must collapse from 0.4 to 0.0"
+        );
+
+        // IMPACT HONNÊTE NUL — le pair sain publie 3 alertes dans la MÊME
+        // fenêtre : tout passe, aucun abus, réputation intacte.
+        for j in 0..3u64 {
+            let ev = signed_spam_alert(&honest, &format!("alerte sérieuse {j}"), 0);
+            let outcome = receiver.receive_peer_event(t_end - 10 + j, &ev);
+            assert!(
+                matches!(outcome, PeerEventOutcome::AlertStored),
+                "honest peer message must never be affected: {outcome:?}"
+            );
+        }
+        assert_eq!(receiver.reputation.abuse_level(&honest_pub, t_end), 0.0);
+        assert_eq!(
+            receiver.reputation.action_for(&honest_pub, t_end),
+            TrustAction::Accept
+        );
+        assert!((receiver.reputation.effective_score(&honest_pub, t_end) - 0.8).abs() < 1e-9);
+
+        // CONTENTION 3 — empreinte mémoire bornée : exactement
+        // budget + messages honnêtes dans le magasin et l'outbox.
+        assert_eq!(
+            receiver.message_store.total_count(),
+            SPAM_BUDGET_PER_WINDOW + 3
+        );
+        let outbox = receiver.gossip.get_pending_broadcasts();
+        // L'outbox contient aussi l'endossement émis par le setup (+1).
+        let alerts_in_outbox = outbox
+            .iter()
+            .filter(|e| e.kind == OndeMessageType::Alert)
+            .count();
+        assert_eq!(
+            alerts_in_outbox,
+            SPAM_BUDGET_PER_WINDOW + 3,
+            "only budgeted spam + honest alerts may be relayed"
+        );
+        let attacker_ids = outbox.iter().filter(|e| e.pubkey == attacker_pub).count();
+        let honest_ids = outbox.iter().filter(|e| e.pubkey == honest_pub).count();
+        assert_eq!(attacker_ids, SPAM_BUDGET_PER_WINDOW);
+        assert_eq!(honest_ids, 3);
+    }
+
+    /// La remontée lente rend sa place à un attaquant arrêté — jamais
+    /// instantanément, jamais sans preuve de calme prolongé.
+    #[tokio::test]
+    async fn test_attacker_recovers_only_slowly_after_stopping() {
+        let mut receiver = Node::new(NodeConfig::default());
+        let attacker = test_identity(3);
+        let pubk = attacker.pubkey_hex();
+
+        // Trois violations de débit simulées directement (0.9 d'abus).
+        for k in 0..3u64 {
+            receiver
+                .reputation
+                .record_violation(&pubk, AbuseReason::ExcessiveRate, T0 + k);
+        }
+        let t_end = T0 + 3;
+        assert_eq!(
+            receiver.reputation.action_for(&pubk, t_end),
+            TrustAction::Ignore
+        );
+
+        // 24 h plus tard : 1 heure pleine × 24 → abus 0.9 − 0.24 = 0.66 →
+        // Deprioritize (plus ignoré, toujours surveillé).
+        let t_day = t_end + 24 * SECS_PER_HOUR;
+        assert!((receiver.reputation.abuse_level(&pubk, t_day) - 0.66).abs() < 1e-9);
+        assert_eq!(
+            receiver.reputation.action_for(&pubk, t_day),
+            TrustAction::Deprioritize
+        );
+
+        // 100 h : abus 0.9 − 1.0 → 0 → retour complet au régime normal.
+        let t_clean = t_end + 100 * SECS_PER_HOUR;
+        assert_eq!(receiver.reputation.abuse_level(&pubk, t_clean), 0.0);
+        assert_eq!(
+            receiver.reputation.action_for(&pubk, t_clean),
+            TrustAction::Accept
+        );
+        // Et le PoW exigé redevient celui d'un inconnu standard (MAX), pas pire.
+        assert_eq!(
+            receiver
+                .reputation
+                .required_pow_difficulty_at(&pubk, t_clean),
+            MAX_POW_DIFFICULTY
+        );
+    }
+
+    /// PROPAGATION — un signalement d'abus signé par un témoin DE CONFIANCE
+    /// traverse le wire et durcit la politique locale du receveur qui n'a
+    /// JAMAIS vu le spam ; doublon, rapporteur inconnu et faux rapports sont
+    /// rejetés.
+    #[tokio::test]
+    async fn test_penalty_propagation_via_gossip() {
+        // Deux témoins indépendants observent le même spammeur.
+        let mut witness_a = Node::new(NodeConfig::default());
+        let mut witness_b = Node::new(NodeConfig::default());
+        // Le receveur R2 n'a JAMAIS vu d'événement de l'attaquant.
+        let mut r2 = Node::new(NodeConfig::default());
+        let attacker = test_identity(4);
+        let attacker_pub = attacker.pubkey_hex();
+
+        // R2 fait confiance aux deux témoins (bootstrap manuel du test).
+        r2.reputation.set_trusted(
+            &witness_a.identity.pubkey_hex(),
+            crate::reputation::GENESIS_TRUST,
+        );
+        r2.reputation.set_trusted(
+            &witness_b.identity.pubkey_hex(),
+            crate::reputation::GENESIS_TRUST,
+        );
+        assert_eq!(
+            r2.reputation.action_for(&attacker_pub, T0),
+            TrustAction::Accept
+        );
+
+        // Témoin A signale : l'événement part dans SON outbox gossip (prêt à
+        // être relayé) et porte le kind wire dédié.
+        let report_ev = witness_a
+            .report_abuse(&attacker_pub, AbuseReason::ExcessiveRate, T0)
+            .expect("trusted witness can report");
+        assert_eq!(report_ev.kind, OndeMessageType::AbuseReport);
+        assert_eq!(report_ev.pubkey, witness_a.identity.pubkey_hex());
+
+        // Transport : le signalement survit au round-trip wire (pad inclus).
+        let wire = report_ev.to_wire_bytes().expect("serialize");
+        let decoded = MeshEvent::from_wire_bytes(&wire).expect("decode");
+
+        // R2 intègre : +PENALTY_REMOTE_REPORT, relai dans son propre gossip.
+        let before_known = r2.gossip.known_count();
+        match r2.receive_peer_event(T0 + 5, &decoded) {
+            PeerEventOutcome::AbuseReportApplied(level) => {
+                assert!((level - PENALTY_REMOTE_REPORT).abs() < 1e-9);
+            }
+            other => panic!("expected AbuseReportApplied, got {other:?}"),
+        }
+        assert_eq!(
+            r2.gossip.known_count(),
+            before_known + 1,
+            "applied report is relayed"
+        );
+        // Un seul rapport ne suffit pas à sanctionner (0.10 < 0.15).
+        assert_eq!(
+            r2.reputation.action_for(&attacker_pub, T0 + 5),
+            TrustAction::Accept
+        );
+
+        // Témoin B confirme : 0.20 ≥ seuil Throttle → politique durcie LOCALEMENT
+        // alors qu'aucun message de l'attaquant n'a jamais touché R2.
+        let report_b = witness_b
+            .report_abuse(&attacker_pub, AbuseReason::ExcessiveRate, T0 + 10)
+            .expect("second witness can report");
+        let wire_b = report_b.to_wire_bytes().unwrap();
+        let decoded_b = MeshEvent::from_wire_bytes(&wire_b).unwrap();
+        match r2.receive_peer_event(T0 + 15, &decoded_b) {
+            PeerEventOutcome::AbuseReportApplied(level) => {
+                assert!((level - 0.20).abs() < 1e-9);
+            }
+            other => panic!("expected second report applied, got {other:?}"),
+        }
+        assert_eq!(
+            r2.reputation.action_for(&attacker_pub, T0 + 15),
+            TrustAction::Throttle
+        );
+
+        // DOUBLON : le même constat rejoué par le même témoin est rejeté.
+        let replayed = witness_a
+            .report_abuse(&attacker_pub, AbuseReason::ExcessiveRate, T0 + 20)
+            .expect("witness can emit again");
+        let wire_r = replayed.to_wire_bytes().unwrap();
+        let decoded_r = MeshEvent::from_wire_bytes(&wire_r).unwrap();
+        match r2.receive_peer_event(T0 + 25, &decoded_r) {
+            PeerEventOutcome::AbuseReportRejected(r) => {
+                assert!(r.contains("Duplicate"), "got: {r}");
+            }
+            other => panic!("duplicate must be rejected, got {other:?}"),
+        }
+        // …et le niveau n'a pas bougé.
+        assert!((r2.reputation.abuse_level(&attacker_pub, T0 + 25) - 0.20).abs() < 1e-9);
+
+        // RAPPORT FORGÉ : le payload annonce un autre rapporteur que le
+        // signataire réel → rejeté (l'usurpation ne passe pas).
+        let forged_payload = serde_json::json!({
+            "reporter": witness_b.identity.pubkey_hex(),
+            "offender": attacker_pub,
+            "reason": AbuseReason::ExcessiveRate.code(),
+            "timestamp": T0 + 30,
+        })
+        .to_string()
+        .into_bytes();
+        let content = base64::engine::general_purpose::STANDARD.encode(&forged_payload);
+        // Signé par le témoin A mais prétendu venir du témoin B.
+        let forged = MeshEvent::new_signed(
+            &witness_a.identity,
+            OndeMessageType::AbuseReport,
+            content,
+            vec![],
+        );
+        match r2.receive_peer_event(T0 + 35, &forged) {
+            PeerEventOutcome::AbuseReportRejected(r) => {
+                assert!(r.contains("does not match"), "got: {r}");
+            }
+            other => panic!("forged reporter must be rejected, got {other:?}"),
+        }
+
+        // RAPORTEUR INCONNU : un tiers non approuvé par R2 ne peut pas dénoncer.
+        let mut stranger = Node::new(NodeConfig::default());
+        let stranger_report = stranger
+            .report_abuse(&attacker_pub, AbuseReason::ExcessiveRate, T0 + 40)
+            .expect("stranger CAN emit (his own view decides)");
+        let wire_s = stranger_report.to_wire_bytes().unwrap();
+        let decoded_s = MeshEvent::from_wire_bytes(&wire_s).unwrap();
+        match r2.receive_peer_event(T0 + 45, &decoded_s) {
+            PeerEventOutcome::AbuseReportRejected(r) => {
+                assert!(r.contains("not trusted"), "got: {r}");
+            }
+            other => panic!("stranger report must be rejected, got {other:?}"),
+        }
+        assert!((r2.reputation.abuse_level(&attacker_pub, T0 + 45) - 0.20).abs() < 1e-9);
+    }
+
+    /// Une signature invalide n'est JAMAIS pénalisée : n'importe qui peut
+    /// forger un événement au nom d'autrui — l'attribution serait injuste.
+    #[tokio::test]
+    async fn test_invalid_signature_dropped_without_penalty() {
+        let mut receiver = Node::new(NodeConfig::default());
+        let victim = test_identity(5); // l'identité usurpée
+        let victim_pub = victim.pubkey_hex();
+
+        let mut forged = signed_spam_alert(&victim, "je n'ai jamais dit ça", MAX_POW_DIFFICULTY);
+        forged.sig = hex::encode([9u8; 64]); // signature corrompue
+
+        match receiver.receive_peer_event(T0, &forged) {
+            PeerEventOutcome::Rejected(r) => {
+                assert!(r.contains("signature"), "got: {r}");
+            }
+            other => panic!("forged event must be rejected, got {other:?}"),
+        }
+        // Ni pénalité pour la victime usurpée…
+        assert_eq!(receiver.reputation.abuse_level(&victim_pub, T0), 0.0);
+        assert_eq!(
+            receiver.reputation.action_for(&victim_pub, T0),
+            TrustAction::Accept
+        );
+        // …ni entrée dans le gossip (échec fermé).
+        assert_eq!(receiver.gossip.known_count(), 0);
+    }
+
+    /// Les événements du nœud LUI-MÊME qui reviennent via un relais ne sont
+    /// ni comptés ni pénalisés (sinon un nœud honnête s'auto-throttlrait).
+    #[tokio::test]
+    async fn test_own_relayed_events_never_self_throttled() {
+        let mut node = Node::new(NodeConfig::default());
+        let event = node
+            .publish_alert("message légitime".to_string())
+            .await
+            .unwrap();
+        let me = node.identity.pubkey_hex();
+
+        // 20 relais bavards renvoient le même événement au nœud.
+        for i in 0..20u64 {
+            let outcome = node.receive_peer_event(T0 + i, &event);
+            assert!(
+                !matches!(outcome, PeerEventOutcome::Rejected(_)),
+                "own relayed event must never be rejected: {outcome:?}"
+            );
+        }
+        assert_eq!(node.reputation.abuse_level(&me, T0 + 20), 0.0);
+        assert_eq!(
+            node.reputation.action_for(&me, T0 + 20),
+            TrustAction::Accept
+        );
+    }
+
+    /// NON-RÉGRESSION — flux normal d'un pair honnête à travers le gate :
+    /// alertes stockées, endossements appliqués, rien ne change.
+    #[tokio::test]
+    async fn test_honest_peer_flow_unchanged_through_gate() {
+        let mut alice = Node::new(NodeConfig::default());
+        let mut bob = Node::new(NodeConfig::default());
+        let carol = test_identity(6);
+
+        // Alice approuve Bob ; Bob endosse Carol ; Alice intègre l'endossement
+        // reçu via le dispatcher (chemin identique au comportement pré-2.7).
+        alice
+            .reputation
+            .set_trusted(&bob.identity.pubkey_hex(), crate::reputation::GENESIS_TRUST);
+        let endorsement = bob
+            .endorse(&carol.pubkey_hex())
+            .expect("bob endorses carol");
+        match alice.receive_peer_event(T0, &endorsement) {
+            PeerEventOutcome::EndorsementApplied => {}
+            other => panic!("endorsement must be applied, got {other:?}"),
+        }
+        assert_eq!(alice.reputation.score(&carol.pubkey_hex()), 0.4);
+
+        // Deux alertes honnêtes espacées de 15 s (< budget, > intervalle de
+        // publication simulé côté émission) traversent sans accroc. Carol est
+        // inconnue d'Alice : elle paie le PoW maximal — exactement le régime
+        // préexistant pour un nouveau venu, inchangé par le gate.
+        let m1 = signed_spam_alert(&carol, "coupure d'eau secteur nord", MAX_POW_DIFFICULTY);
+        let m2 = signed_spam_alert(&carol, "point d'eau ouvert au gymnase", MAX_POW_DIFFICULTY);
+        assert!(matches!(
+            alice.receive_peer_event(T0 + 1, &m1),
+            PeerEventOutcome::AlertStored
+        ));
+        assert!(matches!(
+            alice.receive_peer_event(T0 + 15, &m2),
+            PeerEventOutcome::AlertStored
+        ));
+        assert_eq!(
+            alice.reputation.abuse_level(&carol.pubkey_hex(), T0 + 15),
+            0.0
+        );
+        assert_eq!(alice.message_store.total_count(), 2);
     }
 }
