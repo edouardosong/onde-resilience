@@ -97,6 +97,26 @@ pub enum OndeMessageType {
     /// exige un rapporteur **de confiance** et se déduplique
     /// ([`crate::reputation::ReputationSystem::apply_remote_abuse_report`]).
     AbuseReport,
+    /// Social Tuitter/Redit — publication (post ou tuit).
+    ///
+    /// Extension **additive** du format wire (T13 Fusion) : codes 16..21
+    /// attribués après le 15 (`AbuseReport`), aucun code existant n'est
+    /// renuméroté. `content` porte le payload JSON du module [`crate::social`]
+    /// ; `sig` est la signature Ed25519 de l'auteur sur l'ID canonique ; le
+    /// PoW adaptatif de la réputation s'applique. Un pair ancien rejette
+    /// proprement ces kinds inconnus (échec fermé au décodage wire).
+    SocialPost,
+    /// Social Tuitter/Redit — commentaire imbriqué sous un post.
+    SocialComment,
+    /// Social Tuitter/Redit — vote (+1/-1) sur un post ou un commentaire.
+    SocialVote,
+    /// Social Tuitter/Redit — abonnement à un auteur (Tuitter follow /
+    /// Redit adhésion de communauté).
+    SocialFollow,
+    /// Social Tuitter/Redit — message privé entre deux paires de clés.
+    SocialMessage,
+    /// Social Tuitter/Redit — signalement de modération locale d'un contenu.
+    SocialModeration,
 }
 
 /// Nostr-style event for the mesh network
@@ -225,6 +245,15 @@ impl MeshEvent {
             // Phase 2.7 : code 15 — endossement négatif (signalement d'abus)
             // propagé dans le gossip, toujours sans renumérotation.
             OndeMessageType::AbuseReport => 15,
+            // T13 Fusion : codes 16..21 — événements sociaux Tuitter/Redit,
+            // renumérotation ADDITIVE après le 15 (aucun code existant ne
+            // bouge ; voir docs/adr/ pour la décision de numérotation).
+            OndeMessageType::SocialPost => 16,
+            OndeMessageType::SocialComment => 17,
+            OndeMessageType::SocialVote => 18,
+            OndeMessageType::SocialFollow => 19,
+            OndeMessageType::SocialMessage => 20,
+            OndeMessageType::SocialModeration => 21,
         }
     }
 
@@ -509,6 +538,13 @@ impl MeshEvent {
             14 => OndeMessageType::IdentityRotation,
             // Phase 2.7 : endossement négatif (signalement d'abus).
             15 => OndeMessageType::AbuseReport,
+            // T13 Fusion : événements sociaux Tuitter/Redit (additif).
+            16 => OndeMessageType::SocialPost,
+            17 => OndeMessageType::SocialComment,
+            18 => OndeMessageType::SocialVote,
+            19 => OndeMessageType::SocialFollow,
+            20 => OndeMessageType::SocialMessage,
+            21 => OndeMessageType::SocialModeration,
             other => return Err(format!("wire: unknown kind code {other}")),
         })
     }
@@ -1318,6 +1354,86 @@ mod tests {
         assert_eq!(report.offender, "bb".repeat(32));
         assert_eq!(report.reason, 1);
         assert_eq!(report.reporter, decoded.pubkey);
+    }
+
+    #[test]
+    fn test_social_kinds_additive_after_abuse_report() {
+        // T13 Fusion : les six kinds sociaux sont renumérotés ADDITIVEMENT
+        // après le 15 (AbuseReport) — codes 16..21. Le test de stabilité est
+        // étendu à [0..21] : aucun code existant ne bouge, chaque kind social
+        // fait un roundtrip wire complet (signature + PoW + décodage).
+        let all: Vec<(OndeMessageType, u8)> = vec![
+            (OndeMessageType::Alert, 0),
+            (OndeMessageType::MutualAid, 1),
+            (OndeMessageType::VoiceMemo, 2),
+            (OndeMessageType::Transcription, 3),
+            (OndeMessageType::Transaction, 4),
+            (OndeMessageType::AiQuery, 5),
+            (OndeMessageType::AiResponse, 6),
+            (OndeMessageType::FileShareRequest, 7),
+            (OndeMessageType::Heartbeat, 8),
+            (OndeMessageType::UpdateAnnounce, 9),
+            (OndeMessageType::UpdateManifest, 10),
+            (OndeMessageType::UpdateChunk, 11),
+            (OndeMessageType::UpdateRequest, 12),
+            (OndeMessageType::Endorsement, 13),
+            (OndeMessageType::IdentityRotation, 14),
+            // Phase 2.7 — le kind 15 reste l'AbuseReport anti-abus.
+            (OndeMessageType::AbuseReport, 15),
+            // T13 Fusion — kinds sociaux additifs 16..21.
+            (OndeMessageType::SocialPost, 16),
+            (OndeMessageType::SocialComment, 17),
+            (OndeMessageType::SocialVote, 18),
+            (OndeMessageType::SocialFollow, 19),
+            (OndeMessageType::SocialMessage, 20),
+            (OndeMessageType::SocialModeration, 21),
+        ];
+        let codes: Vec<u8> = all.iter().map(|(k, _)| MeshEvent::kind_code(k)).collect();
+        assert_eq!(
+            codes,
+            vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
+        );
+
+        let identity = Identity::generate();
+        for (kind, expected) in &all[16..] {
+            let mut event = MeshEvent::new_signed(
+                &identity,
+                kind.clone(),
+                format!("social payload {expected}"),
+                vec!["platform=Tuitter".to_string()],
+            );
+            event.pow_difficulty = 1;
+            assert!(event.compute_pow(1_000_000), "PoW must succeed");
+            let wire = event.to_wire_bytes().expect("social event must serialize");
+            let decoded = MeshEvent::from_wire_bytes(&wire).expect("social event must decode");
+            assert_eq!(decoded.kind, *kind);
+            assert!(decoded.validate().is_ok());
+            assert_eq!(MeshEvent::kind_code(&decoded.kind), *expected);
+        }
+    }
+
+    #[test]
+    fn test_social_kind_ids_differ_for_same_content() {
+        // Des kinds sociaux différents produisent des IDs canoniques
+        // différents (même contenu, même auteur, même timestamp).
+        let pk = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+        let tags = vec!["platform=Tuitter".to_string()];
+        let ids: Vec<String> = [
+            OndeMessageType::SocialPost,
+            OndeMessageType::SocialComment,
+            OndeMessageType::SocialVote,
+            OndeMessageType::SocialFollow,
+            OndeMessageType::SocialMessage,
+            OndeMessageType::SocialModeration,
+        ]
+        .iter()
+        .map(|k| MeshEvent::compute_id(pk, 42, k, &tags, "x"))
+        .collect();
+        for i in 0..ids.len() {
+            for j in (i + 1)..ids.len() {
+                assert_ne!(ids[i], ids[j]);
+            }
+        }
     }
 
     #[test]
