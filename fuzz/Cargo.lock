@@ -583,6 +583,7 @@ dependencies = [
  "dtn-router",
  "libfuzzer-sys",
  "onde-core",
+ "serde_json",
  "zim-parser",
 ]
 
@@ -1100,6 +1101,7 @@ version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
+ "thiserror",
  "tokio",
  "tracing",
 ]
