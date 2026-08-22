@@ -319,13 +319,18 @@ pub enum AbuseReportOutcome {
 }
 
 /// Résultat du traitement d'un événement social reçu du gossip (T13 Fusion).
+///
+/// « Stocké » signifie **accepté et relayé** : l'écriture dans le cache
+/// SQLite local est best-effort — un cache-miss (commentaire orphelin,
+/// disque plein, base indisponible) ne change PAS l'issue et ne pénalise
+/// jamais l'auteur distant.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SocialEventOutcome {
     /// Message non social (ignoré).
     Ignored,
-    /// Post stocké (id).
+    /// Post accepté (id).
     PostStored(String),
-    /// Commentaire stocké (id).
+    /// Commentaire accepté (id) — éventuellement bufferisé en attendant son post.
     CommentStored(String),
     /// Vote appliqué.
     VoteApplied,
@@ -335,6 +340,46 @@ pub enum SocialEventOutcome {
     MessageStored,
     /// Signalement de modération enregistré.
     ModerationApplied,
+}
+
+// T13-checker M3 — plafonds BRUTS (octets de `content`) appliqués AVANT tout
+// décodage JSON, même justification que Endorsement/AbuseReport (1024 o) :
+// borner le travail du parseur et la mémoire retenue, rejeter proprement et
+// de façon attribuable un payload signé surdimensionné. Les plafonds post/
+// commentaire couvrent le pire cas valide (40 000 caractères × 4 octets
+// UTF-8 × échappement JSON ≈ 320 ko).
+const SOCIAL_POST_MAX_BYTES: usize = 512 * 1024;
+const SOCIAL_COMMENT_MAX_BYTES: usize = 512 * 1024;
+const SOCIAL_VOTE_MAX_BYTES: usize = 4 * 1024;
+const SOCIAL_FOLLOW_MAX_BYTES: usize = 4 * 1024;
+const SOCIAL_MESSAGE_MAX_BYTES: usize = 16 * 1024;
+const SOCIAL_MODERATION_MAX_BYTES: usize = 8 * 1024;
+
+/// Vérifie le plafond brut d'un payload social avant décodage.
+fn check_social_payload_size(kind: &str, content: &str, max_bytes: usize) -> Result<(), String> {
+    if content.len() > max_bytes {
+        return Err(format!("{kind} payload too large (max {max_bytes} bytes)"));
+    }
+    Ok(())
+}
+
+/// Valide une référence de cible sociale (id de post/commentaire/cible).
+fn validate_social_target_ref(value: &str, field: &str) -> Result<(), String> {
+    if value.is_empty() || value.chars().count() > crate::social::MAX_SOCIAL_ID {
+        return Err(format!(
+            "{field} must contain 1..={} characters",
+            crate::social::MAX_SOCIAL_ID
+        ));
+    }
+    Ok(())
+}
+
+/// Valide une référence à une clé publique hexadécimale 32 octets.
+fn validate_social_pubkey_ref(value: &str, field: &str) -> Result<(), String> {
+    if value.len() != 64 || !value.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(format!("{field} must be a 32-byte hex pubkey"));
+    }
+    Ok(())
 }
 
 /// Parse le nom d'une plateforme sociale accepté par l'API publique.
@@ -1814,7 +1859,6 @@ impl Node {
             title: title.map(|t| t.to_string()),
             body: body.to_string(),
             community_slug: community_slug.map(|s| s.to_string()),
-            parent_id: None,
             media_urls: vec![],
         };
         post.validate()?;
@@ -1832,10 +1876,16 @@ impl Node {
         self.gossip
             .add_event_with_reputation(event.clone(), &self.reputation)?;
 
-        // Cache matérialisé local.
+        // Cache matérialisé local (best-effort — un échec local ne fait pas
+        // échouer une publication déjà relayée). `ensure_user` ne réinitialise
+        // JAMAIS le profil existant du propriétaire.
         if let Some(store) = &self.social_store {
-            store.upsert_user(&pubkey, &self.config.display_name, "", "")?;
-            store.insert_post(&post)?;
+            if let Err(cache_err) = store.ensure_user(&pubkey) {
+                tracing::warn!("social cache write failed (author): {cache_err}");
+            }
+            if let Err(cache_err) = store.insert_post(&post) {
+                tracing::warn!("social cache write failed (own post): {cache_err}");
+            }
         }
 
         self.record_publish();
@@ -1880,7 +1930,9 @@ impl Node {
             .add_event_with_reputation(event.clone(), &self.reputation)?;
 
         if let Some(store) = &self.social_store {
-            store.insert_comment(&comment)?;
+            if let Err(cache_err) = store.insert_comment(&comment) {
+                tracing::warn!("social cache write failed (own comment): {cache_err}");
+            }
         }
         Ok(event)
     }
@@ -1897,8 +1949,26 @@ impl Node {
         &mut self,
         event: &MeshEvent,
     ) -> Result<SocialEventOutcome, String> {
+        // SÉPARATION DES RÉGIMES D'ERREUR (T13-checker H1) :
+        // 1. Payload invalide (dépassement de plafond brut, JSON illisible,
+        //    bornes de domaine violées) ou PoW insuffisant → `Err` : violation
+        //    ATTRIBUABLE (l'événement est signé par son auteur), classifiée
+        //    par le dispatcher comme les alertes corrompues.
+        // 2. Échec du cache local (`social_store` : disque plein, FK-miss,
+        //    base verrouillée…) → JAMAIS pénalisant : le store est un cache
+        //    matérialisé, pas une autorité ; l'événement est déjà relayé dans
+        //    le gossip. L'écriture est best-effort (warning de traçabilité).
+        macro_rules! cache_write {
+            ($scope:expr, $expr:expr) => {
+                if let Err(cache_err) = $expr {
+                    tracing::warn!("social cache write failed ({}): {}", $scope, cache_err);
+                }
+            };
+        }
+
         match event.kind {
             OndeMessageType::SocialPost => {
+                check_social_payload_size("social post", &event.content, SOCIAL_POST_MAX_BYTES)?;
                 let post: SocialPost = serde_json::from_str(&event.content)
                     .map_err(|e| format!("social post decode: {e}"))?;
                 post.validate()?;
@@ -1906,12 +1976,17 @@ impl Node {
                 self.gossip
                     .add_event_with_reputation(event.clone(), &self.reputation)?;
                 if let Some(store) = &self.social_store {
-                    store.upsert_user(&post.author_pubkey, "", "", "")?;
-                    store.insert_post(&post)?;
+                    cache_write!("post author", store.ensure_user(&post.author_pubkey));
+                    cache_write!("post insert", store.insert_post(&post));
                 }
                 Ok(SocialEventOutcome::PostStored(post.id))
             }
             OndeMessageType::SocialComment => {
+                check_social_payload_size(
+                    "social comment",
+                    &event.content,
+                    SOCIAL_COMMENT_MAX_BYTES,
+                )?;
                 let comment: SocialComment = serde_json::from_str(&event.content)
                     .map_err(|e| format!("social comment decode: {e}"))?;
                 comment.validate()?;
@@ -1919,82 +1994,123 @@ impl Node {
                 self.gossip
                     .add_event_with_reputation(event.clone(), &self.reputation)?;
                 if let Some(store) = &self.social_store {
-                    store.upsert_user(&comment.author_pubkey, "", "", "")?;
-                    store.insert_comment(&comment)?;
+                    cache_write!("comment author", store.ensure_user(&comment.author_pubkey));
+                    // Commentaire orphelin (post/parent pas encore arrivé) :
+                    // bufferisé côté store, JAMAIS une erreur pénalisante.
+                    cache_write!("comment insert", store.insert_comment(&comment).map(|_| ()));
                 }
                 Ok(SocialEventOutcome::CommentStored(comment.id))
             }
             OndeMessageType::SocialVote => {
+                check_social_payload_size("vote", &event.content, SOCIAL_VOTE_MAX_BYTES)?;
                 let payload: serde_json::Value = serde_json::from_str(&event.content)
                     .map_err(|e| format!("vote payload decode: {e}"))?;
                 let target_id = payload["target_id"].as_str().unwrap_or("");
                 let direction = payload["direction"].as_i64().unwrap_or(1);
                 let target_table = payload["target_table"].as_str().unwrap_or("posts");
-                if target_id.is_empty() {
-                    return Err("vote payload missing target_id".to_string());
+                validate_social_target_ref(target_id, "vote target_id")?;
+                if !(-1..=1).contains(&direction) {
+                    return Err("vote direction must be -1 or 1".to_string());
+                }
+                if !matches!(target_table, "posts" | "comments") {
+                    return Err(format!("unknown vote target table: {target_table}"));
                 }
                 event.validate_with_reputation(&self.reputation)?;
                 self.gossip
                     .add_event_with_reputation(event.clone(), &self.reputation)?;
                 if let Some(store) = &self.social_store {
-                    store.vote(
-                        &event.pubkey,
-                        target_id,
-                        direction.clamp(-1, 1) as i32,
-                        target_table,
-                    )?;
+                    cache_write!(
+                        "vote",
+                        store
+                            .vote(&event.pubkey, target_id, direction as i32, target_table)
+                            .map(|_| ())
+                    );
                 }
                 Ok(SocialEventOutcome::VoteApplied)
             }
             OndeMessageType::SocialFollow => {
+                check_social_payload_size("follow", &event.content, SOCIAL_FOLLOW_MAX_BYTES)?;
                 let payload: serde_json::Value = serde_json::from_str(&event.content)
                     .map_err(|e| format!("follow payload decode: {e}"))?;
                 let followed = payload["followed"].as_str().unwrap_or("");
                 let unfollow = payload["unfollow"].as_bool().unwrap_or(false);
-                if followed.is_empty() {
-                    return Err("follow payload missing followed".to_string());
-                }
+                validate_social_pubkey_ref(followed, "follow target")?;
                 event.validate_with_reputation(&self.reputation)?;
                 self.gossip
                     .add_event_with_reputation(event.clone(), &self.reputation)?;
                 if let Some(store) = &self.social_store {
                     if unfollow {
-                        store.unfollow(&event.pubkey, followed)?;
+                        cache_write!("unfollow", store.unfollow(&event.pubkey, followed));
                     } else {
-                        store.follow(&event.pubkey, followed)?;
+                        cache_write!("follow", store.follow(&event.pubkey, followed));
                     }
                 }
                 Ok(SocialEventOutcome::FollowApplied)
             }
             OndeMessageType::SocialMessage => {
+                check_social_payload_size(
+                    "private message",
+                    &event.content,
+                    SOCIAL_MESSAGE_MAX_BYTES,
+                )?;
                 let payload: serde_json::Value = serde_json::from_str(&event.content)
                     .map_err(|e| format!("message payload decode: {e}"))?;
                 let recipient = payload["recipient"].as_str().unwrap_or("");
                 let body = payload["body"].as_str().unwrap_or("");
-                if recipient.is_empty() || body.is_empty() {
-                    return Err("message payload missing recipient or body".to_string());
+                validate_social_pubkey_ref(recipient, "message recipient")?;
+                if body.trim().is_empty() {
+                    return Err("message body cannot be empty".to_string());
+                }
+                if body.chars().count() > crate::social::MAX_PRIVATE_MESSAGE_BODY {
+                    return Err(format!(
+                        "message body exceeds {} characters",
+                        crate::social::MAX_PRIVATE_MESSAGE_BODY
+                    ));
                 }
                 event.validate_with_reputation(&self.reputation)?;
                 self.gossip
                     .add_event_with_reputation(event.clone(), &self.reputation)?;
                 if let Some(store) = &self.social_store {
-                    store.insert_message(&generate_social_id(), &event.pubkey, recipient, body)?;
+                    cache_write!(
+                        "message insert",
+                        store.insert_message(&generate_social_id(), &event.pubkey, recipient, body)
+                    );
                 }
                 Ok(SocialEventOutcome::MessageStored)
             }
             OndeMessageType::SocialModeration => {
+                check_social_payload_size(
+                    "moderation report",
+                    &event.content,
+                    SOCIAL_MODERATION_MAX_BYTES,
+                )?;
                 let payload: serde_json::Value = serde_json::from_str(&event.content)
                     .map_err(|e| format!("moderation payload decode: {e}"))?;
                 let target_id = payload["target_id"].as_str().unwrap_or("");
                 let reason = payload["reason"].as_str().unwrap_or("");
-                if target_id.is_empty() || reason.is_empty() {
-                    return Err("moderation payload missing target_id or reason".to_string());
+                validate_social_target_ref(target_id, "moderation target_id")?;
+                if reason.trim().is_empty() {
+                    return Err("moderation reason cannot be empty".to_string());
+                }
+                if reason.chars().count() > crate::social::MAX_MODERATION_REASON {
+                    return Err(format!(
+                        "moderation reason exceeds {} characters",
+                        crate::social::MAX_MODERATION_REASON
+                    ));
                 }
                 event.validate_with_reputation(&self.reputation)?;
                 self.gossip
                     .add_event_with_reputation(event.clone(), &self.reputation)?;
                 if let Some(store) = &self.social_store {
-                    store.submit_report(&generate_social_id(), &event.pubkey, target_id, reason)?;
+                    cache_write!(
+                        "report insert",
+                        store.submit_report(
+                            &generate_social_id(),
+                            &event.pubkey,
+                            target_id,
+                            reason
+                        )
+                    );
                 }
                 Ok(SocialEventOutcome::ModerationApplied)
             }
@@ -3010,7 +3126,6 @@ mod tests {
             title: None,
             body: body.to_string(),
             community_slug: None,
-            parent_id: None,
             media_urls: vec![],
         };
         let content = serde_json::to_string(&post).expect("serialize SocialPost");
@@ -3189,5 +3304,198 @@ mod tests {
             .unwrap_err();
         assert!(err.contains("unknown social platform"));
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn test_orphan_comment_before_post_no_penalty() {
+        // T13-checker H1 : un commentaire arrivé AVANT son post (banal en
+        // DTN/gossip) est ACCEPTÉ par le dispatcher — pas de violation, pas
+        // de pénalité pour l'auteur honnête — puis rejoué quand le post
+        // arrive enfin.
+        let dir = std::env::temp_dir().join(format!("onde-node-orphan-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("social.sqlite3");
+        let mut receiver = Node::new(NodeConfig {
+            social_db_path: Some(db.to_string_lossy().to_string()),
+            ..Default::default()
+        });
+        let alice = test_identity(1);
+
+        let comment = crate::social::SocialComment {
+            id: "c-early".to_string(),
+            platform: crate::social::SocialPlatform::Tuitter,
+            author_pubkey: alice.pubkey_hex(),
+            post_id: "p-late".to_string(),
+            parent_id: None,
+            body: "commentaire pressé".to_string(),
+        };
+        let content = serde_json::to_string(&comment).unwrap();
+        let mut ev = MeshEvent::new_signed(&alice, OndeMessageType::SocialComment, content, vec![])
+            .with_pow_difficulty(MAX_POW_DIFFICULTY);
+        assert!(ev.compute_pow(4_000_000));
+
+        // Le commentaire arrive le premier → accepté SANS pénalité.
+        match receiver.receive_peer_event(T0, &ev) {
+            PeerEventOutcome::Social(SocialEventOutcome::CommentStored(id)) => {
+                assert_eq!(id, "c-early")
+            }
+            other => panic!("orphan comment must be accepted, got {other:?}"),
+        }
+        assert_eq!(
+            receiver.reputation.abuse_level(&alice.pubkey_hex(), T0),
+            0.0,
+            "an honest early comment must NEVER be penalized"
+        );
+
+        // Le post arrive ensuite → le commentaire bufferisé est rejoué.
+        let post = signed_social_post(&alice, "p-late", "le post retardé", MAX_POW_DIFFICULTY);
+        match receiver.receive_peer_event(T0 + 1, &post) {
+            PeerEventOutcome::Social(SocialEventOutcome::PostStored(_)) => {}
+            other => panic!("late post must be stored, got {other:?}"),
+        }
+        let comments = receiver
+            .social_store
+            .as_ref()
+            .unwrap()
+            .list_comments("p-late")
+            .unwrap();
+        assert_eq!(comments.len(), 1, "buffered comment must be replayed");
+        assert_eq!(comments[0].id, "c-early");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn test_local_cache_failure_never_penalizes_author() {
+        // T13-checker H1 : sans cache social (base inouvrable), les
+        // événements sociaux restent acceptés et relayés — l'échec d'un
+        // stockage LOCAL n'est jamais imputé à l'auteur distant.
+        let mut receiver = Node::new(NodeConfig {
+            social_db_path: Some("/proc/onde-impossible/social.sqlite3".to_string()),
+            ..Default::default()
+        });
+        assert!(
+            receiver.social_store.is_none(),
+            "store must degrade to None"
+        );
+        let alice = test_identity(1);
+
+        let event = signed_social_post(&alice, "p-nocache", "tuit sans cache", MAX_POW_DIFFICULTY);
+        match receiver.receive_peer_event(T0, &event) {
+            PeerEventOutcome::Social(SocialEventOutcome::PostStored(_)) => {}
+            other => panic!("accepted outcome expected without cache, got {other:?}"),
+        }
+        assert!(receiver.gossip.is_known(&event.id), "must still be relayed");
+        assert_eq!(
+            receiver.reputation.abuse_level(&alice.pubkey_hex(), T0),
+            0.0
+        );
+    }
+
+    #[tokio::test]
+    async fn test_oversized_social_payload_rejected_and_penalized() {
+        // T13-checker M3 : plafond brut AVANT parse — rejet propre, non
+        // panique, et violation ATTRIBUABLE (payload signé surdimensionné).
+        let mut receiver = Node::new(NodeConfig::default());
+        let mallory = test_identity(1);
+
+        // Post Redit (borne domaine 40 000 caractères) dépassant le plafond
+        // BRUT wire : le plafond taille doit parler AVANT la validation.
+        let redit_post = crate::social::SocialPost {
+            id: "p-huge".to_string(),
+            platform: crate::social::SocialPlatform::Redit,
+            author_pubkey: mallory.pubkey_hex(),
+            title: Some("Trop long".to_string()),
+            // 600 ko > plafond brut de 512 kio — la taille parle AVANT tout.
+            body: "x".repeat(SOCIAL_POST_MAX_BYTES + 100_000),
+            community_slug: Some("test".to_string()),
+            media_urls: vec![],
+        };
+        let content = serde_json::to_string(&redit_post).unwrap();
+        let mut oversized =
+            MeshEvent::new_signed(&mallory, OndeMessageType::SocialPost, content, vec![])
+                .with_pow_difficulty(MAX_POW_DIFFICULTY);
+        assert!(oversized.compute_pow(4_000_000));
+        match receiver.receive_peer_event(T0, &oversized) {
+            PeerEventOutcome::Rejected(r) => {
+                assert!(r.contains("payload too large"), "got {r}")
+            }
+            other => panic!("oversized payload must be rejected, got {other:?}"),
+        }
+        assert!(
+            receiver.reputation.abuse_level(&mallory.pubkey_hex(), T0) > 0.0,
+            "signed oversize must weigh on the author"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_social_small_payload_domain_bounds() {
+        // T13-checker M3 : bornes de domaine des petits payloads (message
+        // privé, signalement, vote) — rejet propre et attribuable.
+        let mut receiver = Node::new(NodeConfig::default());
+        let mallory = test_identity(1);
+        let recipient = "aa".repeat(32);
+
+        let send_signed_json =
+            |identity: &Identity, kind: OndeMessageType, value: serde_json::Value| {
+                let content = serde_json::to_string(&value).unwrap();
+                let mut ev = MeshEvent::new_signed(identity, kind, content, vec![])
+                    .with_pow_difficulty(MAX_POW_DIFFICULTY);
+                assert!(ev.compute_pow(4_000_000));
+                ev
+            };
+
+        // Message privé : corps dépassant la borne domaine.
+        let big_body = "y".repeat(crate::social::MAX_PRIVATE_MESSAGE_BODY + 1);
+        let ev = send_signed_json(
+            &mallory,
+            OndeMessageType::SocialMessage,
+            serde_json::json!({ "recipient": recipient, "body": big_body }),
+        );
+        match receiver.receive_peer_event(T0, &ev) {
+            PeerEventOutcome::Rejected(r) => assert!(r.contains("exceeds"), "got {r}"),
+            other => panic!("oversize message body must be rejected, got {other:?}"),
+        }
+
+        // Message privé : destinataire non hex64.
+        let ev = send_signed_json(
+            &mallory,
+            OndeMessageType::SocialMessage,
+            serde_json::json!({ "recipient": "pas-une-clef", "body": "salut" }),
+        );
+        match receiver.receive_peer_event(T0 + 1, &ev) {
+            PeerEventOutcome::Rejected(r) => assert!(r.contains("hex pubkey"), "got {r}"),
+            other => panic!("bad recipient must be rejected, got {other:?}"),
+        }
+
+        // Signalement : motif vide.
+        let ev = send_signed_json(
+            &mallory,
+            OndeMessageType::SocialModeration,
+            serde_json::json!({ "target_id": "p-1", "reason": "   " }),
+        );
+        match receiver.receive_peer_event(T0 + 2, &ev) {
+            PeerEventOutcome::Rejected(r) => assert!(r.contains("reason"), "got {r}"),
+            other => panic!("empty reason must be rejected, got {other:?}"),
+        }
+
+        // Vote : direction hors domaine.
+        let ev = send_signed_json(
+            &mallory,
+            OndeMessageType::SocialVote,
+            serde_json::json!({ "target_id": "p-1", "direction": 7, "target_table": "posts" }),
+        );
+        match receiver.receive_peer_event(T0 + 3, &ev) {
+            PeerEventOutcome::Rejected(r) => assert!(r.contains("direction"), "got {r}"),
+            other => panic!("out-of-domain direction must be rejected, got {other:?}"),
+        }
+
+        // Toutes ces violations sont attribuables.
+        assert!(
+            receiver
+                .reputation
+                .abuse_level(&mallory.pubkey_hex(), T0 + 3)
+                > 0.0,
+            "signed out-of-domain payloads must weigh on the author"
+        );
     }
 }
