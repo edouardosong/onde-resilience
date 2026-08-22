@@ -199,6 +199,28 @@ pub struct TokenizedInput {
     pub n_tokens: usize,
 }
 
+/// Validate accumulated detokenizer byte pieces as UTF-8 text.
+///
+/// llama.cpp may emit byte-fallback pieces that split a multibyte UTF-8
+/// character across several tokens, so pieces cannot be validated one by one.
+/// The full byte stream is therefore checked once here: no panics, no
+/// unchecked conversion. Returns a clean error for invalid UTF-8.
+pub fn decode_token_pieces(bytes: &[u8]) -> Result<String, String> {
+    String::from_utf8(bytes.to_vec())
+        .map_err(|e| format!("generated text contains invalid UTF-8: {}", e.utf8_error()))
+}
+
+/// Byte-level search for stop sequences in not-yet-decoded token pieces.
+///
+/// Works on raw bytes because the accumulated pieces may end in the middle of
+/// a multibyte character. Empty stop tokens are ignored.
+pub fn contains_stop_sequence(bytes: &[u8], stop_tokens: &[String]) -> bool {
+    stop_tokens
+        .iter()
+        .filter(|s| !s.is_empty() && s.len() <= bytes.len())
+        .any(|s| bytes.windows(s.len()).any(|w| w == s.as_bytes()))
+}
+
 /// Generation result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerationResult {
@@ -272,7 +294,10 @@ impl LlamaContext {
             let c = unsafe { llama_cpp_sys::llama_new_context_with_model(m, cp) };
             if c.is_null() {
                 unsafe { llama_cpp_sys::llama_free_model(m) };
-                return Err(format!("Failed to create llama context for: {}", model_path));
+                return Err(format!(
+                    "Failed to create llama context for: {}",
+                    model_path
+                ));
             }
 
             self.model_ptr = m;
@@ -326,7 +351,7 @@ impl LlamaContext {
                 c_prompt.as_bytes().len() as i32,
                 prompt_tokens.as_mut_ptr(),
                 n_ctx as i32,
-                true, // add BOS
+                true,  // add BOS
                 false, // no special-token parsing
             )
         };
@@ -358,7 +383,9 @@ impl LlamaContext {
         // 3. Sampling loop: until max_tokens, EOS or a stop sequence.
         let n_vocab = unsafe { llama_cpp_sys::llama_n_vocab(self.model_ptr) };
         let eos = unsafe { llama_cpp_sys::llama_token_eos(self.model_ptr) };
-        let mut text = String::new();
+        // Accumulated raw pieces; validated once at the end by
+        // [`decode_token_pieces`] (checked — no from_utf8_unchecked).
+        let mut text_bytes: Vec<u8> = Vec::new();
         let mut n_generated: u32 = 0;
 
         for _ in 0..self.config.max_tokens {
@@ -370,7 +397,9 @@ impl LlamaContext {
             let mut cdata: Vec<llama_cpp_sys::llama_token_data> =
                 vec![unsafe { std::mem::zeroed() }; n_vocab as usize];
             unsafe {
-                for (i, x) in std::slice::from_raw_parts(logits, n_vocab as usize).iter().enumerate()
+                for (i, x) in std::slice::from_raw_parts(logits, n_vocab as usize)
+                    .iter()
+                    .enumerate()
                 {
                     cdata[i].id = i as llama_cpp_sys::llama_token;
                     cdata[i].logit = *x;
@@ -384,10 +413,24 @@ impl LlamaContext {
 
             unsafe {
                 if self.config.temperature > 0.0 {
-                    llama_cpp_sys::llama_sample_temp(self.ctx_ptr, &mut candidates, self.config.temperature);
+                    llama_cpp_sys::llama_sample_temp(
+                        self.ctx_ptr,
+                        &mut candidates,
+                        self.config.temperature,
+                    );
                 }
-                llama_cpp_sys::llama_sample_top_k(self.ctx_ptr, &mut candidates, self.config.top_k as i32, 1);
-                llama_cpp_sys::llama_sample_top_p(self.ctx_ptr, &mut candidates, self.config.top_p, 1);
+                llama_cpp_sys::llama_sample_top_k(
+                    self.ctx_ptr,
+                    &mut candidates,
+                    self.config.top_k as i32,
+                    1,
+                );
+                llama_cpp_sys::llama_sample_top_p(
+                    self.ctx_ptr,
+                    &mut candidates,
+                    self.config.top_p,
+                    1,
+                );
                 llama_cpp_sys::llama_sample_softmax(self.ctx_ptr, &mut candidates);
             }
             let token = unsafe { llama_cpp_sys::llama_sample_token(self.ctx_ptr, &mut candidates) };
@@ -409,10 +452,10 @@ impl LlamaContext {
             if n_piece < 0 {
                 return Err("Failed to detokenize a generated token (invalid UTF-8)".to_string());
             }
-            text.push_str(unsafe { std::str::from_utf8_unchecked(&buf[..n_piece as usize]) });
+            text_bytes.extend_from_slice(&buf[..n_piece as usize]);
 
-            // Stop sequences.
-            if self.config.stop_tokens.iter().any(|s| !s.is_empty() && text.contains(s.as_str())) {
+            // Stop sequences (byte-level: pieces may end mid-character).
+            if contains_stop_sequence(&text_bytes, &self.config.stop_tokens) {
                 break;
             }
 
@@ -431,9 +474,15 @@ impl LlamaContext {
             let rc = unsafe { llama_cpp_sys::llama_decode(self.ctx_ptr, nb) };
             unsafe { llama_cpp_sys::llama_batch_free(nb) };
             if rc != 0 {
-                return Err(format!("llama_decode failed (token {}) with code {}", n_generated, rc));
+                return Err(format!(
+                    "llama_decode failed (token {}) with code {}",
+                    n_generated, rc
+                ));
             }
         }
+
+        // Checked conversion: clean error instead of latent UB on invalid UTF-8.
+        let text = decode_token_pieces(&text_bytes)?;
 
         let gen_time_ms = start.elapsed().as_millis() as u64;
         Ok(GenerationResult {
@@ -563,6 +612,95 @@ mod tests {
         assert_eq!(Quantization::Q2K.ram_per_billion_params(), 450);
     }
 
+    // ---- Debt fix #1: checked detokenization (no UB, no panic) ----
+
+    #[test]
+    fn test_decode_token_pieces_ascii_and_multibyte() {
+        let acc = b"bo".to_vec();
+        assert_eq!(decode_token_pieces(&acc).unwrap(), "bo");
+
+        let acc = "caf\u{e9}".as_bytes().to_vec();
+        assert_eq!(decode_token_pieces(&acc).unwrap(), "caf\u{e9}");
+    }
+
+    /// A multibyte UTF-8 character cut in the middle by byte-fallback pieces
+    /// must still decode once all pieces are accumulated.
+    #[test]
+    fn test_decode_token_pieces_handles_multibyte_split_across_tokens() {
+        let mut acc: Vec<u8> = Vec::new();
+        acc.extend_from_slice(&[b'c', 0xC3]); // first half of 'é' (U+00E9)
+        acc.extend_from_slice(&[0xA9, b'!']); // second half
+        assert_eq!(decode_token_pieces(&acc).unwrap(), "c\u{e9}!");
+    }
+
+    /// Invalid UTF-8 must yield a clean error — never a panic or UB.
+    #[test]
+    fn test_decode_token_pieces_rejects_invalid_utf8_with_clean_error() {
+        let bad_inputs: &[&[u8]] = &[&[0xFF], &[0xC3, 0x28], &[0xE4, 0xB8], &[0xF0, 0x9F, 0x98]];
+        for bad in bad_inputs {
+            let res = decode_token_pieces(bad);
+            assert!(res.is_err(), "expected error for bytes {bad:?}");
+            let msg = res.unwrap_err();
+            assert!(
+                msg.contains("invalid UTF-8"),
+                "clean message expected, got: {msg}"
+            );
+        }
+    }
+
+    /// Arbitrary byte streams (deterministic pseudo-random) must either decode
+    /// to exactly the UTF-8 interpretation of those bytes or return an error —
+    /// and never panic.
+    #[test]
+    fn test_decode_token_pieces_never_panics_on_arbitrary_bytes() {
+        let mut state: u64 = 0xDEAD_BEEF;
+        for len in 0..512usize {
+            let mut bytes = Vec::with_capacity(len);
+            for _ in 0..len {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                bytes.push((state >> 33) as u8);
+            }
+            match decode_token_pieces(&bytes) {
+                // Ok only when the bytes were valid UTF-8: text must round-trip.
+                Ok(text) => assert_eq!(text.as_bytes(), bytes.as_slice()),
+                Err(msg) => {
+                    // Err only when invalid: std must agree it is not valid UTF-8.
+                    assert!(
+                        std::str::from_utf8(&bytes).is_err(),
+                        "decode_token_pieces rejected valid UTF-8: {msg}"
+                    );
+                    assert!(
+                        msg.contains("invalid UTF-8"),
+                        "clean message expected, got: {msg}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_contains_stop_sequence_on_raw_bytes() {
+        let stops = vec!["<|im_end|>".to_string()];
+        let mut acc: Vec<u8> = Vec::new();
+        assert!(!contains_stop_sequence(&acc, &stops));
+
+        acc.extend_from_slice("fin ".as_bytes());
+        acc.extend_from_slice(&[0xE4, 0xB8]); // incomplete multibyte char mid-stream
+        assert!(!contains_stop_sequence(&acc, &stops));
+
+        acc.extend_from_slice(b"<|im_end|>");
+        assert!(contains_stop_sequence(&acc, &stops));
+    }
+
+    #[test]
+    fn test_contains_stop_sequence_ignores_empty_or_oversized_stops() {
+        let stops = vec![String::new(), "STOP".to_string()];
+        assert!(!contains_stop_sequence(b"STO", &stops));
+        assert!(contains_stop_sequence(b"aSTOP", &stops));
+    }
+
     /// Real llama.cpp inference test (only with the `llama-cpp` feature).
     /// Skipped cleanly if the GGUF model file is not present on this machine.
     #[cfg(feature = "llama-cpp")]
@@ -570,15 +708,22 @@ mod tests {
     async fn test_real_llama_cpp_inference() {
         let model_path = "/home/linux/onde-models/qwen2.5-0.5b-instruct-q4_k_m.gguf";
         if !std::path::Path::new(model_path).exists() {
-            eprintln!("SKIP: GGUF model not found at {} — real inference test skipped", model_path);
+            eprintln!(
+                "SKIP: GGUF model not found at {} — real inference test skipped",
+                model_path
+            );
             return;
         }
 
         let mut ctx = LlamaContext::new(
             GGUFModel::qwen_0_5b(Quantization::Q4K),
-            GenerationConfig { max_tokens: 128, ..GenerationConfig::default() },
+            GenerationConfig {
+                max_tokens: 128,
+                ..GenerationConfig::default()
+            },
         );
-        ctx.load(model_path).expect("real llama.cpp model load should succeed");
+        ctx.load(model_path)
+            .expect("real llama.cpp model load should succeed");
 
         let result = ctx
             .generate("Qu'est-ce que la RCP ?")
@@ -592,8 +737,14 @@ mod tests {
             result.n_tokens, result.prompt_tokens, result.gen_time_ms, result.tokens_per_sec
         );
 
-        assert!(!result.text.trim().is_empty(), "generated text must not be empty");
+        assert!(
+            !result.text.trim().is_empty(),
+            "generated text must not be empty"
+        );
         assert!(result.n_tokens > 0, "at least one token must be generated");
-        assert!(result.tokens_per_sec > 0.0, "tokens_per_sec must be positive");
+        assert!(
+            result.tokens_per_sec > 0.0,
+            "tokens_per_sec must be positive"
+        );
     }
 }
