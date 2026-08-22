@@ -151,13 +151,7 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('android/**/*.gradle*') }}
           restore-keys: ${{ runner.os }}-gradle-
 
-      # Le wrapper gradle (jar + gradlew) est absent du repo : on le génère.
-      - name: Generate Gradle wrapper
-        working-directory: android
-        run: |
-          gradle wrapper --gradle-version 8.2
-        env:
-          GRADLE_USER_HOME: ${{ runner.home }}/.gradle
+      # Wrapper gradle commité (gradlew + jar) : pas de génération en CI.
 
       - name: Build Rust core for Android (NDK)
         working-directory: core
