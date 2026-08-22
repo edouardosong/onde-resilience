@@ -91,11 +91,20 @@ impl fmt::Display for MbtilesError {
                     "zoom {requested} outside supported range 0..={MAX_SUPPORTED_ZOOM}"
                 ),
             },
-            Self::CoordinatesOutOfBounds { zoom, x, y } => write!(
-                f,
-                "tile ({zoom}/{x}/{y}) out of bounds: x and y must be < {}",
-                1u64 << *zoom
-            ),
+            Self::CoordinatesOutOfBounds { zoom, x, y } => match u64::from(*zoom) {
+                // Defense in depth: this variant may be built on paths where
+                // `zoom` was not yet validated; the shift itself must never
+                // panic or wrap (regression M1, checker T17).
+                z if z > u64::from(MAX_SUPPORTED_ZOOM) => write!(
+                    f,
+                    "tile ({zoom}/{x}/{y}) out of bounds: zoom above supported cap {MAX_SUPPORTED_ZOOM}"
+                ),
+                _ => write!(
+                    f,
+                    "tile ({zoom}/{x}/{y}) out of bounds: x and y must be < {}",
+                    1u64 << *zoom
+                ),
+            },
         }
     }
 }
@@ -385,6 +394,13 @@ impl MbtilesReader {
     /// * [`MbtilesError::InvalidSchema`] — no usable `tiles` source;
     /// * [`MbtilesError::InvalidMetadata`] — mandatory rows missing/unparsable;
     /// * [`MbtilesError::Sqlite`] / [`MbtilesError::Io`] — propagated.
+    ///
+    /// Note on cost: when a producer omitted `minzoom`/`maxzoom`, the effective
+    /// range is derived from one `SELECT MIN(zoom_level), MAX(zoom_level)
+    /// FROM tiles` scan. On huge unindexed datasets this reads the whole zoom
+    /// column once at open time — bounded to a single aggregate query by
+    /// design; callers needing lazy behavior can rely on producers that ship
+    /// the metadata rows (the common case for real-world exports).
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, MbtilesError> {
         let path_str = path.as_ref().to_string_lossy().to_string();
         let meta = std::fs::metadata(path.as_ref()).map_err(|e| match e.kind() {
@@ -765,6 +781,16 @@ impl MbtilesReader {
         column: u32,
         row_xyz: u32,
     ) -> Result<Option<Tile>, MbtilesError> {
+        // Enforce the absolute cap BEFORE building any error: the conversion
+        // below returns `None` for absurd zooms, which used to fabricate a
+        // `CoordinatesOutOfBounds` whose Display could not render safely.
+        if zoom > MAX_SUPPORTED_ZOOM {
+            return Err(MbtilesError::ZoomOutOfRange {
+                requested: zoom,
+                min: None,
+                max: None,
+            });
+        }
         let row_tms =
             xyz_row_to_tms(row_xyz, zoom).ok_or(MbtilesError::CoordinatesOutOfBounds {
                 zoom,
@@ -1396,6 +1422,42 @@ mod tests {
                 "(z={z},x={x},y={y}): {err}"
             );
         }
+    }
+
+    /// Regression M1 (checker T17): `CoordinatesOutOfBounds` used to be built
+    /// on paths where zoom was not yet validated, and its Display shifted
+    /// `1u64 << zoom` — a debug panic for zoom >= 64. Rendering any variant
+    /// must now be panic-free for every representable zoom.
+    #[test]
+    fn coordinates_error_display_never_panics_on_absurd_zoom() {
+        for zoom in [63_u8, 64, 65, 100, 200, u8::MAX] {
+            let err = MbtilesError::CoordinatesOutOfBounds { zoom, x: 0, y: 0 };
+            let rendered = format!("{err}");
+            assert!(rendered.contains(&format!("({zoom}/0/0)")), "{rendered}");
+        }
+    }
+
+    /// Regression M1 (checker T17), public path: `get_tile_xyz` with an absurd
+    /// zoom returns the typed zoom error and its message renders safely.
+    #[test]
+    fn get_tile_xyz_absurd_zoom_is_typed_and_displayable() {
+        let db = tiled_db("mbt-absurd");
+        let reader = MbtilesReader::open(db.path()).expect("open");
+        for zoom in [31_u8, 64, 200] {
+            let err = reader.get_tile_xyz(zoom, 0, 0).unwrap_err();
+            assert!(
+                matches!(err, MbtilesError::ZoomOutOfRange { requested: z, min: None, max: None } if z == zoom),
+                "zoom={zoom}: {err}"
+            );
+            let rendered = format!("{err}");
+            assert!(rendered.contains("outside supported range"), "{rendered}");
+        }
+        // The same absurd request through the raw TMS API stays consistent.
+        let err = reader.get_tile_tms(u8::MAX, 0, 0).unwrap_err();
+        assert!(
+            matches!(err, MbtilesError::ZoomOutOfRange { requested: 255, .. }),
+            "{err}"
+        );
     }
 
     #[test]
