@@ -10,6 +10,8 @@ pub mod network;
 pub mod node;
 pub mod protocol;
 pub mod reputation;
+pub mod social;
+pub mod social_store;
 pub mod storage;
 pub mod update;
 
