@@ -13,6 +13,7 @@ members = [
     "crates/whisper-stt",
     "crates/zim-parser",
     "crates/llama-bind",
+    "crates/mbtiles-parser",
 ]
 # whisper_cpp_sys is vendored C (whisper.cpp) built via CMake; kept OUT of the
 # workspace so default CI builds (`--workspace`) never compile any C code.
