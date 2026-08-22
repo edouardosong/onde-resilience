@@ -388,7 +388,8 @@ impl LlamaContext {
         }
 
         // Guard: prompt + generated tokens must fit in the context window.
-        check_context_fit(n_prompt, self.config.max_tokens, n_ctx)?;
+        // n_prompt >= 0 is guaranteed by the check above.
+        check_context_fit(n_prompt as usize, self.config.max_tokens, n_ctx)?;
 
         // 2. Decode the prompt (logits only on the last token).
         // NOTE: this llama.cpp version does not set `n_tokens` in init — the caller must.
@@ -803,6 +804,44 @@ mod tests {
         }
         let err2 = check_context_fit(10, 600, 512).unwrap_err();
         assert!(err2.contains("600") && err2.contains("10"));
+    }
+
+    /// Fast real-path check that `repeat_penalty` is actually applied:
+    /// default config carries 1.1 (> 1.0), so the penalty window runs on
+    /// every sampled token. Small budget keeps this test cheap.
+    #[cfg(feature = "llama-cpp")]
+    #[tokio::test]
+    async fn test_real_generate_applies_repeat_penalty() {
+        let model_path = "/home/linux/onde-models/qwen2.5-0.5b-instruct-q4_k_m.gguf";
+        if !std::path::Path::new(model_path).exists() {
+            eprintln!(
+                "SKIP: GGUF model not found at {} — repeat-penalty test skipped",
+                model_path
+            );
+            return;
+        }
+
+        let mut ctx = LlamaContext::new(
+            GGUFModel::qwen_0_5b(Quantization::Q4K),
+            GenerationConfig {
+                max_tokens: 32,
+                ..GenerationConfig::default()
+            },
+        );
+        ctx.load(model_path)
+            .expect("real llama.cpp model load should succeed");
+
+        let result = ctx
+            .generate("Cite trois objets utiles en randonnée.")
+            .await
+            .expect("generation with repeat_penalty=1.1 must succeed");
+
+        println!(
+            "--- repeat_penalty=1.1 (default) sample ---\n{}",
+            result.text
+        );
+        assert!(!result.text.trim().is_empty());
+        assert!(result.n_tokens > 0 && result.n_tokens <= 32);
     }
 
     #[cfg(feature = "llama-cpp")]
