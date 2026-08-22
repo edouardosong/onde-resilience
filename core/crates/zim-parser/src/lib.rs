@@ -3,21 +3,21 @@
 //! Parses openZIM format files (used by Kiwix/Wikipedia offline). Each stage is
 //! a separate module committed incrementally:
 //!   * [`header`]  — fixed 80-byte header + index-table pointers (this step)
-//!   * [`entries`] — dirent parsing, rank & prefix-title search (next step)
+//!   * [`entries`] — dirent parsing, rank & prefix-title search (this step)
 //!   * [`content`] — cluster/blob decoding (none / lz4 / zstd) (final step)
 //!
 //! All external input is bounds-checked and returns typed [`ZimError`] variants
 //! rather than panicking.
 
+pub mod entries;
 pub mod header;
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// Typed errors for ZIM parsing. Every failure mode is a distinct variant so
-/// callers can pattern-match without a `panic!` on the wire.
-/// Note: intentionally only `Debug` — the [`ZimError::Io`] variant wraps a
-/// non-clone [`std::io::Error`], so `Clone`/`PartialEq` are not derived.
+/// callers can pattern-match without a `panic!` on the wire. Note: only `Debug`
+/// is derived — [`ZimError::Io`] wraps a non-clone [`std::io::Error`].
 #[derive(Debug)]
 pub enum ZimError {
     /// Magic number is not `KIM\x00`.
@@ -47,10 +47,10 @@ impl std::fmt::Display for ZimError {
             ZimError::OutOfBounds { offset, len } => {
                 write!(f, "offset {} out of bounds (len {})", offset, len)
             }
+            ZimError::Io(e) => write!(f, "io error: {}", e),
             ZimError::UnknownCompression(c) => write!(f, "unknown compression code '{}'", c),
             ZimError::ShortDecompression => write!(f, "short decompression"),
             ZimError::BadMimeIndex(i) => write!(f, "bad MIME index {}", i),
-            ZimError::Io(e) => write!(f, "io error: {}", e),
         }
     }
 }
@@ -98,9 +98,9 @@ pub struct ZimReader {
     loaded: bool,
     /// Raw bytes of the opened file (consumed by content extraction in step 3).
     data: Vec<u8>,
-    /// Raw dirent offsets located from the URL pointer table (parsed in step 2).
-    dirent_offsets: Vec<u32>,
-    /// MIME list parsed from the header region.
+    /// Parsed dirents located from the URL pointer table.
+    dirents: Vec<entries::Dirent>,
+    /// MIME list parsed from the header region, indexed by dirent mime_index.
     mime_types: Vec<String>,
 }
 
@@ -122,7 +122,7 @@ impl ZimReader {
             header: None,
             loaded: false,
             data: Vec::new(),
-            dirent_offsets: Vec::new(),
+            dirents: Vec::new(),
             mime_types: Vec::new(),
         })
     }
@@ -148,9 +148,9 @@ impl ZimReader {
         }
         self.mime_types = mime_types;
 
-        // Locate dirent offsets from the URL pointer table (one per article).
+        // Parse dirents from the URL pointer table (one per article).
         let n = h.article_count as usize;
-        let mut dirent_offsets = Vec::with_capacity(n);
+        let mut dirents = Vec::with_capacity(n);
         for i in 0..n {
             let base = h.url_ptr_pos as usize + i * 4;
             if base + 4 > self.data.len() {
@@ -165,58 +165,51 @@ impl ZimReader {
                 self.data[base + 2],
                 self.data[base + 3],
             ]);
-            dirent_offsets.push(off);
+            dirents.push(entries::Dirent::parse(&self.data, off as usize)?);
         }
-        self.dirent_offsets = dirent_offsets;
+        self.dirents = dirents;
 
         self.loaded = true;
         tracing::info!("Loaded ZIM index: {} articles", h.article_count);
         Ok(())
     }
 
-    /// List the URLs of all located dirents (header-stage utility).
+    /// List the URLs of all located dirents.
     pub fn article_urls(&self) -> Vec<String> {
         if !self.loaded {
             return Vec::new();
         }
-        self.dirent_offsets
-            .iter()
-            .map(|&off| url_string(self, off))
-            .collect()
+        self.dirents.iter().map(|d| d.url.clone()).collect()
     }
 
-    /// Resolve an article by exact URL (rank access). Requires [`load_index`]
-    /// and step 2 dirent parsing. Stubbed until dirents are decoded.
+    /// Resolve an article by exact URL (rank access). Requires [`load_index`].
     pub fn get_article(&self, url: &str) -> Option<ZimArticle> {
         if !self.loaded {
             return None;
         }
-        let idx = self
-            .dirent_offsets
-            .iter()
-            .position(|&off| url_string(self, off) == url)?;
+        let idx = self.dirents.iter().position(|d| d.url == url)?;
         Some(self.build_article(idx))
     }
 
     /// Prefix-title search: entries whose title starts with `query`. Requires
-    /// [`load_index`] and step 2 dirent parsing. Stubbed until dirents decoded.
+    /// [`load_index`]. Ranked by score, then insertion order.
     pub fn search(&self, query: &str, max_results: usize) -> Vec<SearchResult> {
         if !self.loaded {
             return Vec::new();
         }
         let ql = query.to_lowercase();
         let mut out: Vec<SearchResult> = self
-            .dirent_offsets
+            .dirents
             .iter()
             .enumerate()
-            .filter(|(_, &off)| title_string(self, off).to_lowercase().starts_with(&ql))
+            .filter(|(_, d)| d.title.to_lowercase().starts_with(&ql))
             .take(max_results)
-            .map(|(_idx, &off)| SearchResult {
-                title: title_string(self, off),
-                url: url_string(self, off),
+            .map(|(_idx, d)| SearchResult {
+                title: d.title.clone(),
+                url: d.url.clone(),
                 snippet: None,
                 score: 0.8,
-                namespace: 'A',
+                namespace: d.namespace,
             })
             .collect();
         out.sort_by(|a, b| {
@@ -228,20 +221,20 @@ impl ZimReader {
     }
 
     fn build_article(&self, idx: usize) -> ZimArticle {
-        let off = self.dirent_offsets[idx];
+        let d = &self.dirents[idx];
         let mime = self
             .mime_types
-            .get(1)
+            .get(d.mime_index as usize)
             .cloned()
             .unwrap_or_else(|| "application/octet-stream".to_string());
         ZimArticle {
-            url: url_string(self, off),
-            title: title_string(self, off),
+            url: d.url.clone(),
+            title: d.title.clone(),
             mime_type: mime,
-            content: Vec::new(),
-            content_size: 0,
-            is_main: false,
-            namespace: 'A',
+            content: Vec::new(), // decoded in step 3 (content module)
+            content_size: d.blob_size,
+            is_main: d.namespace == 'A' && idx as u32 == 0,
+            namespace: d.namespace,
             index: idx as u32,
         }
     }
@@ -249,32 +242,6 @@ impl ZimReader {
     pub fn article_count(&self) -> u32 {
         self.header.as_ref().map(|h| h.article_count).unwrap_or(0)
     }
-}
-
-/// URL = first null-terminated string of a dirent (offset 0).
-fn url_string(r: &ZimReader, off: u32) -> String {
-    let d = &r.data;
-    let start = off as usize;
-    if start >= d.len() {
-        return String::new();
-    }
-    let end = d[start..].iter().position(|&b| b == 0).unwrap_or(d.len());
-    String::from_utf8_lossy(&d[start..end])
-        .trim_matches('\0')
-        .to_owned()
-}
-
-/// Title = second null-terminated string of a dirent (offset 5, after the ns byte).
-fn title_string(r: &ZimReader, off: u32) -> String {
-    let d = &r.data;
-    let start = (off as usize).saturating_add(5);
-    if start >= d.len() {
-        return String::new();
-    }
-    let end = d[start..].iter().position(|&b| b == 0).unwrap_or(d.len());
-    String::from_utf8_lossy(&d[start..end])
-        .trim_matches('\0')
-        .to_owned()
 }
 
 /// Extract plain text from an HTML blob. Kept stable across parser iterations.
@@ -332,5 +299,28 @@ mod tests {
             Err(ZimError::OutOfBounds { offset: _, len: _ }) => {}
             other => panic!("expected OutOfBounds, got {:?}", other),
         }
+    }
+
+    /// End-to-end entry resolution on a synthetic classic ZIM (see fixtures).
+    #[test]
+    fn test_entry_resolution_on_fixture() {
+        let path = std::env::var("ONDE_ZIM_FIXTURE").unwrap_or_default();
+        if path.is_empty() || !Path::new(&path).exists() {
+            // Skip cleanly when no fixture is provided (step 4 integration gate).
+            return;
+        }
+        let mut r = ZimReader::open(&path).expect("open");
+        r.load_index().expect("load_index");
+        assert!(!r.article_urls().is_empty());
+        // Rank access by URL must resolve a real dirent.
+        let first = r.article_urls()[0].clone();
+        let art = r.get_article(&first).expect("get_article");
+        assert_eq!(art.url, first);
+        assert_ne!(art.mime_type, "application/octet-stream");
+        // Prefix-title search must return results with the dirent namespace.
+        let q = art.title.split_whitespace().next().unwrap_or("");
+        let hits = r.search(q, 10);
+        assert!(!hits.is_empty());
+        assert_eq!(hits[0].namespace, art.namespace);
     }
 }
