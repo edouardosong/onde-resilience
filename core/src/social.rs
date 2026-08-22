@@ -12,6 +12,12 @@ pub const MAX_TUITTER_BODY: usize = 500;
 pub const MAX_REDIT_TITLE: usize = 300;
 pub const MAX_REDIT_BODY: usize = 40_000;
 pub const MAX_COMMUNITY_SLUG: usize = 50;
+/// Corps d'un message privé Tuitter (bornage domaine — payload wire).
+pub const MAX_PRIVATE_MESSAGE_BODY: usize = 2_000;
+/// Motif d'un signalement de modération (bornage domaine — payload wire).
+pub const MAX_MODERATION_REASON: usize = 500;
+/// Longueur maximale d'un identifiant social (id de post/commentaire/cible).
+pub const MAX_SOCIAL_ID: usize = 128;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SocialPlatform {
@@ -27,7 +33,10 @@ pub struct SocialPost {
     pub title: Option<String>,
     pub body: String,
     pub community_slug: Option<String>,
-    pub parent_id: Option<String>,
+    /// Hérité du prototype Fusion puis RETIRÉ (I1) : l'imbrication appartient
+    /// aux commentaires ([`SocialComment::parent_id`]). Le champ n'est plus
+    /// sérialisé ; un payload wire historique portant encore `parent_id` est
+    /// accepté (serde ignore les champs inconnus) et la valeur est ignorée.
     pub media_urls: Vec<String>,
 }
 
@@ -41,9 +50,6 @@ impl SocialPost {
         }
         if self.body.trim().is_empty() {
             return Err("social post body cannot be empty".to_string());
-        }
-        if self.parent_id.as_deref() == Some(self.id.as_str()) {
-            return Err("social post cannot be its own parent".to_string());
         }
         if self.media_urls.len() > 4 {
             return Err("social post cannot contain more than 4 media URLs".to_string());
@@ -163,7 +169,6 @@ mod tests {
             title: None,
             body: "message hors ligne".to_string(),
             community_slug: None,
-            parent_id: None,
             media_urls: Vec::new(),
         }
     }
