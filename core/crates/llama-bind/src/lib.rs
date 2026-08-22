@@ -423,7 +423,7 @@ impl LlamaContext {
             nb.n_tokens = 1; // this llama.cpp version does not set it in init
             unsafe {
                 *nb.token = token;
-                *nb.pos = n_prompt + n_generated as i32;
+                *nb.pos = n_prompt + n_generated as i32 - 1; // 1er token généré en position n_prompt (n_generated déjà incrémenté)
                 *nb.n_seq_id = 1;
                 **nb.seq_id = 0; // seq_id[0][0] = 0
                 *nb.logits = 1;
