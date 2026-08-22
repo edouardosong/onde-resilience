@@ -1,0 +1,50 @@
+[package]
+name = "onde-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+# Isolated from the core workspace: this fuzz crate has its own resolver and is
+# NOT a workspace member, so `cargo build --workspace` / clippy / test see it as
+# an out-of-tree binary tree. Targets depend on the crates under test by path.
+
+[dependencies]
+libfuzzer-sys = "0.4"
+onde-core = { path = "../core" }
+dtn-router = { path = "../core/crates/dtn-router" }
+zim-parser = { path = "../core/crates/zim-parser" }
+
+[[bin]]
+name = "fuzz_target_1"
+path = "fuzz_targets/fuzz_target_1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_target_2"
+path = "fuzz_targets/fuzz_target_2.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_target_3"
+path = "fuzz_targets/fuzz_target_3.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_target_4"
+path = "fuzz_targets/fuzz_target_4.rs"
+test = false
+doc = false
+bench = false
+
+[profile.release]
+opt-level = 3
+overflow-checks = true
