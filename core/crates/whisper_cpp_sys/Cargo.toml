@@ -1,0 +1,16 @@
+[package]
+name = "whisper_cpp_sys"
+version = "0.1.0"
+edition = "2021"
+description = "Vendored whisper.cpp C API bindings for ONDE (raw FFI, built from thirdparty/)"
+license = "MIT"
+publish = false
+links = "whisper"
+
+[dependencies]
+# Link the C++ runtime (whisper.cpp is C++); same mechanism as llama_cpp_sys.
+link-cplusplus = "1.0.9"
+
+[build-dependencies]
+bindgen = "0.69.4"
+cmake = "0.1"

@@ -14,6 +14,11 @@ members = [
     "crates/zim-parser",
     "crates/llama-bind",
 ]
+# whisper_cpp_sys is vendored C (whisper.cpp) built via CMake; kept OUT of the
+# workspace so default CI builds (`--workspace`) never compile any C code.
+# It is pulled in only through the optional `whisper-cpp` feature of
+# whisper-stt (same pattern as llama_cpp_sys behind llama-bind's `llama-cpp`).
+exclude = ["crates/whisper_cpp_sys"]
 
 [lib]
 name = "onde_core"
