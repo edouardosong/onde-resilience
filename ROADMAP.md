@@ -55,7 +55,7 @@ Commits de référence (main) : `7c888b3` (HEAD = merge L2-14) · `28418e4` (mer
 | # | Tâche | Critère d'acceptation | E2E (Playwright) |
 |---|-------|----------------------|-----------|
 | 0.1 | Fix README (129→135) + commit propre — **FAIT** (2026-08-20 : README aligné sur le compte mesuré, 163 tests) | README = réalité | — |
-| 0.2 | Publication GitHub de la passe "Audit #8–#14" | PR mergée, CI green | — |
+| 0.2 | Publication GitHub de la passe "Audit #8–#14" | PR mergée, CI green | ✅ **FAIT** (2026-08-21 : dépôt public `github.com/edouardosong/onde-resilience`, main = 7c888b3) |
 | 0.3 | Configurer Playwright (open source, sans clé API) | config + `npx playwright test` exécutable | ✅ **FAIT** (2026-08-20 : `ui/web/playwright.config.ts`, Playwright 1.62.1, 0 vuln.) |
 | 0.4 | Baseline Playwright : 5 tests UI (démarrage, publish alerte, publish entraide, feed, réputation) | Suite durable green | ✅ **FAIT** (2026-08-20 : `ui/web/e2e/` 5 specs, 5 passed + 1 skip documenté [WoT UI absente], 4 runs verts consécutifs) |
 
@@ -70,7 +70,7 @@ Commits de référence (main) : `7c888b3` (HEAD = merge L2-14) · `28418e4` (mer
 | 1.1 | **Câblage protocole update** dans le gossip (types `UpdateAnnounce/Manifest/Chunk`) | Annonce → manifeste → chunks → APK vérifié entre 2 nœuds | ✅ **FAIT** — code `core/src/update/` ; e2e `test_update_flow_between_two_nodes` + `test_update_rejects_tampered_apk` **verts (mesurés 2026-08-21**, 18/18 `integration_e2e`) |
 | 1.2 | **Propagation WoT** : message `Endorsement` routé dans le protocole | Un endossement propagé à tous les pairs (test e2e) | ✅ **FAIT** — code `core/src/reputation/` ; e2e `test_endorsement_propagation_three_nodes` **vert (mesuré 2026-08-21)** |
 | 1.3 | **Câblage TrafficPadding** dans le transport (pad/unpad des messages réseau) | Taille observée = seau, contenu intact | ✅ **FAIT** — `TrafficPadding` câblé au wire gossip (`core/src/crypto/mod.rs`, `GossipProtocol`) ; e2e `test_traffic_padding_wire_two_nodes` **vert (mesuré 2026-08-21)** |
-| 1.4 | **Câblage RotatingIdentity** : rotation 6h active + période de grâce | Rotation testée, anciens messages vérifiables, nouveaux rejetés | ✅ **FAIT** — `announce_identity_rotation` / `handle_incoming_rotation` (`core/src/node/mod.rs`) ; e2e `test_identity_rotation_two_nodes` + 3 tests anti-replay/anti-forgery **verts (mesurés 2026-08-21)** |
+| 1.4 | **Câblage RotatingIdentity** : rotation 6h active + période de grâce | Rotation testée, anciens messages vérifiables, nouveaux rejetés | ✅ **FAIT** — `announce_identity_rotation` / `handle_incoming_rotation` (`core/src/node/mod.rs`) ; e2e `test_identity_rotation_two_nodes` + 4 tests de rejet à la réception (dont 3 anti-replay/anti-forgery) **verts (mesurés 2026-08-21)** |
 | 1.5 | **Transport réel (Wi-Fi Aware)** — abstraction `MeshTransport` implémentée | 2 appareils réels échangent | ⛔ **BLOCKED** — 2 appareils physiques Wi-Fi Aware requis, **indisponibles dans cet environnement** (pas de matériel ; STATE §6, 2026-08-21) |
 | 1.6 | **Transport BLE** (fallback faible débit) | Échange fonctionnel + chunking | ⛔ **BLOCKED** — 2 appareils physiques BLE requis, **indisponibles dans cet environnement** (pas de matériel ; STATE §6, 2026-08-21) |
 | 1.7 | **Scénario de bout en bout** : alerte critique publiée → propagée → stockée (sharding) → restaurée au redémarrage | Test e2e complet green | ✅ **FAIT** — e2e `test_e2e_critical_alert_full_lifecycle` + `test_update_flow_between_two_nodes` **verts (mesurés 2026-08-21**, 18/18 `integration_e2e`) |
@@ -97,7 +97,7 @@ une alerte hors-ligne, avec mise à jour d'APK signée.
 |----|------|-----------|--------|
 | L2-00 | Durcissement CI (fmt + clippy `-D warnings`, audit npm/cargo hebdo, least-privilege) + passage rustfmt core ; revue crypto du diff orphelin **GO** (preuve versionnée `reports/loop-evidence/revue-crypto-l2-00-2026-08-20.md`) | `07a4bd7` (CI) · `d87f8c9` (rustfmt) · preuves `5746365` | ✅ FAIT |
 | L2-01 | Fix métrique livraison DTN — livraison unique par message (dédup) + latence réelle (checker APPROVED) | `34356a3` · merge `28418e4` | ✅ FAIT |
-| L2-03 | README = vérité + ROADMAP aligné + preuves versionnées | `bfbb980` · `0ff7e33` · merge `c0ac9f9` | ✅ FAIT |
+| L2-03 | README = vérité + ROADMAP aligné + preuves versionnées | `bfbb980` · `4ff7e33` · merge `c0ac9f9` | ✅ FAIT |
 | L2-04 | `rencontre_opportunity` — bucketing spatial EXACT + dispatch | `4887f4b` · merge `6905364` | ✅ FAIT |
 | L2-05 | Scaffolding Python simulation reproductible (`pyproject.toml` + `uv.lock` versionnés) | `4fe00cf` · merge `a298a0c` | ✅ FAIT |
 | L2-06 | Baseline E2E Playwright — 5 specs UI + config, captures d'évidence (checker APPROVED) | `7a15ff4` · merge `f88c87b` · docs `d8a798a` | ✅ FAIT |
