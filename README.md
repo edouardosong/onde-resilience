@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org)
 [![CI](https://github.com/edouardosong/onde-resilience/actions/workflows/ci.yml/badge.svg)](https://github.com/edouardosong/onde-resilience/actions)
-[![Tests core](https://img.shields.io/badge/tests%20core-176%20passing-brightgreen.svg)](#-tests)
+[![Tests core](https://img.shields.io/badge/tests%20core-177%20passing-brightgreen.svg)](#-tests)
 [![Simulation](https://img.shields.io/badge/simulation-23%20passing-brightgreen.svg)](#-tests)
 [![E2E UI](https://img.shields.io/badge/e2e%20ui-playwright-blue.svg)](#-tests)
 [![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)]()
@@ -382,16 +382,16 @@ Protocole de mise à jour d'APK par le mesh (Audit #12/#13) : l'annonceur signe 
 
 ## 🧪 Tests
 
-### Suite du moteur (`core/`) — 176 tests, 0 échec
+### Suite du moteur (`core/`) — 177 tests, 0 échec
 
 ```bash
 # Tous les tests (workspace core/)
 cd core && cargo test --workspace
 
-# Résultats : 176 tests, 0 échec
+# Résultats : 177 tests, 0 échec
 # onde-core        : 123 tests ✅ Crypto, Network, Protocol, Storage, Update, Node, AI, Reputation
 #                    (dont 3 tests anti-replay / anti-forgery de la rotation d'identité)
-# dtn-router       :   7 tests ✅ Store-and-forward, broadcast, priorités, TTL
+# dtn-router       :   9 tests ✅ Store-and-forward, broadcast, priorités, TTL, parsing JSON wire
 # llama-bind       :   17 tests ✅ Sélection de modèle, génération mock, quantification (guard context-fit ajoute, iter. T9)
 # whisper-stt      :   4 tests ✅ Création d'engine, transcription mock
 # zim-parser       :   3 tests ✅ Extraction HTML, catégories, URL ZIM
@@ -410,8 +410,8 @@ parseurs ZIM HTML + DTN JSON).
 ```bash
 # lister the cibles
 cargo fuzz list
-# exécuter a une cible (ex. `dtn`)
-cargo fuzz run dtn -- -max_total_time=600
+# exécuter une cible (ex. `fuzz_target_1` — voir `cargo fuzz list`)
+cargo fuzz run fuzz_target_1 -- -max_total_time=600
 ```
 
 **LIMITE connue (toolchain STABLE)** : sur stable, l'execution est coverage-only
