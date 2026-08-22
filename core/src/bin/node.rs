@@ -109,6 +109,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             20
         },
         sqlite_path,
+        social_db_path: None,
         battery_saver,
         my_geohash: geohash,
         identity_seed: None,

@@ -57,9 +57,17 @@ pub async fn node_start(
     }
     // Répertoire de données applicatives (varie par plateforme) ; s'il n'est
     // pas disponible, le nœud démarre en mémoire seule.
-    let sqlite_path = app.path().app_data_dir().ok().map(|dir| {
-        let _ = std::fs::create_dir_all(&dir);
+    let data_dir = app.path().app_data_dir().ok();
+    let sqlite_path = data_dir.as_ref().map(|dir| {
+        let _ = std::fs::create_dir_all(dir);
         dir.join("onde-mobile.sqlite3")
+            .to_string_lossy()
+            .to_string()
+    });
+    // T13-checker M1 : la base sociale dédiée est ouverte avec le nœud —
+    // les commandes sociales en dépendent (cache matérialisé `social_*`).
+    let social_db_path = data_dir.map(|dir| {
+        dir.join("onde-social.sqlite3")
             .to_string_lossy()
             .to_string()
     });
@@ -67,6 +75,7 @@ pub async fn node_start(
         node_type: NodeType::Mobile,
         display_name,
         sqlite_path,
+        social_db_path,
         ..Default::default()
     };
     let mut node = Node::new(config);
@@ -109,10 +118,7 @@ pub async fn node_status(state: State<'_, AppState>) -> Result<serde_json::Value
 
 /// Publier une alerte civique (280 caractères max).
 #[tauri::command]
-pub async fn publish_alert(
-    state: State<'_, AppState>,
-    content: String,
-) -> Result<String, String> {
+pub async fn publish_alert(state: State<'_, AppState>, content: String) -> Result<String, String> {
     let mut guard = state.node.lock().await;
     let node = guard
         .as_mut()

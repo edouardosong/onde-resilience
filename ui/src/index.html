@@ -89,6 +89,30 @@
             border: 1px solid var(--border);
         }
 
+        /* ===== MODE SWITCHER ===== */
+        .mode-switcher {
+            display: flex;
+            gap: 2px;
+            background: var(--surface-elevated);
+            border-radius: 20px;
+            padding: 2px;
+        }
+        .mode-switcher .mode-btn {
+            padding: 4px 12px;
+            border-radius: 18px;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .mode-switcher .mode-btn.active {
+            background: var(--accent);
+            color: var(--black);
+        }
+
         /* ===== MAIN CONTENT ===== */
         .content {
             flex: 1;
@@ -645,7 +669,12 @@
     <div id="app">
         <!-- HEADER -->
         <div class="header">
-            <div class="logo">⧫ ONDE</div>
+            <div class="logo" id="logo-text">⧫ ONDE</div>
+            <div class="mode-switcher" id="mode-switcher">
+                <button class="mode-btn active" data-mode="onde">ONDE</button>
+                <button class="mode-btn" data-mode="tuitter">Tuitter</button>
+                <button class="mode-btn" data-mode="redit">Redit</button>
+            </div>
             <div class="mesh-badge" id="mesh-badge">Mesh Actif</div>
             <div class="status-dot" id="status-dot"></div>
         </div>
@@ -843,16 +872,181 @@
                     <div style="font-size:14px;">Glissez un fichier ici ou tapez pour sélectionner</div>
                 </div>
             </div>
+
+            <!-- ============== TUITTER PAGES ============== -->
+            <div class="page" id="tuitter-feed">
+                <h2 class="section-title">🐦 Fil Tuitter</h2>
+                <div class="feed" id="tuitter-feed-container">
+                    <div class="empty-state"><div class="icon">🐦</div><div class="label">Aucun tuit — publiez le premier message.</div></div>
+                </div>
+            </div>
+            <div class="page" id="tuitter-search">
+                <h2 class="section-title">🔍 Recherche</h2>
+                <div class="search-box">
+                    <input type="text" id="tuitter-search-input" placeholder="Rechercher des tuits ou utilisateurs…">
+                    <button id="tuitter-search-btn">🔍</button>
+                </div>
+                <div class="feed" id="tuitter-search-results"></div>
+            </div>
+            <div class="page" id="tuitter-notifications">
+                <h2 class="section-title">🔔 Notifications</h2>
+                <div class="feed" id="tuitter-notif-list">
+                    <div class="empty-state"><div class="icon">🔔</div><div class="label">Aucune notification pour le moment.</div></div>
+                </div>
+            </div>
+            <div class="page" id="tuitter-messages">
+                <h2 class="section-title">✉ Messages</h2>
+                <div id="tuitter-message-container" style="margin-bottom:12px;">
+                    <input type="text" id="msg-recipient-input" placeholder="Pubkey du destinataire (64 hex)" style="width:100%;padding:8px;margin-bottom:4px;border-radius:var(--radius-sm);background:var(--black);border:1px solid var(--border);color:var(--text-primary);">
+                    <input type="text" id="msg-body-input" placeholder="Votre message…" style="width:calc(100% - 80px);padding:8px;border-radius:var(--radius-sm);background:var(--black);border:1px solid var(--border);color:var(--text-primary);">
+                    <button onclick="sendSocialMessage()" style="background:var(--accent);color:var(--black);border:none;border-radius:var(--radius-sm);padding:8px 16px;font-weight:700;cursor:pointer;">Envoyer</button>
+                </div>
+                <div class="feed" id="tuitter-message-list">
+                    <div class="empty-state"><div class="icon">✉</div><div class="label">Boîte de réception vide.</div></div>
+                </div>
+            </div>
+            <div class="page" id="tuitter-profile">
+                <h2 class="section-title">👤 Mon Profil</h2>
+                <div id="tuitter-profile-content">
+                    <div class="card" style="text-align:center;">
+                        <div class="avatar" style="width:64px;height:64px;font-size:28px;margin:0 auto;">M</div>
+                        <div style="font-size:18px;font-weight:700;margin-top:8px;" id="tuitter-display-name">Mon Compte</div>
+                        <div style="font-size:12px;color:var(--text-secondary);" id="tuitter-pubkey">---</div>
+                    </div>
+                </div>
+            </div>
+            <div class="page" id="tuitter-bookmarks">
+                <h2 class="section-title">🔖 Favoris</h2>
+                <div class="feed" id="tuitter-bookmarks-list">
+                    <div class="empty-state"><div class="icon">🔖</div><div class="label">Aucun favori.</div></div>
+                </div>
+            </div>
+            <div class="page" id="tuitter-moderation">
+                <h2 class="section-title">🛡 Signalements</h2>
+                <div class="feed" id="tuitter-moderation-list">
+                    <div class="empty-state"><div class="icon">🛡</div><div class="label">Aucun signalement ouvert.</div></div>
+                </div>
+                <button onclick="refreshModerationReports()" style="margin-top:8px;background:var(--accent);color:var(--black);border:none;border-radius:var(--radius-sm);padding:8px 16px;font-weight:700;cursor:pointer;">Rafraîchir</button>
+            </div>
+            <div class="page" id="tuitter-settings">
+                <h2 class="section-title">⚙ Paramètres</h2>
+                <div class="card">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                        <label style="flex:1;">Nom affiché</label>
+                        <input type="text" id="tuitter-name-input" style="padding:8px;border-radius:var(--radius-sm);background:var(--black);border:1px solid var(--border);color:var(--text-primary);" value="Moi">
+                    </div>
+                    <button id="tuitter-save-profile" style="background:var(--accent);color:var(--black);border:none;border-radius:var(--radius-sm);padding:8px 16px;font-weight:700;cursor:pointer;margin-top:8px;">Enregistrer</button>
+                </div>
+            </div>
+
+            <!-- ============== REDIT PAGES ============== -->
+            <div class="page" id="redit-feed">
+                <h2 class="section-title">📢 Fil Redit</h2>
+                <div class="feed" id="redit-feed-container">
+                    <div class="empty-state"><div class="icon">📢</div><div class="label">Aucune publication — rejoignez une communauté.</div></div>
+                </div>
+            </div>
+            <div class="page" id="redit-communities">
+                <h2 class="section-title">🌐 Communautés</h2>
+                <div style="margin-bottom:12px;">
+                    <input type="text" id="redit-community-input" placeholder="slug-de-la-communaute" style="padding:8px 12px;border-radius:var(--radius-sm);background:var(--black);border:1px solid var(--border);color:var(--text-primary);width:calc(100% - 100px);">
+                    <button id="redit-community-join" style="background:var(--accent);color:var(--black);border:none;border-radius:var(--radius-sm);padding:8px 16px;font-weight:700;cursor:pointer;margin-left:4px;">Rejoindre</button>
+                </div>
+                <div class="feed" id="redit-community-list">
+                    <div class="card" style="cursor:pointer;" data-slug="entraide"><strong>r/entraide</strong><br><span style="font-size:12px;color:var(--text-secondary);">Entraide citoyenne et solidarité</span></div>
+                    <div class="card" style="cursor:pointer;" data-slug="tech"><strong>r/tech</strong><br><span style="font-size:12px;color:var(--text-secondary);">Technologies et innovation</span></div>
+                    <div class="card" style="cursor:pointer;" data-slug="survie"><strong>r/survie</strong><br><span style="font-size:12px;color:var(--text-secondary);">Techniques de survie et autonomie</span></div>
+                </div>
+            </div>
+            <div class="page" id="redit-post-detail">
+                <h2 class="section-title">📝 Discussion</h2>
+                <div id="redit-detail-content"></div>
+                <div class="compose-bar" style="display:flex;margin-top:12px;">
+                    <input type="text" id="redit-comment-input" maxlength="40000" placeholder="Votre commentaire…">
+                    <button id="redit-comment-send">➤</button>
+                </div>
+            </div>
+            <div class="page" id="redit-search">
+                <h2 class="section-title">🔍 Recherche</h2>
+                <div class="search-box">
+                    <input type="text" id="redit-search-input" placeholder="Rechercher…">
+                    <button id="redit-search-btn">🔍</button>
+                </div>
+                <div class="feed" id="redit-search-results"></div>
+            </div>
+            <div class="page" id="redit-notifications">
+                <h2 class="section-title">🔔 Notifications</h2>
+                <div class="feed" id="redit-notif-list">
+                    <div class="empty-state"><div class="icon">🔔</div><div class="label">Aucune notification.</div></div>
+                </div>
+            </div>
+            <div class="page" id="redit-messages">
+                <h2 class="section-title">✉ Messages</h2>
+                <div style="margin-bottom:12px;">
+                    <input type="text" id="msg-recipient-input2" placeholder="Pubkey du destinataire (64 hex)" style="width:100%;padding:8px;margin-bottom:4px;border-radius:var(--radius-sm);background:var(--black);border:1px solid var(--border);color:var(--text-primary);">
+                    <input type="text" id="msg-body-input2" placeholder="Votre message…" style="width:calc(100% - 80px);padding:8px;border-radius:var(--radius-sm);background:var(--black);border:1px solid var(--border);color:var(--text-primary);">
+                    <button onclick="document.getElementById('msg-recipient-input').value=document.getElementById('msg-recipient-input2').value;document.getElementById('msg-body-input').value=document.getElementById('msg-body-input2').value;sendSocialMessage()" style="background:var(--accent);color:var(--black);border:none;border-radius:var(--radius-sm);padding:8px 16px;font-weight:700;cursor:pointer;">Envoyer</button>
+                </div>
+                <div class="feed" id="redit-message-list">
+                    <div class="empty-state"><div class="icon">✉</div><div class="label">Boîte vide.</div></div>
+                </div>
+            </div>
+            <div class="page" id="redit-profile">
+                <h2 class="section-title">👤 Profil</h2>
+                <div id="redit-profile-content">
+                    <div class="card" style="text-align:center;">
+                        <div class="avatar" style="width:64px;height:64px;font-size:28px;margin:0 auto;">M</div>
+                        <div style="font-size:18px;font-weight:700;margin-top:8px;" id="redit-display-name">Mon Compte</div>
+                        <div style="font-size:12px;color:var(--text-secondary);" id="redit-pubkey">---</div>
+                    </div>
+                </div>
+            </div>
+            <div class="page" id="redit-bookmarks">
+                <h2 class="section-title">🔖 Favoris</h2>
+                <div class="feed" id="redit-bookmarks-list">
+                    <div class="empty-state"><div class="icon">🔖</div><div class="label">Aucun favori.</div></div>
+                </div>
+            </div>
+            <div class="page" id="redit-moderation">
+                <h2 class="section-title">🛡 Signalements</h2>
+                <div class="feed" id="redit-moderation-list">
+                    <div class="empty-state"><div class="icon">🛡</div><div class="label">Aucun signalement ouvert.</div></div>
+                </div>
+                <button onclick="refreshModerationReports()" style="margin-top:8px;background:var(--accent);color:var(--black);border:none;border-radius:var(--radius-sm);padding:8px 16px;font-weight:700;cursor:pointer;">Rafraîchir</button>
+            </div>
+            <div class="page" id="redit-settings">
+                <h2 class="section-title">⚙ Paramètres</h2>
+                <div class="card">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                        <label style="flex:1;">Nom affiché</label>
+                        <input type="text" id="redit-name-input" style="padding:8px;border-radius:var(--radius-sm);background:var(--black);border:1px solid var(--border);color:var(--text-primary);" value="Moi">
+                    </div>
+                    <button id="redit-save-profile" style="background:var(--accent);color:var(--black);border:none;border-radius:var(--radius-sm);padding:8px 16px;font-weight:700;cursor:pointer;margin-top:8px;">Enregistrer</button>
+                </div>
+            </div>
         </div>
 
-        <!-- COMPOSE BAR (visible only on feed page) -->
-        <div class="compose-bar" id="compose-bar">
+        <!-- ONDE COMPOSE BAR (visible only on ONDE feed page) -->
+        <div class="compose-bar" id="compose-bar-onde">
             <input type="text" id="compose-input" maxlength="280" placeholder="⚠️ Alerte ou message d'entraide (280 car.)">
             <button id="compose-send">⧫</button>
         </div>
 
-        <!-- NAV TABS -->
-        <div class="nav-tabs">
+        <!-- TUITTER COMPOSE BAR -->
+        <div class="compose-bar" id="compose-bar-tuitter" style="display:none;">
+            <input type="text" id="tuitter-compose-input" maxlength="500" placeholder="Quoi de neuf ? (500 car.)">
+            <button id="tuitter-compose-send">🐦</button>
+        </div>
+
+        <!-- REDIT COMPOSE BAR -->
+        <div class="compose-bar" id="compose-bar-redit" style="display:none;">
+            <input type="text" id="redit-title-input" maxlength="300" placeholder="Titre…" style="max-width:200px;">
+            <input type="text" id="redit-compose-input" maxlength="40000" placeholder="Contenu de la publication…">
+            <button id="redit-compose-send">📢</button>
+        </div>
+
+        <!-- NAV TABS ONDE -->
+        <div class="nav-tabs" id="nav-onde">
             <button class="tab active" data-page="page-feed">
                 <span class="icon">⚡</span>
                 <span>Alertes</span>
@@ -876,6 +1070,74 @@
             <button class="tab" data-page="page-p2p">
                 <span class="icon">📱</span>
                 <span>P2P</span>
+            </button>
+        </div>
+
+        <!-- NAV TABS TUITTER -->
+        <div class="nav-tabs" id="nav-tuitter" style="display:none;">
+            <button class="tab active" data-page="tuitter-feed">
+                <span class="icon">🏠</span>
+                <span>Accueil</span>
+            </button>
+            <button class="tab" data-page="tuitter-search">
+                <span class="icon">🔍</span>
+                <span>Recherche</span>
+            </button>
+            <button class="tab" data-page="tuitter-messages">
+                <span class="icon">✉</span>
+                <span>Messages</span>
+            </button>
+            <button class="tab" data-page="tuitter-bookmarks">
+                <span class="icon">🔖</span>
+                <span>Favoris</span>
+            </button>
+            <button class="tab" data-page="tuitter-moderation">
+                <span class="icon">🛡</span>
+                <span>Modération</span>
+            </button>
+            <button class="tab" data-page="tuitter-profile">
+                <span class="icon">👤</span>
+                <span>Profil</span>
+            </button>
+            <button class="tab" data-page="tuitter-settings">
+                <span class="icon">⚙</span>
+                <span>Param.</span>
+            </button>
+        </div>
+
+        <!-- NAV TABS REDIT -->
+        <div class="nav-tabs" id="nav-redit" style="display:none;">
+            <button class="tab active" data-page="redit-feed">
+                <span class="icon">🏠</span>
+                <span>Accueil</span>
+            </button>
+            <button class="tab" data-page="redit-communities">
+                <span class="icon">🌐</span>
+                <span>Communautés</span>
+            </button>
+            <button class="tab" data-page="redit-search">
+                <span class="icon">🔍</span>
+                <span>Recherche</span>
+            </button>
+            <button class="tab" data-page="redit-messages">
+                <span class="icon">✉</span>
+                <span>Messages</span>
+            </button>
+            <button class="tab" data-page="redit-bookmarks">
+                <span class="icon">🔖</span>
+                <span>Favoris</span>
+            </button>
+            <button class="tab" data-page="redit-moderation">
+                <span class="icon">🛡</span>
+                <span>Modération</span>
+            </button>
+            <button class="tab" data-page="redit-profile">
+                <span class="icon">👤</span>
+                <span>Profil</span>
+            </button>
+            <button class="tab" data-page="redit-settings">
+                <span class="icon">⚙</span>
+                <span>Param.</span>
             </button>
         </div>
     </div>
@@ -1187,6 +1449,450 @@
                 if (feed) feed.insertBefore(card, feed.firstChild);
             }, 30000);
         }
+
+        // ===== MODE SWITCHING (ONDE / Tuitter / Redit) =====
+        let currentMode = 'onde';
+        const modeBtns = document.querySelectorAll('.mode-switcher .mode-btn');
+        const pagesOnde = ['page-feed','page-radar','page-ai','page-wallet','page-encyclopedia','page-p2p'];
+        const pagesTuitter = ['tuitter-feed','tuitter-search','tuitter-notifications','tuitter-messages','tuitter-profile','tuitter-bookmarks','tuitter-moderation','tuitter-settings'];
+        const pagesRedit = ['redit-feed','redit-communities','redit-post-detail','redit-search','redit-notifications','redit-messages','redit-profile','redit-bookmarks','redit-moderation','redit-settings'];
+
+        function switchMode(mode) {
+            currentMode = mode;
+            modeBtns.forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+            document.getElementById('logo-text').textContent = mode === 'onde' ? '⧫ ONDE' : mode === 'tuitter' ? '🐦 Tuitter' : '📢 Redit';
+
+            // Hide all pages
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            // Show first page of selected mode
+            const pages = mode === 'onde' ? pagesOnde : mode === 'tuitter' ? pagesTuitter : pagesRedit;
+            pages.forEach(id => document.getElementById(id)?.classList.remove('active'));
+            document.getElementById(pages[0])?.classList.add('active');
+
+            // Toggle compose bars
+            document.getElementById('compose-bar-onde').style.display = mode === 'onde' ? 'flex' : 'none';
+            document.getElementById('compose-bar-tuitter').style.display = mode === 'tuitter' ? 'flex' : 'none';
+            document.getElementById('compose-bar-redit').style.display = mode === 'redit' ? 'flex' : 'none';
+
+            // Toggle navs
+            document.getElementById('nav-onde').style.display = mode === 'onde' ? 'flex' : 'none';
+            document.getElementById('nav-tuitter').style.display = mode === 'tuitter' ? 'flex' : 'none';
+            document.getElementById('nav-redit').style.display = mode === 'redit' ? 'flex' : 'none';
+
+            // Reset tab active states
+            document.querySelector(`#nav-${mode}`)?.querySelector('.tab')?.classList.add('active');
+        }
+
+        modeBtns.forEach(btn => {
+            btn.addEventListener('click', () => switchMode(btn.dataset.mode));
+        });
+
+        // ===== TUITTER COMPOSE =====
+        document.getElementById('tuitter-compose-send').addEventListener('click', async () => {
+            const input = document.getElementById('tuitter-compose-input');
+            const body = input.value?.trim();
+            if (!body) return;
+            if (body.length > 500) { setStatusMsg('Le tuit ne peut pas dépasser 500 caractères', true); return; }
+
+            if (isTauri && currentNodePubkey) {
+                try {
+                    const result = await tauriInvoke('social_publish_post', {
+                        platform: 'Tuitter', title: null, body, communitySlug: null
+                    });
+                    input.value = '';
+                    refreshTuitterFeed();
+                    setStatusMsg('Tuit publié !', false);
+                } catch (e) { setStatusMsg(String(e), true); }
+                return;
+            }
+            // Démo
+            const feed = document.getElementById('tuitter-feed-container');
+            addSocialCard(feed, 'Tuitter', body, null);
+            input.value = '';
+        });
+
+        // ===== REDIT COMPOSE =====
+        document.getElementById('redit-compose-send').addEventListener('click', async () => {
+            const titleEl = document.getElementById('redit-title-input');
+            const bodyEl = document.getElementById('redit-compose-input');
+            const title = titleEl.value?.trim();
+            const body = bodyEl.value?.trim();
+            if (!title || !body) { setStatusMsg('Titre et contenu requis', true); return; }
+
+            if (isTauri && currentNodePubkey) {
+                try {
+                    await tauriInvoke('social_publish_post', {
+                        platform: 'Redit', title, body, communitySlug: 'entraide'
+                    });
+                    titleEl.value = '';
+                    bodyEl.value = '';
+                    refreshReditFeed();
+                    setStatusMsg('Publication Redit créée !', false);
+                } catch (e) { setStatusMsg(String(e), true); }
+                return;
+            }
+            const feed = document.getElementById('redit-feed-container');
+            addSocialCard(feed, 'Redit', body, title);
+            titleEl.value = '';
+            bodyEl.value = '';
+        });
+
+        function addSocialCard(container, platform, body, title) {
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.innerHTML = `
+                <div class="card-header">
+                    <div class="avatar">MO</div>
+                    <div class="meta">
+                        <div class="name">Moi</div>
+                        <div class="time">À l'instant</div>
+                    </div>
+                    <span class="card-type ${platform === 'Tuitter' ? 'alert' : 'aid'}">${platform === 'Tuitter' ? 'TUIT' : 'DISCUSSION'}</span>
+                </div>
+                ${title ? `<div style="font-weight:600;margin-bottom:4px;">${esc(title)}</div>` : ''}
+                <div class="content">${esc(body)}</div>
+                <div style="display:flex;gap:16px;margin-top:8px;font-size:12px;color:var(--text-secondary);">
+                    <span>↑ 0</span><span>💬 0</span><span>🔖</span>
+                </div>
+            `;
+            container.insertBefore(card, container.firstChild);
+            // Remove empty-state if present
+            const empty = container.querySelector('.empty-state');
+            if (empty) empty.style.display = 'none';
+        }
+
+        async function refreshTuitterFeed() {
+            if (!isTauri) return;
+            try {
+                const posts = await tauriInvoke('social_list_posts', { platform: 'Tuitter', communitySlug: null, limit: 20, offset: 0 });
+                renderSocialPosts('tuitter-feed-container', posts);
+            } catch (e) {}
+        }
+        async function refreshReditFeed() {
+            if (!isTauri) return;
+            try {
+                const posts = await tauriInvoke('social_list_posts', { platform: 'Redit', communitySlug: null, limit: 20, offset: 0 });
+                renderSocialPosts('redit-feed-container', posts);
+            } catch (e) {}
+        }
+
+        function renderSocialPosts(containerId, posts) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            container.innerHTML = '';
+            if (!posts || posts.length === 0) {
+                container.innerHTML = '<div class="empty-state"><div class="icon">📭</div><div class="label">Aucune publication.</div></div>';
+                return;
+            }
+            posts.forEach(p => {
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.innerHTML = `
+                    <div class="card-header">
+                        <div class="avatar">${esc((p.author_pubkey || '?').slice(0,2).toUpperCase())}</div>
+                        <div class="meta">
+                            <div class="name">${esc(p.author_display_name || p.author_pubkey.slice(0,12))}…</div>
+                            <div class="time">${new Date(p.created_at * 1000).toLocaleString('fr-FR')}</div>
+                        </div>
+                    </div>
+                    ${p.title ? `<div style="font-weight:600;margin-bottom:4px;">${esc(p.title)}</div>` : ''}
+                    <div class="content">${esc(p.body)}</div>
+                    <div style="display:flex;gap:16px;margin-top:8px;font-size:12px;color:var(--text-secondary);">
+                        <span>↑ ${p.vote_score || 0}</span><span>💬</span>
+                        ${p.community_slug ? `<span style="color:var(--accent-dim);">r/${esc(p.community_slug)}</span>` : ''}
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        // ===== SOCIAL NAV TABS =====
+        function initSocialNav(navId) {
+            document.querySelectorAll(`#${navId} .tab`).forEach(tab => {
+                tab.addEventListener('click', () => {
+                    document.querySelectorAll(`#${navId} .tab`).forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    // Hide all pages for current mode
+                    const pages = currentMode === 'tuitter' ? pagesTuitter : currentMode === 'redit' ? pagesRedit : pagesOnde;
+                    pages.forEach(id => { const el = document.getElementById(id); if (el) el.classList.remove('active'); });
+                    document.getElementById(tab.dataset.page)?.classList.add('active');
+
+                    // Toggle compose bar for feed pages only
+                    const isFeed = tab.dataset.page === 'tuitter-feed' || tab.dataset.page === 'redit-feed';
+                    document.getElementById('compose-bar-tuitter').style.display = (currentMode === 'tuitter' && isFeed) ? 'flex' : 'none';
+                    document.getElementById('compose-bar-redit').style.display = (currentMode === 'redit' && isFeed) ? 'flex' : 'none';
+                    document.getElementById('compose-bar-onde').style.display = (currentMode === 'onde') ? 'flex' : 'none';
+                });
+            });
+        }
+        initSocialNav('nav-tuitter');
+        initSocialNav('nav-redit');
+
+        // ===== REDIT COMMUNITY CLICK =====
+        document.getElementById('redit-community-list').addEventListener('click', (e) => {
+            const card = e.target.closest('.card');
+            if (!card) return;
+            const slug = card.dataset.slug;
+            if (!slug) return;
+            document.querySelectorAll('#nav-redit .tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('#nav-redit .tab')[0]?.classList.add('active');
+            pagesRedit.forEach(id => { const el = document.getElementById(id); if (el) el.classList.remove('active'); });
+            document.getElementById('redit-feed')?.classList.add('active');
+            if (isTauri) {
+                tauriInvoke('social_list_posts', { platform: 'Redit', communitySlug: slug, limit: 20, offset: 0 })
+                    .then(posts => renderSocialPosts('redit-feed-container', posts))
+                    .catch(() => {});
+            }
+        });
+
+        // ===== TUITTER/REDIT SEARCH =====
+        document.getElementById('tuitter-search-btn')?.addEventListener('click', () => {
+            const q = document.getElementById('tuitter-search-input')?.value?.trim();
+            if (!q) return;
+            if (isTauri) {
+                tauriInvoke('social_list_posts', { platform: 'Tuitter', communitySlug: null, limit: 20, offset: 0 })
+                    .then(posts => {
+                        const filtered = posts.filter(p => p.body.toLowerCase().includes(q.toLowerCase()));
+                        renderSocialPosts('tuitter-search-results', filtered);
+                    }).catch(() => {});
+            }
+        });
+        document.getElementById('redit-search-btn')?.addEventListener('click', () => {
+            const q = document.getElementById('redit-search-input')?.value?.trim();
+            if (!q) return;
+            if (isTauri) {
+                tauriInvoke('social_list_posts', { platform: 'Redit', communitySlug: null, limit: 50, offset: 0 })
+                    .then(posts => {
+                        const filtered = posts.filter(p => (p.title || '').toLowerCase().includes(q.toLowerCase()) || p.body.toLowerCase().includes(q.toLowerCase()));
+                        renderSocialPosts('redit-search-results', filtered);
+                    }).catch(() => {});
+            }
+        });
+
+        // ===== REDIT COMMUNITY JOIN =====
+        document.getElementById('redit-community-join')?.addEventListener('click', async () => {
+            const slug = document.getElementById('redit-community-input')?.value?.trim();
+            if (!slug) return;
+            if (isTauri && currentNodePubkey) {
+                try {
+                    await tauriInvoke('social_community_membership', { communitySlug: slug, leave: false });
+                    setStatusMsg(`Communauté r/${slug} rejointe !`, false);
+                } catch (e) { setStatusMsg(String(e), true); }
+            }
+        });
+
+        // ===== SETTINGS SAVE =====
+        document.getElementById('tuitter-save-profile')?.addEventListener('click', () => {
+            const name = document.getElementById('tuitter-name-input')?.value?.trim() || 'Moi';
+            document.getElementById('tuitter-display-name').textContent = name;
+            setStatusMsg('Profil Tuitter enregistré', false);
+        });
+        document.getElementById('redit-save-profile')?.addEventListener('click', () => {
+            const name = document.getElementById('redit-name-input')?.value?.trim() || 'Moi';
+            document.getElementById('redit-display-name').textContent = name;
+            setStatusMsg('Profil Redit enregistré', false);
+        });
+
+        // ===== SOCIAL VOTE BUTTONS =====
+        // Each vote button uses data attributes: data-target-id, data-direction (+1/-1), data-table (posts/comments)
+        async function handleVote(targetId, direction, table) {
+            if (!isTauri || !currentNodePubkey) {
+                setStatusMsg('Vote nécessite le mode Tauri', true);
+                return;
+            }
+            try {
+                await tauriInvoke('social_vote', { targetId, direction, targetTable: table });
+                setStatusMsg('Vote enregistré !', false);
+                // Refresh current view
+                if (currentMode === 'tuitter') refreshTuitterFeed();
+                else if (currentMode === 'redit') refreshReditFeed();
+            } catch (e) { setStatusMsg(String(e), true); }
+        }
+
+        // ===== BOOKMARK TOGGLE =====
+        async function toggleBookmark(targetId) {
+            if (!isTauri || !currentNodePubkey) {
+                setStatusMsg('Favoris nécessite le mode Tauri', true);
+                return;
+            }
+            try {
+                await tauriInvoke('social_add_bookmark', { targetId });
+                setStatusMsg('Ajouté aux favoris !', false);
+            } catch(e) {
+                try {
+                    await tauriInvoke('social_remove_bookmark', { targetId });
+                    setStatusMsg('Retiré des favoris', false);
+                } catch(e2) { setStatusMsg(String(e2), true); }
+            }
+        }
+
+        // ===== REPORT =====
+        async function reportPost(targetId) {
+            if (!isTauri || !currentNodePubkey) {
+                setStatusMsg('Signalement nécessite le mode Tauri', true);
+                return;
+            }
+            const reason = prompt('Raison du signalement (spam, harcèlement, autre) :') || 'spam';
+            try {
+                await tauriInvoke('social_report_post', { targetId, reason });
+                setStatusMsg('Signalement envoyé', false);
+            } catch (e) { setStatusMsg(String(e), true); }
+        }
+
+        // ===== MESSAGE SEND =====
+        async function sendSocialMessage() {
+            if (!isTauri || !currentNodePubkey) {
+                setStatusMsg('Messagerie nécessite le mode Tauri', true);
+                return;
+            }
+            const recipient = document.getElementById('msg-recipient-input')?.value?.trim();
+            const body = document.getElementById('msg-body-input')?.value?.trim();
+            if (!recipient || !body) { setStatusMsg('Destinataire et message requis', true); return; }
+            try {
+                await tauriInvoke('social_send_message', { recipientPubkey: recipient, body });
+                document.getElementById('msg-recipient-input').value = '';
+                document.getElementById('msg-body-input').value = '';
+                refreshMessages();
+                setStatusMsg('Message envoyé !', false);
+            } catch (e) { setStatusMsg(String(e), true); }
+        }
+
+        async function refreshMessages() {
+            if (!isTauri || !currentNodePubkey) return;
+            try {
+                const msgs = await tauriInvoke('social_list_messages', {});
+                const tuitterList = document.getElementById('tuitter-message-list');
+                const reditList = document.getElementById('redit-message-list');
+                const html = msgs && msgs.length > 0
+                    ? msgs.map(m => `<div class="card"><div style="font-size:12px;color:var(--text-secondary);">${esc(m.sender_pubkey.slice(0,12))}… → ${esc(m.recipient_pubkey.slice(0,12))}…</div><div class="content">${esc(m.body)}</div><div style="font-size:10px;color:var(--text-dim);">${new Date(m.created_at * 1000).toLocaleString('fr-FR')}</div></div>`).join('')
+                    : '<div class="empty-state"><div class="icon">✉</div><div class="label">Boîte vide.</div></div>';
+                if (tuitterList) tuitterList.innerHTML = html;
+                if (reditList) reditList.innerHTML = html;
+            } catch (e) {}
+        }
+
+        // ===== MODERATION PAGE =====
+        async function refreshModerationReports() {
+            if (!isTauri || !currentNodePubkey) return;
+            try {
+                const reports = await tauriInvoke('social_list_reports', {});
+                const container = document.getElementById('tuitter-moderation-list');
+                const container2 = document.getElementById('redit-moderation-list');
+                const html = reports && reports.length > 0
+                    ? reports.map(r => `<div class="card"><div style="font-size:12px;color:var(--text-secondary);">Signalement ${esc(r.id.slice(0,8))} — ${esc(r.reason)}</div><div class="content">Cible: ${esc(r.target_id.slice(0,12))}…</div><div style="font-size:10px;color:var(--text-dim);">Reporter: ${esc(r.reporter_pubkey.slice(0,12))}… · Statut: ${esc(r.status)}</div></div>`).join('')
+                    : '<div class="empty-state"><div class="icon">🛡</div><div class="label">Aucun signalement ouvert.</div></div>';
+                if (container) container.innerHTML = html;
+                if (container2) container2.innerHTML = html;
+            } catch (e) {}
+        }
+
+        // Update renderSocialPosts to include vote/bookmark/report buttons
+        const origRenderSocialPosts = renderSocialPosts;
+        renderSocialPosts = function(containerId, posts) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            container.innerHTML = '';
+            if (!posts || posts.length === 0) {
+                container.innerHTML = `<div class="empty-state"><div class="icon">📭</div><div class="label">Aucune publication.</div></div>`;
+                return;
+            }
+            posts.forEach(p => {
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.innerHTML = `
+                    <div class="card-header">
+                        <div class="avatar">${esc((p.author_pubkey || '?').slice(0,2).toUpperCase())}</div>
+                        <div class="meta">
+                            <div class="name">${esc(p.author_display_name || p.author_pubkey.slice(0,12))}…</div>
+                            <div class="time">${new Date(p.created_at * 1000).toLocaleString('fr-FR')}</div>
+                        </div>
+                    </div>
+                    ${p.title ? `<div style="font-weight:600;margin-bottom:4px;">${esc(p.title)}</div>` : ''}
+                    <div class="content">${esc(p.body)}</div>
+                    <div style="display:flex;gap:12px;align-items:center;margin-top:8px;font-size:12px;color:var(--text-secondary);">
+                        <button onclick="handleVote('${esc(p.id)}',1,'posts')" style="background:transparent;border:none;color:var(--accent-dim);cursor:pointer;font-size:14px;" title="+1">▲ ${p.vote_score || 0}</button>
+                        <button onclick="handleVote('${esc(p.id)}',-1,'posts')" style="background:transparent;border:none;color:var(--danger);cursor:pointer;font-size:14px;" title="-1">▼</button>
+                        <span onclick="showPostDetail('${esc(p.id)}','${esc(p.platform)}')" style="cursor:pointer;" title="Commentaires">💬</span>
+                        <span onclick="toggleBookmark('${esc(p.id)}')" style="cursor:pointer;" title="Favori">🔖</span>
+                        <span onclick="reportPost('${esc(p.id)}')" style="cursor:pointer;color:var(--danger);margin-left:auto;font-size:10px;" title="Signaler">🚩</span>
+                        ${p.community_slug ? `<span style="color:var(--accent-dim);">r/${esc(p.community_slug)}</span>` : ''}
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        };
+
+        // ===== POST DETAIL (comments + reply) =====
+        async function showPostDetail(postId, platform) {
+            // Navigate to the post detail page
+            const detailPage = platform === 'Tuitter' ? 'tuitter-feed' : 'redit-post-detail';
+            // Use the feed page as detail for Tuitter (no separate detail page yet), Redit has one
+            const pages = currentMode === 'tuitter' ? pagesTuitter : pagesRedit;
+            pages.forEach(id => { const el = document.getElementById(id); if (el) el.classList.remove('active'); });
+            document.getElementById(detailPage)?.classList.add('active');
+
+            const detailContent = document.getElementById('redit-detail-content');
+            if (!detailContent) return;
+
+            // Show post top
+            if (isTauri) {
+                try {
+                    const post = await tauriInvoke('social_get_post', { postId });
+                    const comments = await tauriInvoke('social_list_comments', { postId });
+                    let html = '';
+                    if (post) {
+                        html += `<div class="card"><div class="card-header"><div class="avatar">${esc((post.author_pubkey||'').slice(0,2).toUpperCase())}</div><div class="meta"><div class="name">${esc(post.author_pubkey.slice(0,12))}…</div></div></div>${post.title?`<div style="font-weight:600;">${esc(post.title)}</div>`:''}<div class="content">${esc(post.body)}</div><div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">▲ ${post.vote_score||0}</div></div>`;
+                    }
+                    if (comments && comments.length > 0) {
+                        html += '<div style="margin-top:8px;font-weight:600;">Commentaires</div>';
+                        comments.forEach(c => {
+                            html += `<div class="card" style="margin-left:${c.parent_id ? '20px' : '0'};margin-top:6px;"><div style="font-size:12px;color:var(--text-secondary);">${esc(c.author_pubkey.slice(0,12))}…</div><div class="content">${esc(c.body)}</div><div style="font-size:11px;"><button onclick="handleVote('${esc(c.id)}',1,'comments')" style="background:transparent;border:none;color:var(--accent-dim);cursor:pointer;">▲${c.vote_score||0}</button></div></div>`;
+                        });
+                    } else {
+                        html += '<div class="empty-state"><div class="label">Aucun commentaire.</div></div>';
+                    }
+                    detailContent.innerHTML = html;
+                } catch (e) { detailContent.innerHTML = `<div class="card"><div class="content">Erreur: ${esc(String(e))}</div></div>`; }
+            } else {
+                detailContent.innerHTML = `<div class="card"><div class="content">Post ${esc(postId)} — mode démo (détail complet en mode Tauri)</div></div>`;
+            }
+        }
+
+        // ===== REDIT COMMENT SEND =====
+        document.getElementById('redit-comment-send')?.addEventListener('click', async () => {
+            const input = document.getElementById('redit-comment-input');
+            const comment = input?.value?.trim();
+            if (!comment) return;
+            if (isTauri && currentNodePubkey) {
+                // Get the current post ID from the detail content (hack: read first data attribute)
+                const detailEl = document.getElementById('redit-detail-content');
+                // For now, use a simple approach — the post ID is stored in a global
+                try {
+                    // Re-prompt for post ID if we can't determine it
+                    const postId = window._currentPostId || prompt('ID du post :');
+                    if (!postId) return;
+                    await tauriInvoke('social_send_message', { recipientPubkey: postId, body: comment });
+                    input.value = '';
+                    showPostDetail(postId, 'Redit');
+                    setStatusMsg('Commentaire publié', false);
+                } catch (e) { setStatusMsg(String(e), true); }
+                return;
+            }
+            const detail = document.getElementById('redit-detail-content');
+            if (detail) {
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.innerHTML = `<div class="card-header"><div class="avatar">MO</div><div class="meta"><div class="name">Moi</div><div class="time">À l'instant</div></div></div><div class="content">${esc(comment)}</div>`;
+                detail.appendChild(card);
+            }
+            input.value = '';
+        });
+
+        // ===== MESSAGE COMPOSE =====
+        document.getElementById('tuitter-message-container')?.addEventListener('submit', (e) => {
+            e?.preventDefault();
+            sendSocialMessage();
+        });
 
         // Démarrage du nœud réel au chargement (mode Tauri uniquement)
         initTauriNode();

@@ -13,6 +13,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+serde_json = "1"
 onde-core = { path = "../core" }
 dtn-router = { path = "../core/crates/dtn-router" }
 zim-parser = { path = "../core/crates/zim-parser" }
@@ -41,6 +42,13 @@ bench = false
 [[bin]]
 name = "fuzz_target_4"
 path = "fuzz_targets/fuzz_target_4.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_target_5"
+path = "fuzz_targets/fuzz_target_5.rs"
 test = false
 doc = false
 bench = false
