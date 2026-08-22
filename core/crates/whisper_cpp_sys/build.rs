@@ -51,7 +51,11 @@ fn main() {
 
     // CMake installs the archives into <dst>/lib (cmake crate install prefix).
     let lib_dir = dst.join("lib");
-    let search_dir = if lib_dir.is_dir() { lib_dir } else { dst.to_path_buf() };
+    let search_dir = if lib_dir.is_dir() {
+        lib_dir
+    } else {
+        dst.to_path_buf()
+    };
     println!("cargo:rustc-link-search=native={}", search_dir.display());
     for lib in link_order(&search_dir) {
         println!("cargo:rustc-link-lib=static={lib}");
