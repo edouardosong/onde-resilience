@@ -683,6 +683,136 @@ fn load_metadata(conn: &Connection) -> Result<MbtilesMetadata, MbtilesError> {
 }
 
 // ---------------------------------------------------------------------------
+// Tile access
+// ---------------------------------------------------------------------------
+
+/// One map tile: raw encoded bytes plus the format declared by the file's
+/// `format` metadata row. Bytes are returned verbatim — decoding (raster
+/// blitting, protobuf vector parsing) belongs to a later rendering iteration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tile {
+    /// Raw tile payload exactly as stored in SQLite (`tile_data` BLOB).
+    pub data: Vec<u8>,
+    /// Declared encoding of `data`.
+    pub format: TileFormat,
+}
+
+/// Converts an XYZ row (Google/Slippy convention, `y = 0` at **north**) into
+/// the TMS row physically stored by MBTiles (`y = 0` at **south**).
+///
+/// Returns `None` when the grid no longer fits `u32` rows (`zoom >= 33`) or
+/// when `y` is outside `[0, 2^zoom)` — never panics, never wraps.
+#[must_use]
+pub fn xyz_row_to_tms(y: u32, zoom: u8) -> Option<u32> {
+    let span = 1_u64.checked_shl(u32::from(zoom))?;
+    let y = u64::from(y);
+    if y >= span {
+        return None;
+    }
+    u32::try_from(span - 1 - y).ok()
+}
+
+/// Inverse of [`xyz_row_to_tms`]: TMS row (south-anchored) to XYZ row
+/// (north-anchored).
+#[must_use]
+pub fn tms_row_to_xyz(y: u32, zoom: u8) -> Option<u32> {
+    xyz_row_to_tms(y, zoom)
+}
+
+impl MbtilesReader {
+    /// Fetches the tile at `column`, `row` in **raw MBTiles/TMS** coordinates,
+    /// i.e. exactly the values stored in the `tiles` table.
+    ///
+    /// Returns `Ok(None)` for a valid coordinate with no tile in the dataset
+    /// (sparse datasets are normal).
+    ///
+    /// # Errors
+    ///
+    /// * [`MbtilesError::ZoomOutOfRange`] — outside the dataset range or the
+    ///   absolute [`MAX_SUPPORTED_ZOOM`] cap;
+    /// * [`MbtilesError::CoordinatesOutOfBounds`] — x/y outside `[0, 2^z)`;
+    /// * [`MbtilesError::Sqlite`] — query failure.
+    pub fn get_tile_tms(
+        &self,
+        zoom: u8,
+        column: u32,
+        row: u32,
+    ) -> Result<Option<Tile>, MbtilesError> {
+        self.ensure_tile_coords(zoom, column, row)?;
+        let data: Option<Vec<u8>> = self
+            .conn
+            .query_row(
+                "SELECT tile_data FROM tiles WHERE zoom_level = ?1 AND tile_column = ?2 AND tile_row = ?3",
+                rusqlite::params![zoom, column, row],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(data.map(|data| Tile {
+            data,
+            format: self.metadata.format,
+        }))
+    }
+
+    /// Fetches the tile at XYZ coordinates (the convention used by Leaflet,
+    /// Google Maps and most renderers). Performs the south/north flip against
+    /// the TMS storage layout, then delegates to [`Self::get_tile_tms`].
+    ///
+    /// # Errors
+    /// Same contract as [`Self::get_tile_tms`].
+    pub fn get_tile_xyz(
+        &self,
+        zoom: u8,
+        column: u32,
+        row_xyz: u32,
+    ) -> Result<Option<Tile>, MbtilesError> {
+        let row_tms =
+            xyz_row_to_tms(row_xyz, zoom).ok_or(MbtilesError::CoordinatesOutOfBounds {
+                zoom,
+                x: column,
+                y: row_xyz,
+            })?;
+        self.get_tile_tms(zoom, column, row_tms)
+    }
+
+    /// Validates `z/x/y` against the absolute zoom cap, the dataset-declared
+    /// zoom range and the per-zoom grid extent.
+    fn ensure_tile_coords(&self, zoom: u8, x: u32, y: u32) -> Result<(), MbtilesError> {
+        if zoom > MAX_SUPPORTED_ZOOM {
+            // Generic range message: the request is absurd regardless of what
+            // this particular dataset declares.
+            return Err(MbtilesError::ZoomOutOfRange {
+                requested: zoom,
+                min: None,
+                max: None,
+            });
+        }
+        if let Some(min) = self.metadata.min_zoom {
+            if zoom < min {
+                return Err(MbtilesError::ZoomOutOfRange {
+                    requested: zoom,
+                    min: self.metadata.min_zoom,
+                    max: self.metadata.max_zoom,
+                });
+            }
+        }
+        if let Some(max) = self.metadata.max_zoom {
+            if zoom > max {
+                return Err(MbtilesError::ZoomOutOfRange {
+                    requested: zoom,
+                    min: self.metadata.min_zoom,
+                    max: self.metadata.max_zoom,
+                });
+            }
+        }
+        let span = 1_u64 << zoom; // zoom <= MAX_SUPPORTED_ZOOM: no overflow.
+        if u64::from(x) >= span || u64::from(y) >= span {
+            return Err(MbtilesError::CoordinatesOutOfBounds { zoom, x, y });
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests — synthetic MBTiles databases built in temporary directories, so the
 // suite is CI-safe with no external fixture.
 // ---------------------------------------------------------------------------
@@ -1088,6 +1218,231 @@ mod tests {
         assert_eq!(schema.tiles_kind, TilesKind::Table);
         assert!(!schema.has_unique_tile_index);
         assert!(!schema.fully_conformant());
+    }
+
+    /// Builds a dataset with tiles at every coordinate of zooms 0 and 1 plus
+    /// two sparse zoom-2 tiles; payload byte encodes the TMS row so flips are
+    /// observable in assertions.
+    fn tiled_db(tag: &str) -> TestDb {
+        let db = TestDb::new(tag);
+        let conn = bare_db(&db);
+        conn.execute_batch(
+            r#"
+            CREATE TABLE metadata (name TEXT PRIMARY KEY, value TEXT);
+            CREATE TABLE tiles (
+                zoom_level INTEGER NOT NULL,
+                tile_column INTEGER NOT NULL,
+                tile_row INTEGER NOT NULL,
+                tile_data BLOB NOT NULL
+            );
+            CREATE UNIQUE INDEX tile_index ON tiles (zoom_level, tile_column, tile_row);
+            INSERT INTO metadata VALUES ('name','tiled'),('format','png');
+            INSERT INTO metadata VALUES ('minzoom', '0');
+            INSERT INTO metadata VALUES ('maxzoom', '2');
+            "#,
+        )
+        .expect("ddl");
+        let tiles: Vec<(u8, u32, u32)> = vec![
+            (0, 0, 0),
+            (1, 0, 0),
+            (1, 0, 1),
+            (1, 1, 0),
+            (1, 1, 1),
+            (2, 1, 2),
+            (2, 2, 3),
+        ];
+        for (z, x, y_tms) in &tiles {
+            let payload = [
+                0x89_u8,
+                b'P',
+                b'N',
+                b'G',
+                *z + 10,
+                u8::try_from(*x).unwrap_or(0),
+                u8::try_from(*y_tms).unwrap_or(0),
+            ];
+            conn.execute(
+                "INSERT INTO tiles (zoom_level, tile_column, tile_row, tile_data) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![z, x, y_tms, payload],
+            )
+            .expect("insert tile");
+        }
+        db
+    }
+
+    #[test]
+    fn get_tile_tms_returns_stored_bytes_and_none_on_miss() {
+        let db = tiled_db("mbt-get-tms");
+        let reader = MbtilesReader::open(db.path()).expect("open");
+        let hit = reader
+            .get_tile_tms(1, 1, 0)
+            .expect("query")
+            .expect("tile present");
+        assert_eq!(hit.format, TileFormat::Png);
+        assert_eq!(hit.data, vec![0x89, b'P', b'N', b'G', 11, 1, 0]);
+        let miss = reader.get_tile_tms(2, 3, 3).expect("query");
+        assert_eq!(miss, None, "sparse datasets return None for valid coords");
+    }
+
+    #[test]
+    fn get_tile_xyz_flips_the_row_against_storage() {
+        let db = tiled_db("mbt-get-xyz");
+        let reader = MbtilesReader::open(db.path()).expect("open");
+        // Stored at TMS row 1 == XYZ row (2-1-1)=0 for z=1.
+        let north = reader
+            .get_tile_xyz(1, 0, 0)
+            .expect("query")
+            .expect("present");
+        assert_eq!(north.data, vec![0x89, b'P', b'N', b'G', 11, 0, 1]);
+        // Same physical tile through both APIs:
+        let via_tms = reader
+            .get_tile_tms(1, 0, 1)
+            .expect("query")
+            .expect("present");
+        assert_eq!(north, via_tms);
+        // XYZ row 1 at z=1 maps to TMS row 0 — different stored bytes.
+        let south_xyz = reader
+            .get_tile_xyz(1, 0, 1)
+            .expect("query")
+            .expect("present");
+        assert_ne!(south_xyz.data, north.data);
+    }
+
+    #[test]
+    fn tms_xyz_conversions_roundtrip_across_zooms() {
+        for zoom in 0_u8..=6 {
+            let span = 1_u64 << zoom;
+            for y in 0..span {
+                let y = y as u32;
+                let flipped = xyz_row_to_tms(y, zoom).expect("valid input");
+                assert!(
+                    u64::from(flipped) < span,
+                    "flipped row {flipped} escaped grid at z={zoom}"
+                );
+                assert_eq!(tms_row_to_xyz(flipped, zoom), Some(y), "roundtrip z={zoom}");
+            }
+            // Identity at the equator rows only when the grid is symmetric;
+            // instead verify the known anchor: z=1 north pole (xyz 0) is south
+            // pole (tms 1).
+        }
+        assert_eq!(xyz_row_to_tms(0, 1), Some(1));
+        assert_eq!(xyz_row_to_tms(1, 1), Some(0));
+        assert_eq!(tms_row_to_xyz(0, 1), Some(1));
+    }
+
+    #[test]
+    fn conversions_reject_out_of_grid_inputs() {
+        assert_eq!(xyz_row_to_tms(2, 1), None, "y beyond 2^z rejected");
+        // z=32 still fits u32 rows exactly (last row == u32::MAX):
+        assert_eq!(xyz_row_to_tms(0, 32), Some(u32::MAX));
+        assert_eq!(tms_row_to_xyz(u32::MAX, 32), Some(0));
+        // z=33 overflows the u32 row space -> refused instead of wrapped:
+        assert_eq!(xyz_row_to_tms(0, 33), None);
+        assert_eq!(tms_row_to_xyz(0, 33), None);
+    }
+
+    #[test]
+    fn zoom_outside_declared_range_is_an_error() {
+        let db = tiled_db("mbt-zoomrng");
+        let reader = MbtilesReader::open(db.path()).expect("open");
+        let err = reader.get_tile_tms(3, 0, 0).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                MbtilesError::ZoomOutOfRange {
+                    requested: 3,
+                    min: Some(0),
+                    max: Some(2)
+                }
+            ),
+            "{err}"
+        );
+        // Absolute cap even without declared limits:
+        let bare = TestDb::new("mbt-zoomcap");
+        let conn = bare_db(&bare);
+        conn.execute_batch(
+            "CREATE TABLE metadata (name TEXT PRIMARY KEY, value TEXT);
+             CREATE TABLE tiles (zoom_level INTEGER, tile_column INTEGER, tile_row INTEGER, tile_data BLOB);
+             INSERT INTO metadata VALUES ('name','nocap'),('format','png');",
+        )
+        .expect("ddl");
+        drop(conn);
+        let reader = MbtilesReader::open(bare.path()).expect("open");
+        let err = reader
+            .get_tile_xyz(MAX_SUPPORTED_ZOOM + 1, 0, 0)
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                MbtilesError::ZoomOutOfRange {
+                    requested: 31,
+                    min: None,
+                    max: None
+                }
+            ),
+            "{err}"
+        );
+        assert!(err.to_string().contains("outside supported range"), "{err}");
+    }
+
+    #[test]
+    fn coordinates_outside_the_grid_are_errors() {
+        let db = tiled_db("mbt-grid");
+        let reader = MbtilesReader::open(db.path()).expect("open");
+        for (z, x, y) in [(1, 2, 0), (1, 0, 2), (0, 1, 0), (2, 4, 0)] {
+            let err = reader.get_tile_xyz(z, x, y).unwrap_err();
+            assert!(
+                matches!(err, MbtilesError::CoordinatesOutOfBounds { .. }),
+                "(z={z},x={x},y={y}): {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn tile_count_matches_seeded_rows() {
+        let db = tiled_db("mbt-count");
+        let reader = MbtilesReader::open(db.path()).expect("open");
+        assert_eq!(reader.tile_count().expect("count"), 7);
+    }
+
+    #[test]
+    fn tiles_are_readable_through_a_view() {
+        let db = TestDb::new("mbt-viewget");
+        let conn = bare_db(&db);
+        conn.execute_batch(
+            r#"
+            CREATE TABLE metadata (name TEXT PRIMARY KEY, value TEXT);
+            INSERT INTO metadata VALUES ('name','viewed'),('format','webp'),('minzoom','5'),('maxzoom','5');
+            CREATE TABLE map (
+                zoom_level INTEGER NOT NULL,
+                tile_column INTEGER NOT NULL,
+                tile_row INTEGER NOT NULL,
+                tile_id TEXT NOT NULL
+            );
+            CREATE TABLE images (tile_id TEXT PRIMARY KEY, tile_data BLOB NOT NULL);
+            CREATE UNIQUE INDEX map_index ON map (zoom_level, tile_column, tile_row);
+            INSERT INTO images VALUES ('i1', x'DEADBEEF');
+            INSERT INTO map VALUES (5, 3, 7, 'i1');
+            CREATE VIEW tiles AS
+                SELECT map.zoom_level AS zoom_level, map.tile_column AS tile_column,
+                       map.tile_row AS tile_row, images.tile_data AS tile_data
+                FROM map JOIN images ON images.tile_id = map.tile_id;
+            "#,
+        )
+        .expect("ddl");
+        drop(conn);
+        let reader = MbtilesReader::open(db.path()).expect("open");
+        let tile = reader
+            .get_tile_tms(5, 3, 7)
+            .expect("query")
+            .expect("present");
+        assert_eq!(tile.data, vec![0xDE, 0xAD, 0xBE, 0xEF]);
+        assert_eq!(tile.format, TileFormat::WebP);
+        assert_eq!(
+            reader.get_tile_xyz(5, 3, 0).expect("q").map(|t| t.data),
+            None,
+            "TMS row 7 == XYZ row 24 for z=5; xyz row 0 is a miss"
+        );
     }
 
     #[test]
