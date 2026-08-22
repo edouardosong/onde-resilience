@@ -84,6 +84,19 @@ pub enum OndeMessageType {
     /// hex, "x25519": hex, "timestamp": u64 }` (base64) ; `sig` est la
     /// signature Ed25519 de l'auteur stable sur l'ID canonique.
     IdentityRotation,
+    /// Signalement d'abus (Phase 2.7) — endossement **négatif** propagé dans
+    /// le gossip.
+    ///
+    /// Extension **additive** du format wire : code 15, aucun code existant
+    /// n'est renuméroté. `content` porte le JSON
+    /// `{ reporter, offender, reason, timestamp }` (base64) ; `sig` est la
+    /// signature Ed25519 du rapporteur sur l'ID canonique ; le PoW adaptatif
+    /// s'applique. Compatibilité : un pair ancien rejette proprement le kind
+    /// inconnu (échec fermé au décodage wire) — même sémantique que l'arrivée
+    /// des kinds 9..14 dans les phases précédentes. L'intégration en réception
+    /// exige un rapporteur **de confiance** et se déduplique
+    /// ([`crate::reputation::ReputationSystem::apply_remote_abuse_report`]).
+    AbuseReport,
 }
 
 /// Nostr-style event for the mesh network
@@ -209,6 +222,9 @@ impl MeshEvent {
             // stable de signature ne change PAS (réputation intacte) ; seule
             // la clé X25519 de chiffrement tourne.
             OndeMessageType::IdentityRotation => 14,
+            // Phase 2.7 : code 15 — endossement négatif (signalement d'abus)
+            // propagé dans le gossip, toujours sans renumérotation.
+            OndeMessageType::AbuseReport => 15,
         }
     }
 
@@ -221,6 +237,21 @@ impl MeshEvent {
     /// at least 2 hash attempts on average — trivial for an honest client, a
     /// real (if small) cost for a spammer. Honest producers already use 2–4.
     pub const MIN_POW_DIFFICULTY: u8 = 1;
+
+    /// Vérifier uniquement la signature Ed25519 de l'événement (Phase 2.7 —
+    /// gate d'admission anti-abus). Facteur des vérifications inline déjà
+    /// présentes côté `Node` : hex valide, longueurs exactes, Ed25519 sur
+    /// l'ID canonique. Ne vérifie NI le PoW NI le contenu — c'est le premier
+    /// filtre, le moins coûteux, qui décide si un auteur est **attribuable**.
+    pub fn signature_valid(&self) -> bool {
+        let Ok(pk) = decode_hex_32(&self.pubkey) else {
+            return false;
+        };
+        let Ok(sig) = decode_hex_64(&self.sig) else {
+            return false;
+        };
+        Identity::verify_from_pubkey(&pk, self.id.as_bytes(), &sig)
+    }
 
     /// Verify content validity: size limit, timestamp sanity, canonical ID,
     /// Ed25519 signature and PoW (plancher réseau fixe).
@@ -476,6 +507,8 @@ impl MeshEvent {
             13 => OndeMessageType::Endorsement,
             // Phase 1.4 : annonce de rotation d'identité X25519.
             14 => OndeMessageType::IdentityRotation,
+            // Phase 2.7 : endossement négatif (signalement d'abus).
+            15 => OndeMessageType::AbuseReport,
             other => return Err(format!("wire: unknown kind code {other}")),
         })
     }
@@ -692,6 +725,13 @@ impl GossipProtocol {
         self.known_events.len()
     }
 
+    /// L'événement est-il déjà connu ? Utilisé par le gate d'admission
+    /// anti-abus (Phase 2.7) : un doublon relayé ne doit pas être compté une
+    /// seconde fois contre son auteur — le coût marginal est nul (lookup).
+    pub fn is_known(&self, id: &str) -> bool {
+        self.known_events.contains(id)
+    }
+
     /// Get pending broadcasts (outbox, tous événements confondus)
     pub fn get_pending_broadcasts(&self) -> Vec<&MeshEvent> {
         self.pending_broadcasts.iter().collect()
@@ -767,6 +807,7 @@ impl VoiceMemo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine as _;
 
     #[test]
     fn test_event_creation() {
@@ -1217,11 +1258,16 @@ mod tests {
             OndeMessageType::UpdateChunk,
             OndeMessageType::UpdateRequest,
             OndeMessageType::Endorsement,
+            // Phase 2.7 : signalement d'abus (endossement négatif propagé).
+            OndeMessageType::AbuseReport,
         ]
         .iter()
         .map(MeshEvent::kind_code)
         .collect();
-        assert_eq!(codes, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+        assert_eq!(
+            codes,
+            vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15]
+        );
         let mut sorted = codes.clone();
         sorted.sort_unstable();
         sorted.dedup();
@@ -1235,6 +1281,90 @@ mod tests {
         let id_endorsement =
             MeshEvent::compute_id(pk, 42, &OndeMessageType::Endorsement, &tags, "x");
         assert_ne!(id_alert, id_endorsement);
+    }
+
+    #[test]
+    fn test_abuse_report_kind15_wire_roundtrip() {
+        // Phase 2.7 : un signalement d'abus voyage exactement comme un
+        // endossement (JSON base64 dans content, signé par le rapporteur),
+        // avec un code wire dédié (15). Roundtrip complet octets → événement.
+        let identity = Identity::generate();
+        let payload = serde_json::json!({
+            "reporter": identity.pubkey_hex(),
+            "offender": "bb".repeat(32),
+            "reason": 1u8,
+            "timestamp": 1_000_000u64,
+        });
+        let content =
+            base64::engine::general_purpose::STANDARD.encode(payload.to_string().into_bytes());
+        let mut event =
+            MeshEvent::new_signed(&identity, OndeMessageType::AbuseReport, content, vec![]);
+        event.pow_difficulty = 0; // rapporteur de confiance → pas de PoW
+        assert!(event.signature_valid(), "self-signed event must verify");
+
+        let wire = event.to_wire_bytes().expect("abuse report must serialize");
+        assert_eq!(wire.len(), TrafficPadding::bucket_for(wire.len()));
+        let decoded = MeshEvent::from_wire_bytes(&wire).expect("wire must decode");
+        assert_eq!(decoded.kind, OndeMessageType::AbuseReport);
+        assert_eq!(decoded.pubkey, event.pubkey);
+        assert_eq!(decoded.content, event.content);
+        assert_eq!(decoded.sig, event.sig);
+        assert!(decoded.signature_valid());
+        // Le payload décodé redevient un AbuseReport structuralement valide.
+        let data = base64::engine::general_purpose::STANDARD
+            .decode(&decoded.content)
+            .unwrap();
+        let report: crate::reputation::AbuseReport = serde_json::from_slice(&data).unwrap();
+        assert_eq!(report.offender, "bb".repeat(32));
+        assert_eq!(report.reason, 1);
+        assert_eq!(report.reporter, decoded.pubkey);
+    }
+
+    #[test]
+    fn test_signature_valid_rejects_forged_and_empty() {
+        let identity = Identity::generate();
+        let event = MeshEvent::new_signed(
+            &identity,
+            OndeMessageType::Alert,
+            "honnête".to_string(),
+            vec![],
+        );
+        assert!(event.signature_valid());
+
+        // Signature vide (événement non signé) → invalide.
+        let mut unsigned = event.clone();
+        unsigned.sig = String::new();
+        assert!(!unsigned.signature_valid());
+
+        // Signature forgée (autre clé) → invalide.
+        let mut forged = event.clone();
+        forged.sig = hex::encode([7u8; 64]);
+        assert!(!forged.signature_valid());
+
+        // Contenu modifié après signature, avec ID recalculé sur le nouveau
+        // contenu mais ANCIENNE signature → invalide (la signature ne couvre
+        // plus cet ID). NB : modifier le contenu SANS recalculer l'ID est
+        // rejeté par `validate` (cohérence ID canonique), pas par ce helper.
+        let mut tampered = event.clone();
+        tampered.content = "falsifié".to_string();
+        tampered.id = MeshEvent::compute_id(
+            &tampered.pubkey,
+            tampered.created_at,
+            &tampered.kind,
+            &tampered.tags,
+            &tampered.content,
+        );
+        assert!(!tampered.signature_valid());
+        // Et l'ancien événement falsifié sans recalcul d'ID reste rejeté par
+        // la validation complète (l'ID ne correspond plus au contenu).
+        let mut stale_id = event.clone();
+        stale_id.content = "falsifié".to_string();
+        assert!(stale_id.validate().is_err());
+
+        // Hex invalide → invalide (jamais de panique).
+        let mut badhex = event.clone();
+        badhex.pubkey = "zz".repeat(32);
+        assert!(!badhex.signature_valid());
     }
 
     // ------------------------------------------------------------------

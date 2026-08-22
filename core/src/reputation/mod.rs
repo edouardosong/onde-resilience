@@ -15,6 +15,15 @@ use serde::{Deserialize, Serialize};
 /// n'ont pas encore prouvé leur fiabilité.
 use std::collections::HashMap;
 
+pub mod spam;
+pub use spam::{
+    action_for_abuse, decayed_abuse, AbuseReason, AbuseRecord, AbuseReport, SpamGuard, TrustAction,
+    ABUSE_DEPRIORITIZE_THRESHOLD, ABUSE_IGNORE_THRESHOLD, ABUSE_RECOVERY_PER_HOUR,
+    ABUSE_THROTTLE_THRESHOLD, MAX_ABUSE_REPORTS_TRACKED, MAX_TRACKED_AUTHORS,
+    PENALTY_EXCESSIVE_RATE, PENALTY_INSUFFICIENT_POW, PENALTY_INVALID_EVENT, PENALTY_REMOTE_REPORT,
+    SECS_PER_HOUR, SPAM_BUDGET_PER_WINDOW, SPAM_WINDOW_SECS,
+};
+
 /// Seuil au-dessus duquel un nœud est considéré "de confiance"
 /// (peut poster sans PoW, peut endosser d'autres nœuds).
 pub const TRUSTED_THRESHOLD: f64 = 0.7;
@@ -52,6 +61,15 @@ pub struct ReputationSystem {
     endorsements: HashMap<String, Vec<Endorsement>>,
     /// pubkey_hex → nombre de signatures vérifiées de ce nœud
     activity: HashMap<String, u64>,
+    /// Phase 2.7 — pubkey_hex → enregistrement d'abus (pénalités actives,
+    /// remontée lente). Couche SÉPARÉE du score WoT : un auteur sans
+    /// historique d'abus n'est jamais affecté par le dispositif anti-abus.
+    abuse: HashMap<String, AbuseRecord>,
+    /// Phase 2.7 — clés de dédup des signalements distants intégrés
+    /// (rapporteur, coupable, raison).
+    abuse_report_keys: std::collections::HashSet<(String, String, u8)>,
+    /// Ordre d'arrivée des clés ci-dessus (éviction FIFO bornée).
+    abuse_report_order: std::collections::VecDeque<(String, String, u8)>,
 }
 
 impl ReputationSystem {
@@ -217,6 +235,27 @@ impl ReputationSystem {
     /// - Nœud intermédiaire → échelle linéaire entre 0 et MAX
     ///   proportionnelle à l'inverse de la réputation.
     pub fn required_pow_difficulty(&self, pubkey: &str) -> u8 {
+        // Phase 2.7 : un auteur au moins **throttlé** (abus >= seuil) paie le
+        // PoW maximal, même s'il reste WoT-de-confiance — défense en
+        // profondeur. Vue conservatrice (niveau stocké, sans pliage horaire).
+        if self.stored_abuse_level(pubkey) >= ABUSE_THROTTLE_THRESHOLD {
+            return MAX_POW_DIFFICULTY;
+        }
+        self.required_pow_difficulty_inner(pubkey)
+    }
+
+    /// Variante à temps explicite (Phase 2.7) : la vue de l'abus est pliée à
+    /// `now` — un auteur récupéré retrouve son régime PoW normal sans
+    /// attendre une écriture.
+    pub fn required_pow_difficulty_at(&self, pubkey: &str, now: u64) -> u8 {
+        if self.abuse_level(pubkey, now) >= ABUSE_THROTTLE_THRESHOLD {
+            return MAX_POW_DIFFICULTY;
+        }
+        self.required_pow_difficulty_inner(pubkey)
+    }
+
+    /// Logique PoW adaptative WoT existante (inchangée).
+    fn required_pow_difficulty_inner(&self, pubkey: &str) -> u8 {
         let score = self.score(pubkey);
         if score >= TRUSTED_THRESHOLD {
             return 0;
@@ -230,6 +269,127 @@ impl ReputationSystem {
         let diff_f =
             MAX_POW_DIFFICULTY as f64 - t * (MAX_POW_DIFFICULTY - BASE_POW_DIFFICULTY) as f64;
         (diff_f.round() as u8).clamp(BASE_POW_DIFFICULTY, MAX_POW_DIFFICULTY)
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 2.7 — pénalités anti-abus et signalements propagés
+    // ------------------------------------------------------------------
+
+    /// Enregistrer une violation **attribuable** (l'auteur a signé l'événement
+    /// fautif) à l'instant `now`. Retourne le nouveau niveau d'abus (0..=1).
+    pub fn record_violation(&mut self, author: &str, reason: AbuseReason, now: u64) -> f64 {
+        let rec = self.abuse.entry(author.to_string()).or_default();
+        rec.record(reason.penalty(), now)
+    }
+
+    /// Niveau d'abus d'un auteur vu à `now` (décroissance pliée à la lecture).
+    /// Aucun historique → 0.0.
+    pub fn abuse_level(&self, author: &str, now: u64) -> f64 {
+        self.abuse
+            .get(author)
+            .map(|r| r.level_at(now))
+            .unwrap_or(0.0)
+    }
+
+    /// Niveau d'abus **stocké** (sans pliage horaire) — vue conservatrice
+    /// utilisée par les chemins de validation sans horloge injectable : un
+    /// auteur restera au plancher strict jusqu'à la prochaine écriture pliée.
+    fn stored_abuse_level(&self, author: &str) -> f64 {
+        self.abuse.get(author).map(|r| r.score).unwrap_or(0.0)
+    }
+
+    /// Plier explicitement la décroissance d'abus d'un auteur à `now`
+    /// (écriture). Retourne le niveau plié. Utilisé par la maintenance et
+    /// les tests ; les lectures explicites (`abuse_level`) calculent la vue
+    /// pliée sans muter.
+    pub fn fold_abuse_decay(&mut self, author: &str, now: u64) -> f64 {
+        let Some(rec) = self.abuse.get_mut(author) else {
+            return 0.0;
+        };
+        let folded = rec.level_at(now);
+        rec.score = folded;
+        rec.updated_at = now;
+        folded
+    }
+
+    /// Action graduée vis-à-vis d'un auteur à `now` : Accept / Throttle /
+    /// Deprioritize / Ignore selon le niveau d'abus plié. Sans historique
+    /// d'abus → toujours `Accept` (les pairs honnêtes sont intouchables).
+    pub fn action_for(&self, author: &str, now: u64) -> TrustAction {
+        spam::action_for_abuse(self.abuse_level(author, now))
+    }
+
+    /// Score de confiance **effectif** : score WoT moins le niveau d'abus
+    /// actif (plafonné à 0). C'est la réputation « vue de l'extérieur » —
+    /// l'attaque fait s'effondrer cette valeur sans détruire le socle WoT.
+    pub fn effective_score(&self, author: &str, now: u64) -> f64 {
+        (self.score(author) - self.abuse_level(author, now)).clamp(0.0, 1.0)
+    }
+
+    /// Intégrer un signalement d'abus **reçu d'un autre nœud** (endossement
+    /// négatif propagé, Phase 2.7).
+    ///
+    /// Miroir exact de [`Self::apply_remote_endorsement`] :
+    /// - la signature du rapporteur doit avoir été vérifiée par l'appelant ;
+    /// - le rapporteur doit être **de confiance dans la vue locale**
+    ///   (>= `ENDORSEMENT_THRESHOLD`) — un inconnu ne peut pas dénoncer ;
+    /// - auto-dénonciation et raison inconnue sont rejetées ;
+    /// - dédup par (rapporteur, coupable, raison) — un même constat relayé
+    ///   plusieurs fois ne pèse qu'une fois.
+    ///
+    /// Un rapport qualifié pèse [`spam::PENALTY_REMOTE_REPORT`] (moins qu'une
+    /// violation locale directe : la vue du rapporteur peut diverger).
+    pub fn apply_remote_abuse_report(
+        &mut self,
+        report: &AbuseReport,
+        reporter_sig_verified: bool,
+    ) -> Result<f64, String> {
+        if !reporter_sig_verified {
+            return Err("Abuse report signature could not be verified".to_string());
+        }
+        if report.reporter == report.offender {
+            return Err("A node cannot report itself".to_string());
+        }
+        // La raison doit exister (code wire connu) même si son poids ne sert
+        // pas : un signalement portant un code inconnu est refusé.
+        if AbuseReason::from_code(report.reason).is_none() {
+            return Err(format!("Unknown abuse reason code {}", report.reason));
+        }
+        if self.score(&report.reporter) < ENDORSEMENT_THRESHOLD {
+            return Err(format!(
+                "Abuse reporter {} is not trusted enough (score {})",
+                report.reporter,
+                self.score(&report.reporter)
+            ));
+        }
+        let key = (
+            report.reporter.clone(),
+            report.offender.clone(),
+            report.reason,
+        );
+        if self.abuse_report_keys.contains(&key) {
+            return Err("Duplicate abuse report".to_string());
+        }
+
+        // Un rapport qualifié pèse moins qu'une violation locale directe :
+        // la vue du rapporteur peut diverger de la nôtre (PENALTY_REMOTE_REPORT,
+        // indépendamment de la raison constatée).
+        let rec = self.abuse.entry(report.offender.clone()).or_default();
+        let level = rec.record(PENALTY_REMOTE_REPORT, report.timestamp);
+
+        self.abuse_report_keys.insert(key.clone());
+        self.abuse_report_order.push_back(key);
+        while self.abuse_report_order.len() > MAX_ABUSE_REPORTS_TRACKED {
+            if let Some(old) = self.abuse_report_order.pop_front() {
+                self.abuse_report_keys.remove(&old);
+            }
+        }
+        Ok(level)
+    }
+
+    /// Nombre de signalements distants intégrés (visibilité / tests).
+    pub fn abuse_report_count(&self) -> usize {
+        self.abuse_report_keys.len()
     }
 
     /// Nombre de nœuds suivis.
@@ -433,6 +593,177 @@ mod tests {
             "3 qualified endorsements must promote"
         );
         assert_eq!(rep.score(&newcomer), TRUSTED_THRESHOLD);
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Phase 2.7 — pénalités anti-abus, remontée lente, propagation
+    // ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_record_violation_graduated_actions() {
+        let mut rep = ReputationSystem::new();
+        let a = key("abuser");
+        let t0 = 100_000u64;
+        // Aucun historique → toujours Accept, même inconnu (les honnêtes ne
+        // sont JAMAIS affectés par le dispositif anti-abus).
+        assert_eq!(rep.action_for(&a, t0), TrustAction::Accept);
+
+        // 0.30 → Throttle
+        rep.record_violation(&a, AbuseReason::ExcessiveRate, t0);
+        assert_eq!(rep.action_for(&a, t0 + 1), TrustAction::Throttle);
+        // 0.60 → Deprioritize
+        rep.record_violation(&a, AbuseReason::ExcessiveRate, t0 + 1);
+        assert_eq!(rep.action_for(&a, t0 + 2), TrustAction::Deprioritize);
+        // 0.90 → Ignore (contenu)
+        rep.record_violation(&a, AbuseReason::ExcessiveRate, t0 + 2);
+        assert_eq!(rep.action_for(&a, t0 + 3), TrustAction::Ignore);
+        assert!((rep.abuse_level(&a, t0 + 3) - 0.90).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_effective_score_collapses_and_recovers_slowly() {
+        let mut rep = ReputationSystem::new();
+        let g = key("g");
+        rep.bootstrap(std::slice::from_ref(&g));
+        let a = key("author");
+        let t0 = 200_000u64;
+
+        // Endossé une fois par un fondateur : 0.8 × 0.5 = 0.4
+        rep.endorse(&g, &a, t0).unwrap();
+        assert!((rep.effective_score(&a, t0) - 0.4).abs() < 1e-9);
+
+        // Attaque : deux violations de débit → abus 0.6 → effectif 0.0
+        rep.record_violation(&a, AbuseReason::ExcessiveRate, t0 + 1);
+        rep.record_violation(&a, AbuseReason::ExcessiveRate, t0 + 1);
+        assert_eq!(
+            rep.effective_score(&a, t0 + 2),
+            0.0,
+            "0.4 trust - 0.6 abuse must collapse to 0"
+        );
+        // Le score WoT brut n'est PAS touché : la pénalité est une couche à
+        // part, réversible sans perdre endossements ni activité.
+        assert!((rep.score(&a) - 0.4).abs() < 1e-9);
+
+        // Remontée lente : après 50 h pleines, abus = 0.6 - 0.5 = 0.1
+        let t_late = t0 + 2 + 50 * SECS_PER_HOUR;
+        assert!((rep.abuse_level(&a, t_late) - 0.10).abs() < 1e-9);
+        assert!((rep.effective_score(&a, t_late) - 0.30).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_remote_abuse_report_requires_trusted_reporter_and_dedup() {
+        let mut rep = ReputationSystem::new();
+        let w = key("witness");
+        rep.bootstrap(std::slice::from_ref(&w));
+        let bad = key("bad");
+        let t0 = 300_000u64;
+
+        let report = AbuseReport {
+            reporter: w.clone(),
+            offender: bad.clone(),
+            reason: AbuseReason::ExcessiveRate.code(),
+            timestamp: t0,
+        };
+
+        // Signature non vérifiée → rejeté d'office (miroir des endossements).
+        assert!(rep.apply_remote_abuse_report(&report, false).is_err());
+        assert_eq!(rep.abuse_level(&bad, t0), 0.0);
+
+        // Rapporteur INCONNU (non de confiance localement) → rejeté : un
+        // inconnu ne peut ni endosser ni dénoncer.
+        let stranger = key("stranger");
+        let forged_reporter = AbuseReport {
+            reporter: stranger.clone(),
+            offender: bad.clone(),
+            reason: AbuseReason::ExcessiveRate.code(),
+            timestamp: t0,
+        };
+        assert!(rep
+            .apply_remote_abuse_report(&forged_reporter, true)
+            .is_err());
+        assert_eq!(rep.abuse_level(&bad, t0), 0.0);
+
+        // Auto-dénonciation → rejetée.
+        let self_report = AbuseReport {
+            reporter: w.clone(),
+            offender: w.clone(),
+            reason: AbuseReason::ExcessiveRate.code(),
+            timestamp: t0,
+        };
+        assert!(rep.apply_remote_abuse_report(&self_report, true).is_err());
+
+        // Raison inconnue → rejetée.
+        let bad_reason = AbuseReport {
+            reporter: w.clone(),
+            offender: bad.clone(),
+            reason: 99,
+            timestamp: t0,
+        };
+        assert!(rep.apply_remote_abuse_report(&bad_reason, true).is_err());
+        assert_eq!(rep.abuse_level(&bad, t0), 0.0);
+
+        // Rapport qualifié : +PENALTY_REMOTE_REPORT.
+        let lvl = rep.apply_remote_abuse_report(&report, true).unwrap();
+        assert!((lvl - PENALTY_REMOTE_REPORT).abs() < 1e-9);
+
+        // Doublon (même rapporteur/coupable/raison) → rejeté, pas d'accumulation.
+        assert!(rep.apply_remote_abuse_report(&report, true).is_err());
+        assert!((rep.abuse_level(&bad, t0) - PENALTY_REMOTE_REPORT).abs() < 1e-9);
+
+        // D'autres rapporteurs de confiance qualifiés s'accumulent :
+        // 4 rapports distincts × 0.10 = 0.40 → Deprioritize.
+        let w2 = key("w2");
+        let w3 = key("w3");
+        let w4 = key("w4");
+        rep.set_trusted(&w2, GENESIS_TRUST);
+        rep.set_trusted(&w3, GENESIS_TRUST);
+        rep.set_trusted(&w4, GENESIS_TRUST);
+        for (i, wit) in [&w2, &w3, &w4].into_iter().enumerate() {
+            let r = AbuseReport {
+                reporter: wit.clone(),
+                offender: bad.clone(),
+                reason: AbuseReason::ExcessiveRate.code(),
+                timestamp: t0 + 1 + i as u64,
+            };
+            rep.apply_remote_abuse_report(&r, true).unwrap();
+        }
+        assert!((rep.abuse_level(&bad, t0 + 9) - 0.40).abs() < 1e-9);
+        assert_eq!(rep.action_for(&bad, t0 + 9), TrustAction::Deprioritize);
+    }
+
+    #[test]
+    fn test_required_pow_rises_for_abusive_authors() {
+        let mut rep = ReputationSystem::new();
+        let g = key("g");
+        rep.bootstrap(std::slice::from_ref(&g));
+        let a = key("plain");
+        let t0 = 400_000u64;
+
+        // Sans abus : la confiance WoT donne PoW 0, l'inconnu MAX (inchangé).
+        assert_eq!(rep.required_pow_difficulty(&g), 0);
+        assert_eq!(rep.required_pow_difficulty(&a), MAX_POW_DIFFICULTY);
+
+        // Le fondateur devient abusif (2 × 0.30 = 0.60 ≥ throttle) → PoW MAX
+        // MALGRÉ la confiance WoT (défense en profondeur).
+        rep.record_violation(&g, AbuseReason::ExcessiveRate, t0);
+        rep.record_violation(&g, AbuseReason::ExcessiveRate, t0);
+        assert_eq!(rep.action_for(&g, t0), TrustAction::Deprioritize);
+        assert_eq!(
+            rep.required_pow_difficulty(&g),
+            MAX_POW_DIFFICULTY,
+            "abusive author pays max PoW even when WoT-trusted"
+        );
+
+        // Vue pliée à une date lointaine : récupération → retour au régime
+        // normal (0.60 - 0.80 < 0 → Accept).
+        let t_late = t0 + 80 * SECS_PER_HOUR;
+        assert_eq!(rep.action_for(&g, t_late), TrustAction::Accept);
+        assert_eq!(rep.required_pow_difficulty_at(&g, t_late), 0);
+
+        // La vue conservatrice (sans horloge) suit après pliage explicite.
+        let folded = rep.fold_abuse_decay(&g, t_late);
+        assert_eq!(folded, 0.0);
+        assert_eq!(rep.required_pow_difficulty(&g), 0);
     }
 
     #[test]
