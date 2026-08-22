@@ -286,9 +286,12 @@ ctx.generate("Premiers secours ?").await?;
 Réseau social **hors-ligne d'abord** porté par le mesh : deux plateformes sur le même
 graphe — **Tuitter** (micro-blog 500 car., abonnements, messages privés) et
 **Redit** (posts titrés jusqu'à 40 000 car. dans des communautés à slug `a-z0-9-`,
-commentaires imbriqués, votes ±1). Chaque interaction est un événement mesh signé
-(kinds wire 16..21, ADR-002) ; la base SQLite dédiée (`social_*`, schéma versionné)
-n'est qu'un **cache matérialisé** — les événements signés restent la source de vérité.
+commentaires imbriqués, votes ±1). Publications et commentaires voyagent en
+événements mesh signés (kinds wire 16/17, ADR-002) ; la base SQLite dédiée
+(`social_*`, schéma versionné) n'est qu'un **cache matérialisé** — les événements
+signés restent la source de vérité. Un commentaire arrivé avant son post (banal
+en DTN) y est bufferisé puis rejoué : un cache-miss n'est jamais une erreur ni
+une pénalité pour l'auteur.
 
 ```rust
 // Publication Tuitter : validation + signature + PoW adaptatif + gossip + cache
@@ -347,8 +350,17 @@ Un sélecteur de mode en en-tête bascule entre trois applications sur le même 
   posts titrés jusqu'à 40 000 car., commentaires imbriqués, votes ±1, signalements
 
 Les deux modes partagent le **même graphe social** (`core/src/social.rs` +
-`SocialStore` SQLite dédiée) et propagent chaque interaction en événements mesh
-signés (kinds wire 16..21) via le gate d'admission anti-abus.
+base SQLite dédiée ouverte au démarrage du nœud). État du câblage UI ↔ mesh :
+
+- **Propagé dans le mesh aujourd'hui** : publications Tuitter/Redit et
+  commentaires — événements signés Ed25519 + PoW adaptatif (kinds wire 16/17),
+  relayés via le gate d'admission anti-abus (`Node::publish_social_post`,
+  `Node::publish_social_comment`, réception par `receive_peer_event`).
+- **Local au cache pour l'instant** : votes, abonnements, messages privés,
+  bookmarks et signalements de modération (leurs kinds wire 18..21 sont définis
+  et routés côté core ; leur émission depuis l'UI est un pas suivant).
+- Les commandes Tauri `social_*` exigent un nœud démarré (`node_start`) :
+  elles opèrent sur son identité stable et son cache SQLite dédié.
 
 ### Ouverture rapide :
 ```bash

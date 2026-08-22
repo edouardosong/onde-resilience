@@ -68,3 +68,25 @@ Contraintes du format (établies par les phases 1.1/1.2/1.4/2.7) :
 - Les six kinds sont testés en fuzzing (`fuzz_target_5` : décodage/validation/roundtrip
   `SocialPost` sans panique).
 
+## Addendum (vérification T13 — durcissements)
+
+- **I1** : le champ `parent_id` de `SocialPost` est retiré du contrat Rust
+  (l'imbrication appartient aux commentaires). Un payload wire historique
+  portant encore `parent_id` reste accepté — serde ignore les champs inconnus —
+  et sa valeur est ignorée ; la colonne `social_posts.parent_id` n'est plus
+  alimentée (schéma stable, compat ascendante).
+- **H1** : le chemin de réception distingue deux régimes — payload invalide
+  (plafond brut, JSON illisible, bornes domaine) = violation attribuable ;
+  échec du cache local = écriture best-effort jamais pénalisante. Les
+  commentaires orphelins sont bufferisés (`social_orphan_comments`, schéma v2,
+  plafond 1024) puis rejoués à l'arrivée du post.
+- **M3** : plafonds bruts par kind AVANT tout décodage (512 kio post/commentaire,
+  4 kio vote/follow, 16 kio message privé, 8 kio signalement) + bornes de
+  domaine (corps de message privé 2 000 car., motif de signalement 500 car.,
+  cibles ≤ 128 car., direction ∈ {-1, 1}, clés publiques hex64).
+- **M1 (câblage UI)** : les commandes Tauri `social_*` passent par le `Node`
+  réel (`AppState.node`) — identité stable et cache SQLite ouverts à
+  `node_start` (`onde-social.sqlite3`) ; plus d'états fantômes. La propagation
+  mesh est effective pour publications/commentaires (kinds 16/17) ; votes,
+  follows, messages, bookmarks et signalements restent locaux au cache
+  (émission UI des kinds 18..21 = pas suivant documenté dans le README).

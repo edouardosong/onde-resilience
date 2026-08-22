@@ -1,8 +1,24 @@
-/// Commandes Tauri sociales Tuitter/Redit.
+/// Commandes Tauri sociales Tuitter/Redit (T13 Fusion).
+///
+/// T13-checker M1 — CHOIX DE CÂBLAGE RÉEL : toutes les commandes passent par
+/// le [`Node`] démarré (`AppState.node`, créé par `node_start`) et donc par
+/// SON identité stable et SON `SocialStore` dédié (`social_db_path` ouvert à
+/// `node_start`). Plus d'états fantômes jamais initialisés : sans nœud
+/// démarré, les commandes renvoient une erreur explicite, comme
+/// `publish_alert`/`get_feed_events`.
+///
+/// Ce qui est propagé dans le mesh aujourd'hui : publications Tuitter/Redit
+/// (`social_publish_post` → `Node::publish_social_post`, événement signé
+/// kind 16) et commentaires (`Node::publish_social_comment`, kind 17), via le
+/// gate d'admission. Les votes/abonnements/messages/bookmarks/signalements
+/// restent LOCAUX au cache (leurs kinds 18..21 existent côté core, leur
+/// émission UI est un pas suivant documenté).
 use serde::Serialize;
 use tauri::State;
 
-use onde_core::social::SocialPlatform;
+use crate::commands::AppState;
+use onde_core::node::Node;
+use onde_core::social::{SocialPlatform, SocialPost};
 use onde_core::social_store::SocialStore;
 
 #[derive(Debug, Serialize)]
@@ -40,81 +56,285 @@ pub struct MessageView {
     pub created_at: i64,
 }
 
+/// Verrouille le nœud démarré et lui délègue l'opération.
+async fn with_node<T>(
+    state: State<'_, AppState>,
+    f: impl FnOnce(&mut Node) -> Result<T, String>,
+) -> Result<T, String> {
+    let mut guard = state.node.lock().await;
+    let node = guard
+        .as_mut()
+        .ok_or("Node not started — call node_start first")?;
+    f(node)
+}
+
+/// Accède au cache social du nœud démarré.
+fn social_store_of(node: &Node) -> Result<&SocialStore, String> {
+    node.social_store
+        .as_ref()
+        .ok_or_else(|| "social store unavailable on this node".to_string())
+}
+
+fn parse_platform(platform: &str) -> Result<SocialPlatform, String> {
+    match platform {
+        "Tuitter" => Ok(SocialPlatform::Tuitter),
+        "Redit" => Ok(SocialPlatform::Redit),
+        other => Err(format!("unknown platform: {other}")),
+    }
+}
+
 #[tauri::command]
 pub async fn social_publish_post(
-    social: State<'_, tokio::sync::Mutex<Option<SocialStore>>>,
-    identity: State<'_, tokio::sync::Mutex<Option<onde_core::crypto::Identity>>>,
+    state: State<'_, AppState>,
     platform: String,
     title: Option<String>,
     body: String,
     community_slug: Option<String>,
 ) -> Result<SocialPostView, String> {
-    let store = social.lock().await;
-    let store = store.as_ref().ok_or("social store not initialized")?;
-    let ident = identity.lock().await;
-    let ident = ident.as_ref().ok_or("identity not loaded")?;
-    let pubkey = ident.pubkey_hex();
-
-    let platform = match platform.as_str() {
-        "Tuitter" => SocialPlatform::Tuitter,
-        "Redit" => SocialPlatform::Redit,
-        other => return Err(format!("unknown platform: {other}")),
-    };
-
-    let post = onde_core::social::SocialPost {
-        id: uuid_v4(),
-        platform,
-        author_pubkey: pubkey.clone(),
-        title: title.filter(|t| !t.is_empty()),
-        body,
-        community_slug: community_slug.filter(|s| !s.is_empty()),
-        parent_id: None,
-        media_urls: vec![],
-    };
-
-    post.validate()?;
-    store.upsert_user(&pubkey, "", "", "")?;
-    store.insert_post(&post)?;
-
-    Ok(SocialPostView {
-        id: post.id,
-        platform: platform_label_str(platform).to_string(),
-        author_pubkey: pubkey,
-        author_display_name: String::new(),
-        title: post.title,
-        body: post.body,
-        community_slug: post.community_slug,
-        vote_score: 0,
-        created_at: 0,
+    // CÂBLAGE MESH RÉEL : validation + signature Ed25519 + PoW adaptatif +
+    // gossip + cache local en une seule opération noyau.
+    with_node(state, move |node| {
+        let platform = parse_platform(&platform)?;
+        let event = node.publish_social_post(
+            platform_label(platform),
+            title.as_deref(),
+            &body,
+            community_slug.as_deref(),
+        )?;
+        let stored: SocialPost =
+            serde_json::from_str(&event.content).map_err(|e| format!("post decode: {e}"))?;
+        Ok(SocialPostView {
+            id: stored.id,
+            platform: platform_label(stored.platform).to_string(),
+            author_pubkey: stored.author_pubkey,
+            author_display_name: node.config.display_name.clone(),
+            title: stored.title,
+            body: stored.body,
+            community_slug: stored.community_slug,
+            vote_score: 0,
+            created_at: event.created_at as i64,
+        })
     })
+    .await
 }
 
 #[tauri::command]
 pub async fn social_list_posts(
-    social: State<'_, tokio::sync::Mutex<Option<SocialStore>>>,
+    state: State<'_, AppState>,
     platform: String,
     community_slug: Option<String>,
     limit: usize,
     offset: usize,
 ) -> Result<Vec<SocialPostView>, String> {
-    let store = social.lock().await;
-    let store = store.as_ref().ok_or("social store not initialized")?;
-    let platform = match platform.as_str() {
-        "Tuitter" => SocialPlatform::Tuitter,
-        "Redit" => SocialPlatform::Redit,
-        other => return Err(format!("unknown platform: {other}")),
-    };
+    with_node(state, move |node| {
+        let store = social_store_of(node)?;
+        let platform = parse_platform(&platform)?;
+        let rows = store.list_posts(
+            platform,
+            community_slug.as_deref(),
+            None,
+            limit.min(100),
+            offset,
+        )?;
+        Ok(rows
+            .into_iter()
+            .map(|r| {
+                let author_display_name = display_name_of(node, &r.author_pubkey);
+                SocialPostView {
+                    id: r.id,
+                    platform: r.platform,
+                    author_pubkey: r.author_pubkey,
+                    author_display_name,
+                    title: if r.title.is_empty() {
+                        None
+                    } else {
+                        Some(r.title)
+                    },
+                    body: r.body,
+                    community_slug: if r.community_slug.is_empty() {
+                        None
+                    } else {
+                        Some(r.community_slug)
+                    },
+                    vote_score: r.vote_score,
+                    created_at: r.created_at,
+                }
+            })
+            .collect())
+    })
+    .await
+}
 
-    let rows = store.list_posts(platform, community_slug.as_deref(), None, limit.min(100), offset)?;
+#[tauri::command]
+pub async fn social_list_comments(
+    state: State<'_, AppState>,
+    post_id: String,
+) -> Result<Vec<SocialCommentView>, String> {
+    with_node(state, move |node| {
+        let store = social_store_of(node)?;
+        let rows = store.list_comments(&post_id)?;
+        Ok(rows
+            .into_iter()
+            .map(|r| SocialCommentView {
+                id: r.id,
+                platform: r.platform,
+                author_pubkey: r.author_pubkey,
+                post_id: r.post_id,
+                parent_id: r.parent_id,
+                body: r.body,
+                vote_score: r.vote_score,
+                created_at: r.created_at,
+            })
+            .collect())
+    })
+    .await
+}
 
-    Ok(rows
-        .into_iter()
-        .map(|r| SocialPostView {
+#[tauri::command]
+pub async fn social_vote(
+    state: State<'_, AppState>,
+    target_id: String,
+    direction: i32,
+    target_table: String,
+) -> Result<(), String> {
+    with_node(state, move |node| {
+        let store = social_store_of(node)?;
+        let voter = node.identity.pubkey_hex();
+        store.vote(&voter, &target_id, direction.clamp(-1, 1), &target_table)?;
+        Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn social_follow(
+    state: State<'_, AppState>,
+    followed_pubkey: String,
+    unfollow: bool,
+) -> Result<(), String> {
+    with_node(state, move |node| {
+        let store = social_store_of(node)?;
+        let follower = node.identity.pubkey_hex();
+        if unfollow {
+            store.unfollow(&follower, &followed_pubkey)
+        } else {
+            store.follow(&follower, &followed_pubkey)
+        }
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn social_community_membership(
+    state: State<'_, AppState>,
+    community_slug: String,
+    leave: bool,
+) -> Result<(), String> {
+    with_node(state, move |node| {
+        let store = social_store_of(node)?;
+        let pubkey = node.identity.pubkey_hex();
+        if leave {
+            store.leave_community(&pubkey, &community_slug)
+        } else {
+            store.join_community(&pubkey, &community_slug)
+        }
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn social_send_message(
+    state: State<'_, AppState>,
+    recipient_pubkey: String,
+    body: String,
+) -> Result<(), String> {
+    with_node(state, move |node| {
+        let store = social_store_of(node)?;
+        let sender = node.identity.pubkey_hex();
+        store.insert_message(&uuid_v4(), &sender, &recipient_pubkey, &body)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn social_list_messages(state: State<'_, AppState>) -> Result<Vec<MessageView>, String> {
+    with_node(state, move |node| {
+        let store = social_store_of(node)?;
+        let me = node.identity.pubkey_hex();
+        let rows = store.list_messages(&me)?;
+        Ok(rows
+            .into_iter()
+            .map(|r| MessageView {
+                id: r.id,
+                sender_pubkey: r.sender_pubkey,
+                recipient_pubkey: r.recipient_pubkey,
+                body: r.body,
+                read_at: r.read_at,
+                created_at: r.created_at,
+            })
+            .collect())
+    })
+    .await
+}
+
+// ── Bookmarks ──
+
+#[tauri::command]
+pub async fn social_add_bookmark(
+    state: State<'_, AppState>,
+    target_id: String,
+) -> Result<(), String> {
+    with_node(state, move |node| {
+        let store = social_store_of(node)?;
+        let pubkey = node.identity.pubkey_hex();
+        store.add_bookmark(&pubkey, &target_id)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn social_remove_bookmark(
+    state: State<'_, AppState>,
+    target_id: String,
+) -> Result<(), String> {
+    with_node(state, move |node| {
+        let store = social_store_of(node)?;
+        let pubkey = node.identity.pubkey_hex();
+        store.remove_bookmark(&pubkey, &target_id)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn social_list_bookmarks(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    with_node(state, move |node| {
+        let store = social_store_of(node)?;
+        let pubkey = node.identity.pubkey_hex();
+        store.list_bookmarks(&pubkey)
+    })
+    .await
+}
+
+// ── Post detail ──
+
+#[tauri::command]
+pub async fn social_get_post(
+    state: State<'_, AppState>,
+    post_id: String,
+) -> Result<Option<SocialPostView>, String> {
+    with_node(state, move |node| {
+        let store = social_store_of(node)?;
+        let row = store.get_post(&post_id)?;
+        Ok(row.map(|r| SocialPostView {
             id: r.id,
             platform: r.platform,
-            author_pubkey: r.author_pubkey,
-            author_display_name: String::new(),
-            title: if r.title.is_empty() { None } else { Some(r.title) },
+            author_pubkey: r.author_pubkey.clone(),
+            author_display_name: display_name_of(node, &r.author_pubkey),
+            title: if r.title.is_empty() {
+                None
+            } else {
+                Some(r.title)
+            },
             body: r.body,
             community_slug: if r.community_slug.is_empty() {
                 None
@@ -123,223 +343,25 @@ pub async fn social_list_posts(
             },
             vote_score: r.vote_score,
             created_at: r.created_at,
-        })
-        .collect())
-}
-
-#[tauri::command]
-pub async fn social_list_comments(
-    social: State<'_, tokio::sync::Mutex<Option<SocialStore>>>,
-    post_id: String,
-) -> Result<Vec<SocialCommentView>, String> {
-    let store = social.lock().await;
-    let store = store.as_ref().ok_or("social store not initialized")?;
-    let rows = store.list_comments(&post_id)?;
-    Ok(rows
-        .into_iter()
-        .map(|r| SocialCommentView {
-            id: r.id,
-            platform: r.platform,
-            author_pubkey: r.author_pubkey,
-            post_id: r.post_id,
-            parent_id: r.parent_id,
-            body: r.body,
-            vote_score: r.vote_score,
-            created_at: r.created_at,
-        })
-        .collect())
-}
-
-#[tauri::command]
-pub async fn social_vote(
-    social: State<'_, tokio::sync::Mutex<Option<SocialStore>>>,
-    identity: State<'_, tokio::sync::Mutex<Option<onde_core::crypto::Identity>>>,
-    target_id: String,
-    direction: i32,
-    target_table: String,
-) -> Result<(), String> {
-    let store = social.lock().await;
-    let store = store.as_ref().ok_or("social store not initialized")?;
-    let ident = identity.lock().await;
-    let ident = ident.as_ref().ok_or("identity not loaded")?;
-
-    store.vote(&ident.pubkey_hex(), &target_id, direction.clamp(-1, 1), &target_table)
-}
-
-#[tauri::command]
-pub async fn social_follow(
-    social: State<'_, tokio::sync::Mutex<Option<SocialStore>>>,
-    identity: State<'_, tokio::sync::Mutex<Option<onde_core::crypto::Identity>>>,
-    followed_pubkey: String,
-    unfollow: bool,
-) -> Result<(), String> {
-    let store = social.lock().await;
-    let store = store.as_ref().ok_or("social store not initialized")?;
-    let ident = identity.lock().await;
-    let ident = ident.as_ref().ok_or("identity not loaded")?;
-
-    if unfollow {
-        store.unfollow(&ident.pubkey_hex(), &followed_pubkey)
-    } else {
-        store.follow(&ident.pubkey_hex(), &followed_pubkey)
-    }
-}
-
-#[tauri::command]
-pub async fn social_community_membership(
-    social: State<'_, tokio::sync::Mutex<Option<SocialStore>>>,
-    identity: State<'_, tokio::sync::Mutex<Option<onde_core::crypto::Identity>>>,
-    community_slug: String,
-    leave: bool,
-) -> Result<(), String> {
-    let store = social.lock().await;
-    let store = store.as_ref().ok_or("social store not initialized")?;
-    let ident = identity.lock().await;
-    let ident = ident.as_ref().ok_or("identity not loaded")?;
-
-    if leave {
-        store.leave_community(&ident.pubkey_hex(), &community_slug)
-    } else {
-        store.join_community(&ident.pubkey_hex(), &community_slug)
-    }
-}
-
-#[tauri::command]
-pub async fn social_send_message(
-    social: State<'_, tokio::sync::Mutex<Option<SocialStore>>>,
-    identity: State<'_, tokio::sync::Mutex<Option<onde_core::crypto::Identity>>>,
-    recipient_pubkey: String,
-    body: String,
-) -> Result<(), String> {
-    let store = social.lock().await;
-    let store = store.as_ref().ok_or("social store not initialized")?;
-    let ident = identity.lock().await;
-    let ident = ident.as_ref().ok_or("identity not loaded")?;
-
-    store.insert_message(&uuid_v4(), &ident.pubkey_hex(), &recipient_pubkey, &body)
-}
-
-#[tauri::command]
-pub async fn social_list_messages(
-    social: State<'_, tokio::sync::Mutex<Option<SocialStore>>>,
-    identity: State<'_, tokio::sync::Mutex<Option<onde_core::crypto::Identity>>>,
-) -> Result<Vec<MessageView>, String> {
-    let store = social.lock().await;
-    let store = store.as_ref().ok_or("social store not initialized")?;
-    let ident = identity.lock().await;
-    let ident = ident.as_ref().ok_or("identity not loaded")?;
-
-    let rows = store.list_messages(&ident.pubkey_hex())?;
-    Ok(rows
-        .into_iter()
-        .map(|r| MessageView {
-            id: r.id,
-            sender_pubkey: r.sender_pubkey,
-            recipient_pubkey: r.recipient_pubkey,
-            body: r.body,
-            read_at: r.read_at,
-            created_at: r.created_at,
-        })
-        .collect())
-}
-
-fn uuid_v4() -> String {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
-    let a: u32 = rng.gen();
-    let b: u16 = rng.gen();
-    let c: u16 = rng.gen();
-    let d: u64 = rng.gen();
-    format!(
-        "{:08x}-{:04x}-4{:03x}-{:04x}-{:012x}",
-        a, b & 0x0fff, c & 0x0fff, (d as u16 & 0x3fff) | 0x8000, d >> 16,
-    )
-}
-
-fn platform_label_str(p: SocialPlatform) -> &'static str {
-    match p {
-        SocialPlatform::Tuitter => "Tuitter",
-        SocialPlatform::Redit => "Redit",
-    }
-}
-
-// ── Bookmarks ──
-
-#[tauri::command]
-pub async fn social_add_bookmark(
-    social: State<'_, tokio::sync::Mutex<Option<SocialStore>>>,
-    identity: State<'_, tokio::sync::Mutex<Option<onde_core::crypto::Identity>>>,
-    target_id: String,
-) -> Result<(), String> {
-    let store = social.lock().await;
-    let store = store.as_ref().ok_or("social store not initialized")?;
-    let ident = identity.lock().await;
-    let ident = ident.as_ref().ok_or("identity not loaded")?;
-    store.add_bookmark(&ident.pubkey_hex(), &target_id)
-}
-
-#[tauri::command]
-pub async fn social_remove_bookmark(
-    social: State<'_, tokio::sync::Mutex<Option<SocialStore>>>,
-    identity: State<'_, tokio::sync::Mutex<Option<onde_core::crypto::Identity>>>,
-    target_id: String,
-) -> Result<(), String> {
-    let store = social.lock().await;
-    let store = store.as_ref().ok_or("social store not initialized")?;
-    let ident = identity.lock().await;
-    let ident = ident.as_ref().ok_or("identity not loaded")?;
-    store.remove_bookmark(&ident.pubkey_hex(), &target_id)
-}
-
-#[tauri::command]
-pub async fn social_list_bookmarks(
-    social: State<'_, tokio::sync::Mutex<Option<SocialStore>>>,
-    identity: State<'_, tokio::sync::Mutex<Option<onde_core::crypto::Identity>>>,
-) -> Result<Vec<String>, String> {
-    let store = social.lock().await;
-    let store = store.as_ref().ok_or("social store not initialized")?;
-    let ident = identity.lock().await;
-    let ident = ident.as_ref().ok_or("identity not loaded")?;
-    store.list_bookmarks(&ident.pubkey_hex())
-}
-
-// ── Post detail ──
-
-#[tauri::command]
-pub async fn social_get_post(
-    social: State<'_, tokio::sync::Mutex<Option<SocialStore>>>,
-    post_id: String,
-) -> Result<Option<SocialPostView>, String> {
-    let store = social.lock().await;
-    let store = store.as_ref().ok_or("social store not initialized")?;
-    let row = store.get_post(&post_id)?;
-    Ok(row.map(|r| SocialPostView {
-        id: r.id,
-        platform: r.platform,
-        author_pubkey: r.author_pubkey,
-        author_display_name: String::new(),
-        title: if r.title.is_empty() { None } else { Some(r.title) },
-        body: r.body,
-        community_slug: if r.community_slug.is_empty() { None } else { Some(r.community_slug) },
-        vote_score: r.vote_score,
-        created_at: r.created_at,
-    }))
+        }))
+    })
+    .await
 }
 
 // ── Moderation ──
 
 #[tauri::command]
 pub async fn social_report_post(
-    social: State<'_, tokio::sync::Mutex<Option<SocialStore>>>,
-    identity: State<'_, tokio::sync::Mutex<Option<onde_core::crypto::Identity>>>,
+    state: State<'_, AppState>,
     target_id: String,
     reason: String,
 ) -> Result<(), String> {
-    let store = social.lock().await;
-    let store = store.as_ref().ok_or("social store not initialized")?;
-    let ident = identity.lock().await;
-    let ident = ident.as_ref().ok_or("identity not loaded")?;
-    store.submit_report(&uuid_v4(), &ident.pubkey_hex(), &target_id, &reason)
+    with_node(state, move |node| {
+        let store = social_store_of(node)?;
+        let reporter = node.identity.pubkey_hex();
+        store.submit_report(&uuid_v4(), &reporter, &target_id, &reason)
+    })
+    .await
 }
 
 #[derive(Debug, Serialize)]
@@ -353,18 +375,56 @@ pub struct ReportView {
 }
 
 #[tauri::command]
-pub async fn social_list_reports(
-    social: State<'_, tokio::sync::Mutex<Option<SocialStore>>>,
-) -> Result<Vec<ReportView>, String> {
-    let store = social.lock().await;
-    let store = store.as_ref().ok_or("social store not initialized")?;
-    let rows = store.list_open_reports()?;
-    Ok(rows.into_iter().map(|r| ReportView {
-        id: r.id,
-        reporter_pubkey: r.reporter_pubkey,
-        target_id: r.target_id,
-        reason: r.reason,
-        status: r.status,
-        created_at: r.created_at,
-    }).collect())
+pub async fn social_list_reports(state: State<'_, AppState>) -> Result<Vec<ReportView>, String> {
+    with_node(state, move |node| {
+        let store = social_store_of(node)?;
+        let rows = store.list_open_reports()?;
+        Ok(rows
+            .into_iter()
+            .map(|r| ReportView {
+                id: r.id,
+                reporter_pubkey: r.reporter_pubkey,
+                target_id: r.target_id,
+                reason: r.reason,
+                status: r.status,
+                created_at: r.created_at,
+            })
+            .collect())
+    })
+    .await
+}
+
+fn uuid_v4() -> String {
+    use rand::Rng;
+    let rng = &mut rand::thread_rng();
+    let a: u32 = rng.gen();
+    let b: u16 = rng.gen();
+    let c: u16 = rng.gen();
+    let d: u64 = rng.gen();
+    format!(
+        "{:08x}-{:04x}-4{:03x}-{:04x}-{:012x}",
+        a,
+        b & 0x0fff,
+        c & 0x0fff,
+        (d as u16 & 0x3fff) | 0x8000,
+        d >> 16,
+    )
+}
+
+fn platform_label(p: SocialPlatform) -> &'static str {
+    match p {
+        SocialPlatform::Tuitter => "Tuitter",
+        SocialPlatform::Redit => "Redit",
+    }
+}
+
+/// Nom d'affichage connu localement pour un auteur (cache utilisateurs) ;
+/// chaîne vide si inconnu — JAMAIS de réinitialisation de profil ici.
+fn display_name_of(node: &Node, pubkey: &str) -> String {
+    node.social_store
+        .as_ref()
+        .and_then(|s| s.get_user(pubkey).ok())
+        .flatten()
+        .map(|u| u.display_name)
+        .unwrap_or_default()
 }

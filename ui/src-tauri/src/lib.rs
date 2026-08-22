@@ -4,20 +4,19 @@ mod social_commands;
 
 use commands::AppState;
 use social_commands::{
-    social_add_bookmark, social_community_membership, social_follow,
-    social_get_post, social_list_bookmarks, social_list_comments,
-    social_list_messages, social_list_posts, social_list_reports,
-    social_publish_post, social_remove_bookmark, social_report_post,
+    social_add_bookmark, social_community_membership, social_follow, social_get_post,
+    social_list_bookmarks, social_list_comments, social_list_messages, social_list_posts,
+    social_list_reports, social_publish_post, social_remove_bookmark, social_report_post,
     social_send_message, social_vote,
 };
-use tokio::sync::Mutex;
 
+// T13-checker M1 : plus d'états sociaux fantômes — les commandes sociales
+// passent par le Node réel de `commands::AppState` (identité stable + cache
+// SQLite dédié ouverts à `node_start`).
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState::default())
-        .manage(Mutex::new(None::<onde_core::crypto::Identity>))
-        .manage(Mutex::new(None::<onde_core::social_store::SocialStore>))
         .invoke_handler(tauri::generate_handler![
             commands::node_start,
             commands::node_stop,
