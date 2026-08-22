@@ -173,7 +173,9 @@ pub struct GenerationConfig {
     pub top_k: u32,
     /// Top-p (nucleus) sampling
     pub top_p: f32,
-    /// Repeat penalty
+    /// Repeat penalty (CTRL paper) applied over the last
+    /// [`REPEAT_PENALTY_WINDOW`] tokens (prompt tail + generated so far)
+    /// before the shaping samplers. 1.0 disables it.
     pub repeat_penalty: f32,
     /// Stop sequences
     pub stop_tokens: Vec<String>,
@@ -197,6 +199,16 @@ impl Default for GenerationConfig {
 pub struct TokenizedInput {
     pub tokens: Vec<i32>,
     pub n_tokens: usize,
+}
+
+/// Maximum number of recent tokens (prompt tail + generated so far) covered
+/// by the repeat penalty in [`LlamaContext::generate`].
+pub const REPEAT_PENALTY_WINDOW: usize = 64;
+
+/// Recent-token slice covered by the repeat penalty (bounded window).
+pub fn penalty_window(tokens: &[i32], window: usize) -> &[i32] {
+    let start = tokens.len().saturating_sub(window);
+    &tokens[start..]
 }
 
 /// Validate accumulated detokenizer byte pieces as UTF-8 text.
@@ -386,6 +398,10 @@ impl LlamaContext {
         // Accumulated raw pieces; validated once at the end by
         // [`decode_token_pieces`] (checked — no from_utf8_unchecked).
         let mut text_bytes: Vec<u8> = Vec::new();
+        // Recent tokens for the repeat penalty: prompt tokens, then each
+        // generated token as it is sampled.
+        let mut recent: Vec<llama_cpp_sys::llama_token> =
+            prompt_tokens[..n_prompt as usize].to_vec();
         let mut n_generated: u32 = 0;
 
         for _ in 0..self.config.max_tokens {
@@ -411,6 +427,22 @@ impl LlamaContext {
                 sorted: false,
             };
 
+            // Repeat penalty over the recent-token window, before the shaping
+            // samplers (upstream llama.cpp simple.cpp ordering).
+            if self.config.repeat_penalty != 1.0 {
+                let window = penalty_window(&recent, REPEAT_PENALTY_WINDOW);
+                unsafe {
+                    llama_cpp_sys::llama_sample_repetition_penalties(
+                        self.ctx_ptr,
+                        &mut candidates,
+                        window.as_ptr(),
+                        window.len(),
+                        self.config.repeat_penalty,
+                        0.0, // frequency penalty (not exposed by GenerationConfig)
+                        0.0, // presence penalty (not exposed by GenerationConfig)
+                    );
+                }
+            }
             unsafe {
                 if self.config.temperature > 0.0 {
                     llama_cpp_sys::llama_sample_temp(
@@ -438,6 +470,7 @@ impl LlamaContext {
             if token == eos {
                 break;
             }
+            recent.push(token);
 
             // Detokenize (UTF-8).
             let mut buf = [0u8; 512];
@@ -699,6 +732,31 @@ mod tests {
         let stops = vec![String::new(), "STOP".to_string()];
         assert!(!contains_stop_sequence(b"STO", &stops));
         assert!(contains_stop_sequence(b"aSTOP", &stops));
+    }
+
+    // ---- Debt fix #2: repeat-penalty recent-token window ----
+
+    #[test]
+    fn test_penalty_window_empty_and_short_inputs() {
+        assert!(penalty_window(&[], REPEAT_PENALTY_WINDOW).is_empty());
+        let toks = [1, 2, 3];
+        assert_eq!(penalty_window(&toks, REPEAT_PENALTY_WINDOW), &[1, 2, 3]);
+    }
+
+    #[test]
+    fn test_penalty_window_keeps_last_n_tokens() {
+        let toks: Vec<i32> = (0..100).collect();
+        let w = penalty_window(&toks, 64);
+        assert_eq!(w.len(), 64);
+        assert_eq!(w.first(), Some(&36));
+        assert_eq!(w.last(), Some(&99));
+    }
+
+    #[test]
+    fn test_penalty_window_exact_size_returns_all() {
+        let toks: Vec<i32> = (0..64).collect();
+        assert_eq!(penalty_window(&toks, 64).len(), 64);
+        assert_eq!(penalty_window(&toks, 64), toks.as_slice());
     }
 
     /// Real llama.cpp inference test (only with the `llama-cpp` feature).
