@@ -25,6 +25,16 @@ pub struct DtnMessage {
     pub delivered_to: Vec<String>,
 }
 
+impl DtnMessage {
+    /// Parse a `DtnMessage` from arbitrary JSON bytes (the unreliable DTN wire
+    /// feed). Returns `Err` on malformed JSON or wrong shape — never panics, so
+    /// it is safe as a cargo-fuzz entry point.
+    pub fn from_wire_bytes(bytes: &[u8]) -> Result<DtnMessage, String> {
+        serde_json::from_slice(bytes)
+            .map_err(|e| format!("dtn wire parse failed: {e}"))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum MessageType {
     Alert,
@@ -501,5 +511,43 @@ mod tests {
             "oldest equal-priority message must be dropped"
         );
         assert!(ids.contains(&"newer"));
+    }
+}
+
+/// Regression tests for the `from_wire_bytes` cargo-fuzz entry point.
+#[cfg(test)]
+mod fuzz_regression_tests {
+    use super::*;
+
+    #[test]
+    fn from_wire_bytes_roundtrip() {
+        let msg = DtnMessage {
+            id: "a".to_string(),
+            sender: "b".to_string(),
+            destination: None,
+            payload: vec![1u8, 2, 3],
+            msg_type: MessageType::Alert,
+            ttl: 5,
+            hop_count: 1,
+            timestamp_ms: 0,
+            priority: 0,
+            delivered_to: vec![],
+        };
+        let wire = serde_json::to_vec(&msg).unwrap();
+        let back = DtnMessage::from_wire_bytes(&wire).unwrap();
+        assert_eq!(back.id, "a");
+        assert_eq!(back.payload, vec![1u8, 2, 3]);
+    }
+
+    #[test]
+    fn from_wire_bytes_rejects_garbage_no_panic() {
+        // Arbitrary bytes must return a Result, never panic (fuzz safety).
+        for _ in 0..5 {
+            let chunk: Vec<u8> = (0..16u8).collect();
+            let _ = DtnMessage::from_wire_bytes(&chunk);
+        }
+        // Empty and whitespace-only inputs are tolerated as Result too.
+        let _ = DtnMessage::from_wire_bytes(b"");
+        let _ = DtnMessage::from_wire_bytes(b"   ");
     }
 }

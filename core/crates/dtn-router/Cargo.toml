@@ -6,6 +6,8 @@ edition = "2021"
 [dependencies]
 tokio = { version = "1", features = ["sync", "macros", "rt"] }
 serde = { version = "1", features = ["derive"] }
+# JSON wire parsing for `DtnMessage::from_wire_bytes` (light dep, in workspace lockfile).
+serde_json = "1"
 
 [features]
 default = []
