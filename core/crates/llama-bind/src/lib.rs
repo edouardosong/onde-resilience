@@ -211,6 +211,22 @@ pub fn penalty_window(tokens: &[i32], window: usize) -> &[i32] {
     &tokens[start..]
 }
 
+/// Ensure a generation request fits the context window.
+///
+/// The prompt occupies positions `0..n_prompt-1` and every generated token
+/// takes one further position, so the request needs exactly
+/// `n_prompt + max_tokens` slots. Returns a clean error when it would
+/// overflow `n_ctx`.
+pub fn check_context_fit(n_prompt: usize, max_tokens: u32, n_ctx: usize) -> Result<(), String> {
+    if n_prompt + max_tokens as usize > n_ctx {
+        Err(format!(
+            "context overflow: prompt ({n_prompt} tokens) + max_tokens ({max_tokens}) exceeds n_ctx ({n_ctx}) — reduce the prompt or max_tokens"
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 /// Validate accumulated detokenizer byte pieces as UTF-8 text.
 ///
 /// llama.cpp may emit byte-fallback pieces that split a multibyte UTF-8
@@ -370,6 +386,9 @@ impl LlamaContext {
         if n_prompt < 0 {
             return Err("Prompt too long for the context window".to_string());
         }
+
+        // Guard: prompt + generated tokens must fit in the context window.
+        check_context_fit(n_prompt, self.config.max_tokens, n_ctx)?;
 
         // 2. Decode the prompt (logits only on the last token).
         // NOTE: this llama.cpp version does not set `n_tokens` in init — the caller must.
@@ -757,6 +776,65 @@ mod tests {
         let toks: Vec<i32> = (0..64).collect();
         assert_eq!(penalty_window(&toks, 64).len(), 64);
         assert_eq!(penalty_window(&toks, 64), toks.as_slice());
+    }
+
+    // ---- Debt fix #3: context-fit guard ----
+
+    #[test]
+    fn test_check_context_fit_accepts_fitting_requests() {
+        assert!(check_context_fit(0, 512, 512).is_ok());
+        assert!(check_context_fit(500, 12, 512).is_ok());
+        // Exact fit: prompt positions 0..499 + tokens at 500..511.
+        assert!(check_context_fit(500, 12, 512).is_ok());
+        // Zero generation requested always fits if the prompt fits.
+        assert!(check_context_fit(512, 0, 512).is_ok());
+    }
+
+    #[test]
+    fn test_check_context_fit_rejects_overflow_with_clean_error() {
+        // Off-by-one boundary: 511+1 fits, 512+1 overflows.
+        assert!(check_context_fit(511, 1, 512).is_ok());
+        let err = check_context_fit(512, 1, 512).unwrap_err();
+        for expected in ["512", "1", "exceeds"] {
+            assert!(
+                err.contains(expected),
+                "error must mention {expected}: {err}"
+            );
+        }
+        let err2 = check_context_fit(10, 600, 512).unwrap_err();
+        assert!(err2.contains("600") && err2.contains("10"));
+    }
+
+    #[cfg(feature = "llama-cpp")]
+    #[tokio::test]
+    async fn test_real_generate_rejects_context_overflow() {
+        let model_path = "/home/linux/onde-models/qwen2.5-0.5b-instruct-q4_k_m.gguf";
+        if !std::path::Path::new(model_path).exists() {
+            eprintln!(
+                "SKIP: GGUF model not found at {} — real overflow test skipped",
+                model_path
+            );
+            return;
+        }
+
+        let mut ctx = LlamaContext::new(
+            GGUFModel::qwen_0_5b(Quantization::Q4K),
+            GenerationConfig {
+                max_tokens: 10_000,
+                ..GenerationConfig::default()
+            },
+        );
+        ctx.load(model_path)
+            .expect("real llama.cpp model load should succeed");
+
+        let err = ctx
+            .generate("Bonjour")
+            .await
+            .expect_err("prompt (few tokens) + max_tokens=10000 must exceed n_ctx=512");
+        assert!(
+            err.contains("exceeds"),
+            "expected the context-fit error, got: {err}"
+        );
     }
 
     /// Real llama.cpp inference test (only with the `llama-cpp` feature).
