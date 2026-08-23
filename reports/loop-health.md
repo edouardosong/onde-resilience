@@ -27,3 +27,4 @@
 - 2026-08-23 : T24 mergée it.14 (mutant idle 198:20 tué, preuve négative rejouée par checker) ; T22 coverage lancée.
 - 2026-08-23 : T22 mergée it.15 (baseline coverage 89,80 % lignes vérifiée à l'identique par le checker Δ0,00 pt ; outil cargo-llvm-cov disponible pour gates futures) ; backlog quasi épuisé — reste T20 (en cours), décision seuil gate (utilisateur), dettes INFO.
 - 2026-08-23 : T25 mergée it.16 (11k validé, reproduction checker byte-identique) ; checkout T20 repris de l'ancien clone, cherry-pick e20db17 appliqué (a58173b) ; Phase 3.3 = FAIT.
+- 2026-08-23 : T20 mergée it.17 (100k messages, RSS 51/100 MiB < 256, preuve re-jouée après perte zombie) ; T26 mergée it.18 (gate coverage ACTIVE en CI) ; incident zombie #3 (processus orphelin tué, règle 7 appliquée) ; backlog restant : T29 minor + dettes INFO + décisions humaines.

@@ -20,7 +20,7 @@
 |---|---|
 | ✅ **Réel et durci** | Mesh DTN, crypto Ed25519/X25519/ChaCha20-Poly1305, PoW adaptatif, réputation Web-of-Trust propagée, padding de trafic, mises à jour signées par le mesh, persistance SQLite, auto-réparation de partition, observabilité |
 | 🔶 **Réel derrière feature optionnelle** | LLM local (llama.cpp/GGUF, feature `llama-cpp`), STT (whisper.cpp, feature `whisper-cpp`) — mocks par défaut pour les builds légers |
-| 🟡 **Récent, validé en cours** | Budget mémoire 100k messages (stress release exécuté, pic RSS borné — revue finale en cours) |
+| ✅ **Validé à gros volume** | Budget mémoire : stress 100k messages via le chemin réel d'ingestion — pic RSS 51 Mo (ingestion) / 100 Mo (post-restauration) < seuil 256 Mo, re-joué et archivé |
 | ⚠️ **Mock assumé** | Preuves ZK (`ZkProof::verify` non implémenté — ROADMAP 3.9 : SNARK réel ou retrait du claim) |
 
 ---
@@ -45,7 +45,7 @@ ONDE permet à deux nœuds (mobiles ou desktops) d'**échanger des alertes sign�
 | 🕶️ **Confidentialité** | Padding de trafic opérationnel sur le fil (seaux 256 B / 1 Kio / 4 Kio / 16 Kio) | ✅ Réel |
 | ♻️ **Auto-réparation** | Détection de partition déterministe, re-sync au retour, heal borné (zéro perte/duplication testés) | ✅ Réel |
 | 📊 **Observabilité** | Métriques atomiques (ingestion/gossip/pairs/storage), snapshot JSON au démarrage, endpoint santé `GET /health` **opt-in** localhost | ✅ Réel |
-| 💾 **Budget mémoire** | Stress 100k messages par le chemin réel d'ingestion : pic RSS mesuré et borné, compression Deflate validée | 🟡 Revue finale |
+| 💾 **Budget mémoire** | Stress 100k messages par le chemin réel d'ingestion : pic RSS mesuré et borné (51/100 Mo < 256 Mo), compression Deflate validée | ✅ Réel |
 | 💰 **Finance ZK** | Transactions asynchrones type Mina | ⚠️ Mock assumé |
 
 ---
