@@ -1,0 +1,11 @@
+[diff-coverage] seuil=80% tolérance=±2 pts base=fixture-b
+==============================================================================
+STATUT         %        lignes  fichier (core-relatif)
+------------------------------------------------------------------------------
+MANQUE    70.00%   140/200     core/crates/example/src/lib.rs
+MANQUE    70.00%    35/50      core/src/network/mod.rs
+------------------------------------------------------------------------------
+exclu (règle déclarée) : core/src/bin/node.rs
+AGREGAT diff : 70.00% (175/250 lignes) sur 2 fichier(s) modifié(s) mesuré(s)
+*** FAIL — 70.00% < 78% (seuil 80% - tolérance 2 pts) ***
+  pire fichier : core/crates/example/src/lib.rs 70.00% (140/200 lignes)

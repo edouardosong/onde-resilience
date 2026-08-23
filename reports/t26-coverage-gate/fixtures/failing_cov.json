@@ -1,0 +1,122 @@
+{
+ "data": [
+  {
+   "files": [
+    {
+     "branches": [],
+     "filename": "/home/user/proj/core/crates/example/src/lib.rs",
+     "functions": [],
+     "segments": [
+      [
+       1,
+       0,
+       140,
+       true,
+       true,
+       false
+      ]
+     ],
+     "summary": {
+      "branches": {
+       "count": 0,
+       "covered": 0,
+       "percent": 0
+      },
+      "functions": {
+       "count": 5,
+       "covered": 5,
+       "percent": 100.0
+      },
+      "instantiations": {
+       "count": 5,
+       "covered": 5,
+       "percent": 100.0
+      },
+      "lines": {
+       "count": 200,
+       "covered": 140,
+       "percent": 70.0
+      }
+     }
+    },
+    {
+     "branches": [],
+     "filename": "/home/user/proj/core/src/network/mod.rs",
+     "functions": [],
+     "segments": [
+      [
+       1,
+       0,
+       35,
+       true,
+       true,
+       false
+      ]
+     ],
+     "summary": {
+      "branches": {
+       "count": 0,
+       "covered": 0,
+       "percent": 0
+      },
+      "functions": {
+       "count": 5,
+       "covered": 5,
+       "percent": 100.0
+      },
+      "instantiations": {
+       "count": 5,
+       "covered": 5,
+       "percent": 100.0
+      },
+      "lines": {
+       "count": 50,
+       "covered": 35,
+       "percent": 70.0
+      }
+     }
+    },
+    {
+     "branches": [],
+     "filename": "/home/user/proj/core/src/bin/node.rs",
+     "functions": [],
+     "segments": [
+      [
+       1,
+       0,
+       0,
+       true,
+       true,
+       false
+      ]
+     ],
+     "summary": {
+      "branches": {
+       "count": 0,
+       "covered": 0,
+       "percent": 0
+      },
+      "functions": {
+       "count": 5,
+       "covered": 0,
+       "percent": 0
+      },
+      "instantiations": {
+       "count": 5,
+       "covered": 0,
+       "percent": 0
+      },
+      "lines": {
+       "count": 118,
+       "covered": 0,
+       "percent": 0.0
+      }
+     }
+    }
+   ],
+   "functions": []
+  }
+ ],
+ "type": "llvm.coverage.json.export",
+ "version": "2.0.1"
+}
