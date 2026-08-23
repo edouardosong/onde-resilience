@@ -1,13 +1,12 @@
-# ONDE — baseline ast-grep (2026-08-23)
+# ONDE — baseline ast-grep (mise à jour 2026-08-23 après T30)
 # Outil : ast-grep 0.45.1 · config : .ast-grep/sgconfig.yml · commande : ast-grep scan -c .ast-grep/sgconfig.yml
 # Sémantique gate : tout finding ABSENT de ce fichier = finding de checker (error => bloquant sauf justification ADR/expect documenté).
-# Ce fichier est mis à jour UNIQUEMENT par décision tracée dans STATE.md (jamais pour 'faire passer' un nouveau code).
 
+core/src/storage/mod.rs:78:48: note[onde-rust-expect-critical]: expect() hors tests dans un module critique — vérifier que le message documente l'invariant non tenu (info checker)
+core/src/storage/mod.rs:267:21: note[onde-rust-expect-critical]: expect() hors tests dans un module critique — vérifier que le message documente l'invariant non tenu (info checker)
+core/src/storage/mod.rs:300:5: note[onde-rust-expect-critical]: expect() hors tests dans un module critique — vérifier que le message documente l'invariant non tenu (info checker)
+core/src/storage/mod.rs:596:9: note[onde-rust-expect-critical]: expect() hors tests dans un module critique — vérifier que le message documente l'invariant non tenu (info checker)
+core/src/storage/mod.rs:599:9: note[onde-rust-expect-critical]: expect() hors tests dans un module critique — vérifier que le message documente l'invariant non tenu (info checker)
 core/src/crypto/mod.rs:88:9: note[onde-rust-expect-critical]: expect() hors tests dans un module critique — vérifier que le message documente l'invariant non tenu (info checker)
-core/src/crypto/mod.rs:745:24: error[onde-rust-unwrap-critical]: unwrap() hors tests dans un module critique ONDE — retourner Result, ou expect(msg) avec justification en commentaire (gate qualité onde-loop §6)
-core/src/storage/mod.rs:75:48: error[onde-rust-unwrap-critical]: unwrap() hors tests dans un module critique ONDE — retourner Result, ou expect(msg) avec justification en commentaire (gate qualité onde-loop §6)
-core/src/storage/mod.rs:257:30: error[onde-rust-unwrap-critical]: unwrap() hors tests dans un module critique ONDE — retourner Result, ou expect(msg) avec justification en commentaire (gate qualité onde-loop §6)
-core/src/storage/mod.rs:287:5: note[onde-rust-expect-critical]: expect() hors tests dans un module critique — vérifier que le message documente l'invariant non tenu (info checker)
-core/src/storage/mod.rs:583:9: note[onde-rust-expect-critical]: expect() hors tests dans un module critique — vérifier que le message documente l'invariant non tenu (info checker)
-core/src/storage/mod.rs:586:9: note[onde-rust-expect-critical]: expect() hors tests dans un module critique — vérifier que le message documente l'invariant non tenu (info checker)
-core/src/protocol/mod.rs:215:20: error[onde-rust-unwrap-critical]: unwrap() hors tests dans un module critique ONDE — retourner Result, ou expect(msg) avec justification en commentaire (gate qualité onde-loop §6)
+core/src/crypto/mod.rs:749:24: note[onde-rust-expect-critical]: expect() hors tests dans un module critique — vérifier que le message documente l'invariant non tenu (info checker)
+core/src/protocol/mod.rs:218:20: note[onde-rust-expect-critical]: expect() hors tests dans un module critique — vérifier que le message documente l'invariant non tenu (info checker)

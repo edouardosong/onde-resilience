@@ -742,7 +742,17 @@ impl TxPool {
 
         if !committed.is_empty() {
             // Update state root
-            let last = self.state_roots.last().unwrap().clone();
+            // INVARIANT : `state_roots` démarre avec la racine « genesis »
+            // (TxPool::new, champ privé) et n'est jamais tronqué ni vidé
+            // ensuite — seuls des `push` le modifient — donc `last()` est
+            // toujours `Some`.
+            let last = self
+                .state_roots
+                .last()
+                .expect(
+                    "INVARIANT : state_roots contient toujours au moins la racine genesis                      posée par TxPool::new et n'est jamais vidée (seuls push la mutent)",
+                )
+                .clone();
             let new_root = hex::encode(Sha256::digest(
                 format!("{last}:{}", self.committed.len()).as_bytes(),
             ));

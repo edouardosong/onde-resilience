@@ -212,7 +212,12 @@ impl MeshEvent {
     ) -> String {
         let canonical =
             serde_json::json!([pubkey, created_at, Self::kind_code(kind), tags, content]);
-        let data = serde_json::to_vec(&canonical).unwrap();
+        // INVARIANT : sérialiser une `serde_json::Value` vers `Vec<u8>` est
+        // infaillible — les clés de map d'une Value sont des String par
+        // construction et l'écriture en mémoire n'a aucun chemin d'EIO.
+        let data = serde_json::to_vec(&canonical).expect(
+            "INVARIANT : la sérialisation d'une Value JSON vers Vec<u8> en mémoire est infaillible",
+        );
         hex::encode(Sha256::digest(&data))
     }
 
