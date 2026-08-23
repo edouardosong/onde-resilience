@@ -722,24 +722,48 @@ impl GossipProtocol {
     /// Un événement reste dans l'outbox jusqu'à éviction (bornée) afin que
     /// les autres pairs puissent aussi le recevoir.
     pub fn get_pending_for_peer(&mut self, peer_id: &str) -> Vec<MeshEvent> {
-        let delivered_set = self.delivered.entry(peer_id.to_string()).or_default();
+        let to_send = self.peek_pending_for_peer(peer_id, usize::MAX);
+        let ids: Vec<String> = to_send.iter().map(|e| e.id.clone()).collect();
+        self.mark_delivered_to_peer(peer_id, &ids);
+        to_send
+    }
 
+    /// Sélectionner SANS marquer « livré », borné à `max` événements
+    /// (Phase 3.4 — rattrapage par lots bornés). Même sélection FIFO que
+    /// [`GossipProtocol::get_pending_for_peer`] ; le compagnon
+    /// [`GossipProtocol::mark_delivered_to_peer`] permet de ne marquer
+    /// qu'APRÈS coup — base de [`crate::node::Node::take_heal_batch`].
+    pub fn peek_pending_for_peer(&mut self, peer_id: &str, max: usize) -> Vec<MeshEvent> {
+        if max == 0 {
+            return Vec::new();
+        }
+        let delivered_set = self.delivered.entry(peer_id.to_string()).or_default();
         let mut to_send = Vec::new();
         for event in self.pending_broadcasts.iter() {
+            if to_send.len() >= max {
+                break;
+            }
             if !delivered_set.iter().any(|id| id == &event.id) {
                 to_send.push(event.clone());
             }
         }
+        to_send
+    }
 
-        // Marque les événements envoyés comme livrés à ce pair (borné)
-        for event in &to_send {
+    /// Marquer des événements (par ID) comme livrés à `peer_id` — borné
+    /// ([`MAX_DELIVERED_PER_PEER`]), compagnon de
+    /// [`GossipProtocol::peek_pending_for_peer`].
+    pub fn mark_delivered_to_peer(&mut self, peer_id: &str, ids: &[String]) {
+        if ids.is_empty() {
+            return;
+        }
+        let delivered_set = self.delivered.entry(peer_id.to_string()).or_default();
+        for id in ids {
             if delivered_set.len() >= MAX_DELIVERED_PER_PEER {
                 delivered_set.pop_front();
             }
-            delivered_set.push_back(event.id.clone());
+            delivered_set.push_back(id.clone());
         }
-
-        to_send
     }
 
     /// Même sélection que [`GossipProtocol::get_pending_for_peer`], mais
