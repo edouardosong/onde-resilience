@@ -97,9 +97,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!(
                     "  --geohash <geohash>       Node geohash position (7 chars, default: u09tunq)"
                 );
-                println!(
-                    "  --health-port <port>      Serve GET /health JSON on 127.0.0.1:<port>\n                     \x20                           (0 = ephemeral port; disabled by default)"
-                );
+                println!("  --health-port <port>     Serve GET /health JSON on 127.0.0.1:<port>");
+                println!("                           (0 = ephemeral port; disabled by default)");
                 println!("  --help, -h               Show this help");
                 return Ok(());
             }
