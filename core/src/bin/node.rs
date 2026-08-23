@@ -6,6 +6,7 @@
 use std::env;
 use tokio::signal;
 
+use onde_core::health::{spawn_health_server, HealthHandle};
 use onde_core::node::{Node, NodeConfig, NodeType};
 
 #[tokio::main]
@@ -26,6 +27,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut sqlite_path: Option<String> = None;
     let mut battery_saver = false;
     let mut geohash = String::from("u09tunq"); // position par défaut (démo Paris)
+                                               // Phase 3.6 — endpoint de santé désactivé par défaut (opt-in explicite).
+    let mut health_port: Option<u16> = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -58,6 +61,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--battery-saver" => {
                 battery_saver = true;
             }
+            "--health-port" => {
+                if i + 1 < args.len() {
+                    match args[i + 1].parse::<u16>() {
+                        Ok(port) => health_port = Some(port),
+                        Err(_) => {
+                            return Err(format!(
+                                "--health-port expects a port number (0-65535), got {:?}",
+                                args[i + 1]
+                            )
+                            .into())
+                        }
+                    }
+                    i += 1;
+                } else {
+                    return Err("--health-port expects a value <port>".to_string().into());
+                }
+            }
             "--geohash" => {
                 if i + 1 < args.len() {
                     geohash = args[i + 1].clone();
@@ -76,6 +96,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("  --battery-saver          Enable battery saver mode (throttled background work)");
                 println!(
                     "  --geohash <geohash>       Node geohash position (7 chars, default: u09tunq)"
+                );
+                println!(
+                    "  --health-port <port>      Serve GET /health JSON on 127.0.0.1:<port>\n                     \x20                           (0 = ephemeral port; disabled by default)"
                 );
                 println!("  --help, -h               Show this help");
                 return Ok(());
@@ -127,6 +150,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut node = Node::new(config);
     node.start().await?;
+
+    // Phase 3.6 — log structuré UNIQUE de démarrage : snapshot JSON complet
+    // (mêmes champs que GET /health), sans aucun secret.
+    node.metrics.log_startup_snapshot(&node.config.display_name);
+
+    // Phase 3.6 — endpoint de santé (opt-in : --health-port). Le port 0 =
+    // bind éphémère ; le port effectif est loggé. Un échec de bind est fatal
+    // et explicite (l'opérateur a demandé cet endpoint).
+    let _health: Option<HealthHandle> = match health_port {
+        Some(port) => match spawn_health_server(port, node.metrics.clone()) {
+            Ok(handle) => {
+                tracing::info!(
+                    "event=health_listen addr=127.0.0.1:{} path=/health",
+                    handle.port
+                );
+                Some(handle)
+            }
+            Err(e) => return Err(format!("health endpoint bind failed on port {port}: {e}").into()),
+        },
+        None => None,
+    };
 
     // Print status
     let status = node.status().await;
