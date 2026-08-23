@@ -1,0 +1,36 @@
+T25 — DONNÉES BRUTES — montée en charge mesh_sim.py (SimPy) jusqu'à 11 000 nœuds
+==============================================================================
+Date : 2026-08-23 · Worktree : onde-wt/t25-sim11k · Branche : loop/t25-sim11k
+Python : Python 3.12.13 · Plateforme : Linux 7.0.0-30-generic x86_64 inconnu
+Driver : reports/t25-sim11k/bench_t25.py (uv run --project simulation)
+Instrumentation : RAM pic = resource.getrusage(RUSAGE_SELF).ru_maxrss ;
+  latences p50/p95 = capture ADDITIVE par monkeypatch de SimStats.register_unique_delivery
+  (l'appel original est toujours exécuté ; le modèle n'est PAS modifié).
+Config commune : sim_duration=3600 s simulées, report_interval=60 s, area=10×10 km, seed=42.
+Ratio mobiles:ponts constant 10:1 à tous les paliers (11k = 10000+1000 = config __main__ du simulateur).
+
+------------------------------------------------------------------------------
+PALIER 500 — commande : bench_t25.py 450 50 3600 42 500  → exit 0
+RESULT_JSON={"label": "500", "nodes_total": 500, "mobile": 450, "bridge": 50, "duration_sim_s": 3600.0, "seed": 42, "wall_time_s": 30.28, "real_time_report_s": 30.28, "ram_peak_mb": 33.9, "messages_sent": 15881, "delivered_unique": 7107, "expired_unique": 1118, "delivery_rate_percent": 44.75, "total_dtn_hops": 13671, "avg_latency_s": 19.613, "p95_latency_s": 60.0, "p50_latency_s": 10.0, "latency_samples": 7107, "throughput_msg_per_sim_s": 4.411, "processing_msgs_per_wall_s": 524.4, "pow_success": 7723, "pow_fail": 7539, "tx_committed": 3239, "encounters_last_tick": 39780}
+------------------------------------------------------------------------------
+PALIER 2k — commande : bench_t25.py 1800 200 3600 42 2k  → exit 0
+RESULT_JSON={"label": "2k", "nodes_total": 2000, "mobile": 1800, "bridge": 200, "duration_sim_s": 3600.0, "seed": 42, "wall_time_s": 30.9, "real_time_report_s": 30.9, "ram_peak_mb": 34.2, "messages_sent": 15532, "delivered_unique": 7167, "expired_unique": 1411, "delivery_rate_percent": 46.14, "total_dtn_hops": 19439, "avg_latency_s": 117.782, "p95_latency_s": 585.0, "p50_latency_s": 0.03, "latency_samples": 7167, "throughput_msg_per_sim_s": 4.314, "processing_msgs_per_wall_s": 502.6, "pow_success": 7736, "pow_fail": 7226, "tx_committed": 3155, "encounters_last_tick": 38008}
+------------------------------------------------------------------------------
+PALIER 5k — commande : bench_t25.py 4500 500 3600 42 5k  → exit 0
+RESULT_JSON={"label": "5k", "nodes_total": 5000, "mobile": 4500, "bridge": 500, "duration_sim_s": 3600.0, "seed": 42, "wall_time_s": 36.67, "real_time_report_s": 36.67, "ram_peak_mb": 37.2, "messages_sent": 15878, "delivered_unique": 6955, "expired_unique": 3305, "delivery_rate_percent": 43.8, "total_dtn_hops": 24054, "avg_latency_s": 178.836, "p95_latency_s": 1110.0, "p50_latency_s": 0.01, "latency_samples": 6955, "throughput_msg_per_sim_s": 4.411, "processing_msgs_per_wall_s": 433.0, "pow_success": 7764, "pow_fail": 7586, "tx_committed": 3182, "encounters_last_tick": 40845}
+------------------------------------------------------------------------------
+PALIER 8k — commande : bench_t25.py 7200 800 3600 42 8k  → exit 0
+RESULT_JSON={"label": "8k", "nodes_total": 8000, "mobile": 7200, "bridge": 800, "duration_sim_s": 3600.0, "seed": 42, "wall_time_s": 39.78, "real_time_report_s": 39.78, "ram_peak_mb": 41.7, "messages_sent": 15887, "delivered_unique": 6694, "expired_unique": 4023, "delivery_rate_percent": 42.14, "total_dtn_hops": 24539, "avg_latency_s": 176.619, "p95_latency_s": 1265.0, "p50_latency_s": 0.01, "latency_samples": 6694, "throughput_msg_per_sim_s": 4.413, "processing_msgs_per_wall_s": 399.3, "pow_success": 7760, "pow_fail": 7577, "tx_committed": 3229, "encounters_last_tick": 42294}
+------------------------------------------------------------------------------
+PALIER 11k — commande : bench_t25.py 10000 1000 3600 42 11k  → exit 0
+RESULT_JSON={"label": "11k", "nodes_total": 11000, "mobile": 10000, "bridge": 1000, "duration_sim_s": 3600.0, "seed": 42, "wall_time_s": 41.36, "real_time_report_s": 41.36, "ram_peak_mb": 46.5, "messages_sent": 15383, "delivered_unique": 6481, "expired_unique": 4006, "delivery_rate_percent": 42.13, "total_dtn_hops": 24173, "avg_latency_s": 130.731, "p95_latency_s": 1065.0, "p50_latency_s": 0.001, "latency_samples": 6481, "throughput_msg_per_sim_s": 4.273, "processing_msgs_per_wall_s": 371.9, "pow_success": 7745, "pow_fail": 7106, "tx_committed": 3336, "encounters_last_tick": 38866}
+------------------------------------------------------------------------------
+
+DÉTERMINISME seed=42 (L2-12) : deux runs palier 500 (450+50), rapports diff :
+  Preuve rejouée depuis reports/t25-sim11k/ : diff <(grep -v real_time_sec raw/500_report.json) <(grep -v real_time_sec raw/500bis_report.json)
+  → DIFF_EXIT=0 : rapports byte-identiques hors real_time_sec (wall-time).
+
+STABILITÉ : grep -c Traceback sur les 6 logs (5 paliers + 500bis) = 0 traceback ;
+  6/6 exits code 0 ; aucun timeout (timeout bash jamais déclenché).
+
+Fichiers bruts par palier (logs complets + rapports JSON) : reports/t25-sim11k/raw/
