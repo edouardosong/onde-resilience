@@ -651,6 +651,10 @@ pub struct GossipProtocol {
     pending_broadcasts: std::collections::VecDeque<MeshEvent>,
     /// peer_id → IDs des événements déjà envoyés à ce pair
     delivered: std::collections::HashMap<String, std::collections::VecDeque<String>>,
+    /// Phase 3.6 — hook de métriques optionnel (aucune dépendance pour les
+    /// usages standalone) : chaque insertion NOUVELLE dans l'outbox incrémente
+    /// le compteur `messages_gossiped`. Coût : une opération atomique.
+    metrics: Option<std::sync::Arc<crate::metrics::NodeMetrics>>,
 }
 
 impl GossipProtocol {
@@ -659,7 +663,14 @@ impl GossipProtocol {
             known_events: std::collections::HashSet::new(),
             pending_broadcasts: std::collections::VecDeque::new(),
             delivered: std::collections::HashMap::new(),
+            metrics: None,
         }
+    }
+
+    /// Brancher le registre de métriques du nœud (Phase 3.6). Sans appel, le
+    /// protocole fonctionne à l'identique (hook `None`, zéro surcoût).
+    pub fn set_metrics(&mut self, metrics: std::sync::Arc<crate::metrics::NodeMetrics>) {
+        self.metrics = Some(metrics);
     }
 
     /// Process a new event from the local user.
@@ -710,6 +721,11 @@ impl GossipProtocol {
         // Borne mémoire sur les événements connus (FIFO)
         if self.known_events.len() > MAX_KNOWN_EVENTS {
             self.expire_old_known();
+        }
+        // Phase 3.6 — métrique `messages_gossiped` : l'événement est NOUVEAU
+        // dans l'outbox (publication locale ou première réception à relayer).
+        if let Some(m) = &self.metrics {
+            m.record_gossiped(1);
         }
         Ok(true)
     }
