@@ -1,0 +1,88 @@
+2026-08-23 18:36:06,705 [INFO] === ONDE MESH SIMULATION ===
+2026-08-23 18:36:06,705 [INFO] Mobiles: 10,000 | Bridges: 1,000 | Zone: 10.0km²
+2026-08-23 18:36:06,705 [INFO] Durée: 3600.0s | Rapport: toutes les 60.0s
+2026-08-23 18:36:06,705 [INFO] Création des nœuds...
+2026-08-23 18:36:06,706 [INFO]   Mobiles créés: 0/10,000
+2026-08-23 18:36:06,709 [INFO]   Mobiles créés: 1,000/10,000
+2026-08-23 18:36:06,712 [INFO]   Mobiles créés: 2,000/10,000
+2026-08-23 18:36:06,714 [INFO]   Mobiles créés: 3,000/10,000
+2026-08-23 18:36:06,717 [INFO]   Mobiles créés: 4,000/10,000
+2026-08-23 18:36:06,720 [INFO]   Mobiles créés: 5,000/10,000
+2026-08-23 18:36:06,723 [INFO]   Mobiles créés: 6,000/10,000
+2026-08-23 18:36:06,726 [INFO]   Mobiles créés: 7,000/10,000
+2026-08-23 18:36:06,728 [INFO]   Mobiles créés: 8,000/10,000
+2026-08-23 18:36:06,731 [INFO]   Mobiles créés: 9,000/10,000
+2026-08-23 18:36:06,737 [INFO] Total nœuds: 11,000
+2026-08-23 18:36:06,737 [INFO] Démarrage de la simulation...
+2026-08-23 18:36:07,149 [INFO] [t=     60s] Envoyés: 213 | Délivrés: 153 (71.8%) | DTN hops: 61 | Encounters: 33751 | Tx queue: 0 | Tx committed: 25 | PoW OK: 210 | Lat moy: 0.6s | Texte: 28.8KB | Voix: 0.0MB
+2026-08-23 18:36:07,682 [INFO] [t=    120s] Envoyés: 498 | Délivrés: 346 (69.5%) | DTN hops: 204 | Encounters: 34303 | Tx queue: 0 | Tx committed: 89 | PoW OK: 481 | Lat moy: 0.6s | Texte: 64.4KB | Voix: 0.1MB
+2026-08-23 18:36:08,175 [INFO] [t=    180s] Envoyés: 765 | Délivrés: 536 (70.1%) | DTN hops: 390 | Encounters: 36578 | Tx queue: 0 | Tx committed: 137 | PoW OK: 739 | Lat moy: 1.4s | Texte: 98.6KB | Voix: 0.3MB
+2026-08-23 18:36:08,708 [INFO] [t=    240s] Envoyés: 1,056 | Délivrés: 733 (69.4%) | DTN hops: 838 | Encounters: 43039 | Tx queue: 0 | Tx committed: 158 | PoW OK: 1014 | Lat moy: 1.2s | Texte: 133.1KB | Voix: 0.3MB
+2026-08-23 18:36:09,089 [INFO] [t=    300s] Envoyés: 1,256 | Délivrés: 867 (69.0%) | DTN hops: 1,132 | Encounters: 37600 | Tx queue: 0 | Tx committed: 201 | PoW OK: 1208 | Lat moy: 2.6s | Texte: 156.3KB | Voix: 0.4MB
+2026-08-23 18:36:09,543 [INFO] [t=    360s] Envoyés: 1,501 | Délivrés: 1,038 (69.2%) | DTN hops: 1,414 | Encounters: 33400 | Tx queue: 0 | Tx committed: 286 | PoW OK: 1449 | Lat moy: 3.5s | Texte: 189.2KB | Voix: 0.4MB
+2026-08-23 18:36:10,018 [INFO] [t=    420s] Envoyés: 1,763 | Délivrés: 1,235 (70.1%) | DTN hops: 1,793 | Encounters: 28699 | Tx queue: 0 | Tx committed: 310 | PoW OK: 1703 | Lat moy: 4.8s | Texte: 223.3KB | Voix: 0.5MB
+2026-08-23 18:36:10,448 [INFO] [t=    480s] Envoyés: 2,004 | Délivrés: 1,406 (70.2%) | DTN hops: 2,218 | Encounters: 30205 | Tx queue: 0 | Tx committed: 325 | PoW OK: 1933 | Lat moy: 6.2s | Texte: 257.2KB | Voix: 0.6MB
+2026-08-23 18:36:10,881 [INFO] [t=    540s] Envoyés: 2,233 | Délivrés: 1,581 (70.8%) | DTN hops: 2,612 | Encounters: 36080 | Tx queue: 0 | Tx committed: 389 | PoW OK: 2155 | Lat moy: 9.3s | Texte: 286.7KB | Voix: 0.7MB
+2026-08-23 18:36:11,378 [INFO] [t=    600s] Envoyés: 2,503 | Délivrés: 1,787 (71.4%) | DTN hops: 3,166 | Encounters: 33025 | Tx queue: 0 | Tx committed: 446 | PoW OK: 2404 | Lat moy: 10.3s | Texte: 321.0KB | Voix: 0.8MB
+2026-08-23 18:36:11,825 [INFO] [t=    660s] Envoyés: 2,732 | Délivrés: 1,952 (71.4%) | DTN hops: 3,714 | Encounters: 37700 | Tx queue: 0 | Tx committed: 511 | PoW OK: 2623 | Lat moy: 11.2s | Texte: 350.3KB | Voix: 1.0MB
+2026-08-23 18:36:12,250 [INFO] [t=    720s] Envoyés: 2,964 | Délivrés: 2,141 (72.2%) | DTN hops: 4,203 | Encounters: 32991 | Tx queue: 0 | Tx committed: 583 | PoW OK: 2851 | Lat moy: 12.7s | Texte: 382.4KB | Voix: 1.0MB
+2026-08-23 18:36:12,706 [INFO] [t=    780s] Envoyés: 3,213 | Délivrés: 2,330 (72.5%) | DTN hops: 4,860 | Encounters: 39191 | Tx queue: 0 | Tx committed: 633 | PoW OK: 3092 | Lat moy: 13.6s | Texte: 412.5KB | Voix: 1.1MB
+2026-08-23 18:36:13,125 [INFO] [t=    840s] Envoyés: 3,438 | Délivrés: 2,503 (72.8%) | DTN hops: 5,367 | Encounters: 33310 | Tx queue: 0 | Tx committed: 666 | PoW OK: 3310 | Lat moy: 16.0s | Texte: 440.5KB | Voix: 1.2MB
+2026-08-23 18:36:13,684 [INFO] [t=    900s] Envoyés: 3,737 | Délivrés: 2,738 (73.3%) | DTN hops: 5,835 | Encounters: 41173 | Tx queue: 0 | Tx committed: 711 | PoW OK: 3605 | Lat moy: 18.6s | Texte: 480.1KB | Voix: 1.2MB
+2026-08-23 18:36:14,112 [INFO] [t=    960s] Envoyés: 3,969 | Délivrés: 2,901 (73.1%) | DTN hops: 6,690 | Encounters: 35695 | Tx queue: 0 | Tx committed: 764 | PoW OK: 3819 | Lat moy: 19.8s | Texte: 508.5KB | Voix: 1.3MB
+2026-08-23 18:36:14,511 [INFO] [t=   1020s] Envoyés: 4,189 | Délivrés: 3,081 (73.5%) | DTN hops: 7,229 | Encounters: 35285 | Tx queue: 0 | Tx committed: 841 | PoW OK: 4038 | Lat moy: 22.0s | Texte: 536.0KB | Voix: 1.3MB
+2026-08-23 18:36:15,093 [INFO] [t=   1080s] Envoyés: 4,506 | Délivrés: 3,342 (74.2%) | DTN hops: 8,251 | Encounters: 38116 | Tx queue: 0 | Tx committed: 923 | PoW OK: 4338 | Lat moy: 23.8s | Texte: 577.7KB | Voix: 1.5MB
+2026-08-23 18:36:15,628 [INFO] [t=   1140s] Envoyés: 4,795 | Délivrés: 3,557 (74.2%) | DTN hops: 9,013 | Encounters: 36638 | Tx queue: 0 | Tx committed: 981 | PoW OK: 4622 | Lat moy: 25.0s | Texte: 615.0KB | Voix: 1.5MB
+2026-08-23 18:36:16,068 [INFO] [t=   1200s] Envoyés: 5,026 | Délivrés: 3,729 (74.2%) | DTN hops: 9,729 | Encounters: 35075 | Tx queue: 0 | Tx committed: 1,046 | PoW OK: 4841 | Lat moy: 25.4s | Texte: 644.4KB | Voix: 1.7MB
+2026-08-23 18:36:16,535 [INFO] [t=   1260s] Envoyés: 5,285 | Délivrés: 3,927 (74.3%) | DTN hops: 10,345 | Encounters: 37291 | Tx queue: 0 | Tx committed: 1,101 | PoW OK: 5099 | Lat moy: 26.8s | Texte: 678.2KB | Voix: 1.7MB
+2026-08-23 18:36:17,036 [INFO] [t=   1320s] Envoyés: 5,560 | Délivrés: 4,143 (74.5%) | DTN hops: 11,010 | Encounters: 37317 | Tx queue: 0 | Tx committed: 1,139 | PoW OK: 5367 | Lat moy: 28.6s | Texte: 715.6KB | Voix: 1.8MB
+2026-08-23 18:36:17,483 [INFO] [t=   1380s] Envoyés: 5,801 | Délivrés: 4,334 (74.7%) | DTN hops: 11,672 | Encounters: 31193 | Tx queue: 0 | Tx committed: 1,221 | PoW OK: 5605 | Lat moy: 30.6s | Texte: 746.1KB | Voix: 1.8MB
+2026-08-23 18:36:18,059 [INFO] [t=   1440s] Envoyés: 6,124 | Délivrés: 4,565 (74.5%) | DTN hops: 12,411 | Encounters: 34531 | Tx queue: 0 | Tx committed: 1,265 | PoW OK: 5914 | Lat moy: 32.6s | Texte: 785.9KB | Voix: 1.8MB
+2026-08-23 18:36:18,593 [INFO] [t=   1500s] Envoyés: 6,418 | Délivrés: 4,805 (74.9%) | DTN hops: 12,995 | Encounters: 31358 | Tx queue: 0 | Tx committed: 1,311 | PoW OK: 6206 | Lat moy: 33.9s | Texte: 824.8KB | Voix: 1.9MB
+2026-08-23 18:36:19,080 [INFO] [t=   1560s] Envoyés: 6,685 | Délivrés: 5,009 (74.9%) | DTN hops: 13,714 | Encounters: 36282 | Tx queue: 0 | Tx committed: 1,373 | PoW OK: 6457 | Lat moy: 36.3s | Texte: 858.6KB | Voix: 2.1MB
+2026-08-23 18:36:19,616 [INFO] [t=   1620s] Envoyés: 6,971 | Délivrés: 5,224 (74.9%) | DTN hops: 14,468 | Encounters: 37869 | Tx queue: 0 | Tx committed: 1,436 | PoW OK: 6740 | Lat moy: 38.6s | Texte: 895.5KB | Voix: 2.1MB
+2026-08-23 18:36:20,100 [INFO] [t=   1680s] Envoyés: 7,224 | Délivrés: 5,425 (75.1%) | DTN hops: 15,171 | Encounters: 36968 | Tx queue: 0 | Tx committed: 1,520 | PoW OK: 6980 | Lat moy: 39.6s | Texte: 927.6KB | Voix: 2.3MB
+2026-08-23 18:36:20,575 [INFO] [t=   1740s] Envoyés: 7,476 | Délivrés: 5,610 (75.0%) | DTN hops: 16,012 | Encounters: 37127 | Tx queue: 0 | Tx committed: 1,591 | PoW OK: 7226 | Lat moy: 41.0s | Texte: 956.6KB | Voix: 2.4MB
+2026-08-23 18:36:21,083 [INFO] [t=   1800s] Envoyés: 7,760 | Délivrés: 5,832 (75.2%) | DTN hops: 17,286 | Encounters: 35605 | Tx queue: 0 | Tx committed: 1,638 | PoW OK: 7491 | Lat moy: 43.4s | Texte: 990.6KB | Voix: 2.5MB
+2026-08-23 18:36:21,563 [INFO] [t=   1860s] Envoyés: 8,002 | Délivrés: 6,043 (75.5%) | DTN hops: 17,823 | Encounters: 37488 | Tx queue: 0 | Tx committed: 1,673 | PoW OK: 7724 | Lat moy: 45.9s | Texte: 1024.4KB | Voix: 2.6MB
+2026-08-23 18:36:22,564 [INFO] [t=   1920s] Envoyés: 8,290 | Délivrés: 6,075 (73.3%) | DTN hops: 18,481 | Encounters: 36246 | Tx queue: 0 | Tx committed: 1,730 | PoW OK: 7745 | Lat moy: 47.0s | Texte: 1026.9KB | Voix: 2.6MB
+2026-08-23 18:36:23,443 [INFO] [t=   1980s] Envoyés: 8,538 | Délivrés: 6,102 (71.5%) | DTN hops: 19,117 | Encounters: 33042 | Tx queue: 0 | Tx committed: 1,803 | PoW OK: 7745 | Lat moy: 50.3s | Texte: 1026.9KB | Voix: 2.7MB
+2026-08-23 18:36:24,426 [INFO] [t=   2040s] Envoyés: 8,816 | Délivrés: 6,124 (69.5%) | DTN hops: 19,631 | Encounters: 31477 | Tx queue: 0 | Tx committed: 1,882 | PoW OK: 7745 | Lat moy: 53.1s | Texte: 1026.9KB | Voix: 2.9MB
+2026-08-23 18:36:25,240 [INFO] [t=   2100s] Envoyés: 9,047 | Délivrés: 6,148 (68.0%) | DTN hops: 20,198 | Encounters: 38578 | Tx queue: 0 | Tx committed: 1,943 | PoW OK: 7745 | Lat moy: 56.5s | Texte: 1026.9KB | Voix: 3.0MB
+2026-08-23 18:36:26,211 [INFO] [t=   2160s] Envoyés: 9,327 | Délivrés: 6,163 (66.1%) | DTN hops: 20,570 | Encounters: 38284 | Tx queue: 0 | Tx committed: 1,970 | PoW OK: 7745 | Lat moy: 58.7s | Texte: 1026.9KB | Voix: 3.2MB
+2026-08-23 18:36:27,112 [INFO] [t=   2220s] Envoyés: 9,575 | Délivrés: 6,175 (64.5%) | DTN hops: 21,121 | Encounters: 38459 | Tx queue: 0 | Tx committed: 2,019 | PoW OK: 7745 | Lat moy: 60.8s | Texte: 1026.9KB | Voix: 3.2MB
+2026-08-23 18:36:28,238 [INFO] [t=   2280s] Envoyés: 9,902 | Délivrés: 6,195 (62.6%) | DTN hops: 21,473 | Encounters: 38680 | Tx queue: 0 | Tx committed: 2,046 | PoW OK: 7745 | Lat moy: 64.0s | Texte: 1026.9KB | Voix: 3.4MB
+2026-08-23 18:36:28,995 [INFO] [t=   2340s] Envoyés: 10,109 | Délivrés: 6,210 (61.4%) | DTN hops: 21,737 | Encounters: 39675 | Tx queue: 0 | Tx committed: 2,094 | PoW OK: 7745 | Lat moy: 67.0s | Texte: 1026.9KB | Voix: 3.5MB
+2026-08-23 18:36:29,996 [INFO] [t=   2400s] Envoyés: 10,392 | Délivrés: 6,241 (60.1%) | DTN hops: 21,959 | Encounters: 41014 | Tx queue: 0 | Tx committed: 2,146 | PoW OK: 7745 | Lat moy: 72.4s | Texte: 1026.9KB | Voix: 3.6MB
+2026-08-23 18:36:30,787 [INFO] [t=   2460s] Envoyés: 10,605 | Délivrés: 6,249 (58.9%) | DTN hops: 22,497 | Encounters: 35803 | Tx queue: 0 | Tx committed: 2,192 | PoW OK: 7745 | Lat moy: 74.1s | Texte: 1026.9KB | Voix: 3.7MB
+2026-08-23 18:36:31,680 [INFO] [t=   2520s] Envoyés: 10,851 | Délivrés: 6,265 (57.7%) | DTN hops: 22,721 | Encounters: 34264 | Tx queue: 0 | Tx committed: 2,220 | PoW OK: 7745 | Lat moy: 77.0s | Texte: 1026.9KB | Voix: 3.8MB
+2026-08-23 18:36:32,473 [INFO] [t=   2580s] Envoyés: 11,071 | Délivrés: 6,285 (56.8%) | DTN hops: 22,924 | Encounters: 36302 | Tx queue: 0 | Tx committed: 2,303 | PoW OK: 7745 | Lat moy: 80.7s | Texte: 1026.9KB | Voix: 3.9MB
+2026-08-23 18:36:33,436 [INFO] [t=   2640s] Envoyés: 11,341 | Délivrés: 6,294 (55.5%) | DTN hops: 23,083 | Encounters: 33978 | Tx queue: 0 | Tx committed: 2,377 | PoW OK: 7745 | Lat moy: 82.6s | Texte: 1026.9KB | Voix: 3.9MB
+2026-08-23 18:36:34,418 [INFO] [t=   2700s] Envoyés: 11,616 | Délivrés: 6,309 (54.3%) | DTN hops: 23,232 | Encounters: 29000 | Tx queue: 0 | Tx committed: 2,415 | PoW OK: 7745 | Lat moy: 85.7s | Texte: 1026.9KB | Voix: 4.0MB
+2026-08-23 18:36:35,300 [INFO] [t=   2760s] Envoyés: 11,853 | Délivrés: 6,324 (53.4%) | DTN hops: 23,346 | Encounters: 37089 | Tx queue: 0 | Tx committed: 2,510 | PoW OK: 7745 | Lat moy: 88.7s | Texte: 1026.9KB | Voix: 4.1MB
+2026-08-23 18:36:36,252 [INFO] [t=   2820s] Envoyés: 12,121 | Délivrés: 6,338 (52.3%) | DTN hops: 23,460 | Encounters: 32402 | Tx queue: 0 | Tx committed: 2,578 | PoW OK: 7745 | Lat moy: 92.6s | Texte: 1026.9KB | Voix: 4.2MB
+2026-08-23 18:36:37,261 [INFO] [t=   2880s] Envoyés: 12,407 | Délivrés: 6,354 (51.2%) | DTN hops: 23,541 | Encounters: 34853 | Tx queue: 0 | Tx committed: 2,666 | PoW OK: 7745 | Lat moy: 96.1s | Texte: 1026.9KB | Voix: 4.3MB
+2026-08-23 18:36:38,108 [INFO] [t=   2940s] Envoyés: 12,633 | Délivrés: 6,371 (50.4%) | DTN hops: 23,660 | Encounters: 38505 | Tx queue: 0 | Tx committed: 2,730 | PoW OK: 7745 | Lat moy: 100.0s | Texte: 1026.9KB | Voix: 4.3MB
+2026-08-23 18:36:38,954 [INFO] [t=   3000s] Envoyés: 12,873 | Délivrés: 6,393 (49.7%) | DTN hops: 23,759 | Encounters: 42335 | Tx queue: 0 | Tx committed: 2,796 | PoW OK: 7745 | Lat moy: 105.0s | Texte: 1026.9KB | Voix: 4.4MB
+2026-08-23 18:36:39,727 [INFO] [t=   3060s] Envoyés: 13,083 | Délivrés: 6,406 (49.0%) | DTN hops: 23,822 | Encounters: 33432 | Tx queue: 0 | Tx committed: 2,860 | PoW OK: 7745 | Lat moy: 108.9s | Texte: 1026.9KB | Voix: 4.5MB
+2026-08-23 18:36:40,626 [INFO] [t=   3120s] Envoyés: 13,334 | Délivrés: 6,415 (48.1%) | DTN hops: 23,877 | Encounters: 29805 | Tx queue: 0 | Tx committed: 2,911 | PoW OK: 7745 | Lat moy: 111.2s | Texte: 1026.9KB | Voix: 4.6MB
+2026-08-23 18:36:41,619 [INFO] [t=   3180s] Envoyés: 13,608 | Délivrés: 6,422 (47.2%) | DTN hops: 23,930 | Encounters: 33377 | Tx queue: 0 | Tx committed: 2,970 | PoW OK: 7745 | Lat moy: 112.9s | Texte: 1026.9KB | Voix: 4.7MB
+2026-08-23 18:36:42,544 [INFO] [t=   3240s] Envoyés: 13,863 | Délivrés: 6,431 (46.4%) | DTN hops: 23,975 | Encounters: 33014 | Tx queue: 0 | Tx committed: 3,038 | PoW OK: 7745 | Lat moy: 114.9s | Texte: 1026.9KB | Voix: 4.8MB
+2026-08-23 18:36:43,501 [INFO] [t=   3300s] Envoyés: 14,117 | Délivrés: 6,445 (45.7%) | DTN hops: 24,017 | Encounters: 37409 | Tx queue: 0 | Tx committed: 3,130 | PoW OK: 7745 | Lat moy: 118.6s | Texte: 1026.9KB | Voix: 4.8MB
+2026-08-23 18:36:44,424 [INFO] [t=   3360s] Envoyés: 14,378 | Délivrés: 6,454 (44.9%) | DTN hops: 24,065 | Encounters: 37268 | Tx queue: 0 | Tx committed: 3,175 | PoW OK: 7745 | Lat moy: 121.7s | Texte: 1026.9KB | Voix: 4.9MB
+2026-08-23 18:36:45,308 [INFO] [t=   3420s] Envoyés: 14,622 | Délivrés: 6,464 (44.2%) | DTN hops: 24,108 | Encounters: 34084 | Tx queue: 0 | Tx committed: 3,204 | PoW OK: 7745 | Lat moy: 125.3s | Texte: 1026.9KB | Voix: 4.9MB
+2026-08-23 18:36:46,165 [INFO] [t=   3480s] Envoyés: 14,861 | Délivrés: 6,471 (43.5%) | DTN hops: 24,141 | Encounters: 35337 | Tx queue: 0 | Tx committed: 3,269 | PoW OK: 7745 | Lat moy: 127.4s | Texte: 1026.9KB | Voix: 4.9MB
+2026-08-23 18:36:47,068 [INFO] [t=   3540s] Envoyés: 15,108 | Délivrés: 6,481 (42.9%) | DTN hops: 24,173 | Encounters: 38866 | Tx queue: 0 | Tx committed: 3,291 | PoW OK: 7745 | Lat moy: 130.7s | Texte: 1026.9KB | Voix: 5.0MB
+2026-08-23 18:36:48,067 [INFO] 
+============================================================
+2026-08-23 18:36:48,067 [INFO] SIMULATION TERMINÉE en 41.4s réels
+2026-08-23 18:36:48,067 [INFO] ============================================================
+2026-08-23 18:36:48,067 [INFO] Messages envoyés:  15,383
+2026-08-23 18:36:48,067 [INFO] Messages délivrés: 6,481
+2026-08-23 18:36:48,067 [INFO] Taux de délivrance: 42.13%
+2026-08-23 18:36:48,067 [INFO] Hops DTN: 24,173
+2026-08-23 18:36:48,067 [INFO] PoW réussis: 7745 / échoués: 7106
+2026-08-23 18:36:48,067 [INFO] Transactions ZK: 3,336 commitées
+2026-08-23 18:36:48,067 [INFO] Octets texte: 1,051,498 | voix: 5,283,215
+2026-08-23 18:36:48,067 [INFO] Rapport sauvegardé: onde/simulation/results/simulation_report.json
+RESULT_JSON={"label": "11k", "nodes_total": 11000, "mobile": 10000, "bridge": 1000, "duration_sim_s": 3600.0, "seed": 42, "wall_time_s": 41.36, "real_time_report_s": 41.36, "ram_peak_mb": 46.5, "messages_sent": 15383, "delivered_unique": 6481, "expired_unique": 4006, "delivery_rate_percent": 42.13, "total_dtn_hops": 24173, "avg_latency_s": 130.731, "p95_latency_s": 1065.0, "p50_latency_s": 0.001, "latency_samples": 6481, "throughput_msg_per_sim_s": 4.273, "processing_msgs_per_wall_s": 371.9, "pow_success": 7745, "pow_fail": 7106, "tx_committed": 3336, "encounters_last_tick": 38866}
