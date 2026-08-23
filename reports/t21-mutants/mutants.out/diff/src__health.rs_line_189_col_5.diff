@@ -1,0 +1,21 @@
+--- src/health.rs
++++ replace clean_stop with ()
+@@ -181,17 +181,17 @@
+                 }
+             }
+         }
+     }
+ }
+ 
+ /// Arrêt propre de la boucle d'acceptation (log structuré unique).
+ fn clean_stop() {
+-    tracing::info!("event=health_stopped reason=shutdown");
++    () /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// Réponse 503 servie inline quand le plafond de connexions est atteint.
+ fn serve_inline_busy(mut stream: TcpStream) {
+     let body = "{\"error\":\"busy\"}";
+     let _ = write_response(&mut stream, "503 Service Unavailable", body);
+ }
+ 

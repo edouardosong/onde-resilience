@@ -1,0 +1,27 @@
+--- src/metrics.rs
++++ replace NodeMetrics::log_startup_snapshot with ()
+@@ -237,23 +237,17 @@
+     pub fn snapshot_json(&self) -> String {
+         serde_json::to_string(&self.snapshot()).unwrap_or_else(|_| "{}".to_string())
+     }
+ 
+     /// Log structuré UNIQUE de démarrage : une ligne JSON contenant le
+     /// snapshot complet + identité affichable du nœud. La seed Ed25519 et
+     /// toute donnée secrète ne sont JAMAIS incluses.
+     pub fn log_startup_snapshot(&self, node_name: &str) {
+-        let mut value = match serde_json::to_value(self.snapshot()) {
+-            Ok(serde_json::Value::Object(map)) => map,
+-            _ => return, // sérialisation impossible → pas de log trompeur
+-        };
+-        value.insert("event".into(), serde_json::json!("startup"));
+-        value.insert("node".into(), serde_json::json!(node_name));
+-        tracing::info!("{}", serde_json::Value::Object(value));
++        () /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// Instantané complet du nœud — corps JSON exact de `GET /health`.
+ #[derive(Debug, Clone, PartialEq, serde::Serialize)]
+ pub struct MetricsSnapshot {
+     /// Toujours `"ok"` tant que l'endpoint répond (la santé détaillée vit
+     /// dans les jauges ; un nœud qui répond prouve son runtime).

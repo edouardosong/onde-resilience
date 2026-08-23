@@ -1,0 +1,21 @@
+--- src/health.rs
++++ replace >= with < in accept_loop
+@@ -141,17 +141,17 @@
+     let mut consecutive_errors: u32 = 0;
+     loop {
+         if stop_flag.load(Ordering::Acquire) {
+             break clean_stop();
+         }
+         match listener.accept() {
+             Ok((stream, _peer)) => {
+                 consecutive_errors = 0;
+-                if active.load(Ordering::Relaxed) >= MAX_CONCURRENT_CONNECTIONS {
++                if active.load(Ordering::Relaxed) < /* ~ changed by cargo-mutants ~ */ MAX_CONCURRENT_CONNECTIONS {
+                     // Surchargé (impossible en pratique sur localhost) :
+                     // refus explicite servi inline, aucun thread spawned.
+                     serve_inline_busy(stream);
+                     continue;
+                 }
+                 let m = metrics.clone();
+                 let a = active.clone();
+                 let spawned = std::thread::Builder::new()

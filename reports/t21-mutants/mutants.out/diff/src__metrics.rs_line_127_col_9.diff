@@ -1,0 +1,21 @@
+--- src/metrics.rs
++++ replace NodeMetrics::record_rejected with ()
+@@ -119,17 +119,17 @@
+ 
+     /// Compter un événement admis et traité avec succès.
+     pub fn record_ingested(&self) {
+         self.messages_ingested.fetch_add(1, Ordering::Relaxed);
+     }
+ 
+     /// Compter un événement refusé (gate ou payload invalide signé).
+     pub fn record_rejected(&self) {
+-        self.messages_rejected.fetch_add(1, Ordering::Relaxed);
++        () /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Compter `n` événements enregistrés nouveaux dans l'outbox gossip
+     /// (`n = 0` → no-op).
+     pub fn record_gossiped(&self, n: u64) {
+         if n > 0 {
+             self.messages_gossiped.fetch_add(n, Ordering::Relaxed);
+         }

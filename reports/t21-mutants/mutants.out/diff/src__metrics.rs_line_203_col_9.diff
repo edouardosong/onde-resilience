@@ -1,0 +1,40 @@
+--- src/metrics.rs
++++ replace NodeMetrics::snapshot -> MetricsSnapshot with Default::default()
+@@ -195,36 +195,17 @@
+     /// let m = NodeMetrics::new();
+     /// m.record_rejected();
+     /// let snap = m.snapshot();
+     /// assert_eq!(snap.status, "ok");
+     /// assert_eq!(snap.metrics.messages_rejected, 1);
+     /// assert_eq!(snap.storage.events, 0);
+     /// ```
+     pub fn snapshot(&self) -> MetricsSnapshot {
+-        MetricsSnapshot {
+-            status: "ok",
+-            uptime_s: self.uptime_secs(),
+-            peers: PeerHealth {
+-                known: self.peers_known(),
+-                synced: self.peers_synced(),
+-            },
+-            metrics: CounterSet {
+-                messages_ingested: self.messages_ingested.load(Ordering::Relaxed),
+-                messages_rejected: self.messages_rejected.load(Ordering::Relaxed),
+-                messages_gossiped: self.messages_gossiped.load(Ordering::Relaxed),
+-                messages_duplicated: self.messages_duplicated.load(Ordering::Relaxed),
+-                health_requests: self.health_requests.load(Ordering::Relaxed),
+-            },
+-            storage: StorageHealth {
+-                events: self.storage_events.load(Ordering::Relaxed),
+-                bytes_raw: self.storage_raw_bytes.load(Ordering::Relaxed),
+-                bytes_stored: self.storage_stored_bytes.load(Ordering::Relaxed),
+-            },
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Instantané en JSON compact (une ligne) — corps de `/health` et format
+     /// du log structuré de démarrage.
+     ///
+     /// ```
+     /// use onde_core::metrics::NodeMetrics;
+     /// let json = NodeMetrics::new().snapshot_json();

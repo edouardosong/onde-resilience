@@ -1,0 +1,21 @@
+--- src/metrics.rs
++++ replace NodeMetrics::record_ingested with ()
+@@ -114,17 +114,17 @@
+             health_requests: AtomicU64::new(0),
+         }
+     }
+ 
+     // ---- Points d'instrumentation (producteurs) --------------------
+ 
+     /// Compter un événement admis et traité avec succès.
+     pub fn record_ingested(&self) {
+-        self.messages_ingested.fetch_add(1, Ordering::Relaxed);
++        () /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Compter un événement refusé (gate ou payload invalide signé).
+     pub fn record_rejected(&self) {
+         self.messages_rejected.fetch_add(1, Ordering::Relaxed);
+     }
+ 
+     /// Compter `n` événements enregistrés nouveaux dans l'outbox gossip

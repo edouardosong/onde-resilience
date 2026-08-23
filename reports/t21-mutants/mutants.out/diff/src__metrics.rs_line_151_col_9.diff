@@ -1,0 +1,25 @@
+--- src/metrics.rs
++++ replace NodeMetrics::record_storage_added with ()
+@@ -143,21 +143,17 @@
+     /// Remplacer les jauges de pairs (appelé après chaque contact pair).
+     pub fn set_peers(&self, known: u64, synced: u64) {
+         self.peers_known.store(known, Ordering::Relaxed);
+         self.peers_synced.store(synced, Ordering::Relaxed);
+     }
+ 
+     /// Compter un message ajouté au magasin hiérarchique.
+     pub fn record_storage_added(&self, raw_bytes: u64, stored_bytes: u64) {
+-        self.storage_events.fetch_add(1, Ordering::Relaxed);
+-        self.storage_raw_bytes
+-            .fetch_add(raw_bytes, Ordering::Relaxed);
+-        self.storage_stored_bytes
+-            .fetch_add(stored_bytes, Ordering::Relaxed);
++        () /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Compter `count` messages purgés du magasin (sweep). Les jauges sont
+     /// **saturantes** : elles ne peuvent jamais passer sous zéro (pas de
+     /// wrapping `u64` dans le JSON de santé).
+     pub fn record_storage_removed(&self, count: u64, raw_bytes: u64, stored_bytes: u64) {
+         saturating_sub(&self.storage_events, count);
+         saturating_sub(&self.storage_raw_bytes, raw_bytes);

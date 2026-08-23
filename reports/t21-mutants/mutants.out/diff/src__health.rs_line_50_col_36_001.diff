@@ -1,0 +1,21 @@
+--- src/health.rs
++++ replace * with /
+@@ -42,17 +42,17 @@
+ use std::net::{Shutdown as SocketShutdown, TcpListener, TcpStream};
+ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+ use std::sync::Arc;
+ use std::time::Duration;
+ 
+ use crate::metrics::NodeMetrics;
+ 
+ /// Taille maximale acceptée pour une requête (octets) — au-delà → 431.
+-const MAX_REQUEST_BYTES: usize = 8 * 1024;
++const MAX_REQUEST_BYTES: usize = 8 / /* ~ changed by cargo-mutants ~ */ 1024;
+ 
+ /// Timeout borné appliqué à chaque socket client (lecture ET écriture).
+ const SOCKET_TIMEOUT: Duration = Duration::from_secs(2);
+ 
+ /// Plafond de threads de connexion actifs ; au-delà, réponse 503 servie en
+ /// ligne par la boucle d'acceptation (jamais de spawn illimité).
+ const MAX_CONCURRENT_CONNECTIONS: usize = 16;
+ 

@@ -1,0 +1,21 @@
+--- src/metrics.rs
++++ replace NodeMetrics::record_health_request with ()
+@@ -161,17 +161,17 @@
+     pub fn record_storage_removed(&self, count: u64, raw_bytes: u64, stored_bytes: u64) {
+         saturating_sub(&self.storage_events, count);
+         saturating_sub(&self.storage_raw_bytes, raw_bytes);
+         saturating_sub(&self.storage_stored_bytes, stored_bytes);
+     }
+ 
+     /// Compter une requête servie par l'endpoint de santé.
+     pub fn record_health_request(&self) {
+-        self.health_requests.fetch_add(1, Ordering::Relaxed);
++        () /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     // ---- Lectures (consommateurs : santé, logs) --------------------
+ 
+     /// Uptime en secondes depuis la création du registre (saturé à 0 si
+     /// l'horloge système recule).
+     pub fn uptime_secs(&self) -> u64 {
+         unix_now().saturating_sub(self.started_at.load(Ordering::Relaxed))

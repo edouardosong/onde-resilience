@@ -1,0 +1,21 @@
+--- src/metrics.rs
++++ delete match arm Ok(serde_json::Value::Object(map)) in NodeMetrics::log_startup_snapshot
+@@ -238,17 +238,17 @@
+         serde_json::to_string(&self.snapshot()).unwrap_or_else(|_| "{}".to_string())
+     }
+ 
+     /// Log structuré UNIQUE de démarrage : une ligne JSON contenant le
+     /// snapshot complet + identité affichable du nœud. La seed Ed25519 et
+     /// toute donnée secrète ne sont JAMAIS incluses.
+     pub fn log_startup_snapshot(&self, node_name: &str) {
+         let mut value = match serde_json::to_value(self.snapshot()) {
+-            Ok(serde_json::Value::Object(map)) => map,
++             /* ~ changed by cargo-mutants ~ */
+             _ => return, // sérialisation impossible → pas de log trompeur
+         };
+         value.insert("event".into(), serde_json::json!("startup"));
+         value.insert("node".into(), serde_json::json!(node_name));
+         tracing::info!("{}", serde_json::Value::Object(value));
+     }
+ }
+ 

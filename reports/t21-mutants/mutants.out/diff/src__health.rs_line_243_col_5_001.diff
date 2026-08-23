@@ -1,0 +1,37 @@
+--- src/health.rs
++++ replace read_request_head -> Option<String> with Some(String::new())
+@@ -235,33 +235,17 @@
+     let _ = write_response(&mut stream, status, &body);
+     let _ = stream.shutdown(SocketShutdown::Both);
+ }
+ 
+ /// Lit l'en-tête HTTP jusqu'à la première ligne complète (CRLF), borné à
+ /// [`MAX_REQUEST_BYTES`]. Retourne la request-line, ou None si rien de
+ /// valable n'arrive à temps.
+ fn read_request_head(stream: &mut TcpStream) -> Option<String> {
+-    let mut buf = Vec::with_capacity(256);
+-    let mut chunk = [0u8; 512];
+-    loop {
+-        match stream.read(&mut chunk) {
+-            Ok(0) => return None, // fermeture sans requête complète
+-            Ok(n) => {
+-                buf.extend_from_slice(&chunk[..n]);
+-                if let Some(pos) = find_crlf(&buf) {
+-                    return Some(String::from_utf8_lossy(&buf[..pos]).into_owned());
+-                }
+-                if buf.len() > MAX_REQUEST_BYTES {
+-                    return None;
+-                }
+-            }
+-            Err(_) => return None, // timeout lecture (> SOCKET_TIMEOUT)
+-        }
+-    }
++    Some(String::new()) /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// Position du premier `\r\n` dans `buf`, si présent.
+ fn find_crlf(buf: &[u8]) -> Option<usize> {
+     buf.windows(2).position(|w| w == b"\r\n")
+ }
+ 
+ /// Écrit une réponse HTTP/1.1 minimale JSON + `Connection: close`.

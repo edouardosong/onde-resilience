@@ -1,0 +1,21 @@
+--- src/health.rs
++++ replace > with >= in read_request_head
+@@ -245,17 +245,17 @@
+     loop {
+         match stream.read(&mut chunk) {
+             Ok(0) => return None, // fermeture sans requête complète
+             Ok(n) => {
+                 buf.extend_from_slice(&chunk[..n]);
+                 if let Some(pos) = find_crlf(&buf) {
+                     return Some(String::from_utf8_lossy(&buf[..pos]).into_owned());
+                 }
+-                if buf.len() > MAX_REQUEST_BYTES {
++                if buf.len() >= /* ~ changed by cargo-mutants ~ */ MAX_REQUEST_BYTES {
+                     return None;
+                 }
+             }
+             Err(_) => return None, // timeout lecture (> SOCKET_TIMEOUT)
+         }
+     }
+ }
+ 
