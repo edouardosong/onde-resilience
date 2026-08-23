@@ -7,6 +7,7 @@ use std::env;
 use tokio::signal;
 
 use onde_core::health::{spawn_health_server, HealthHandle};
+use onde_core::network::tcp::{flush_outbound, process_inbound, TcpTransport, TcpTransportConfig};
 use onde_core::node::{Node, NodeConfig, NodeType};
 
 #[tokio::main]
@@ -29,6 +30,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut geohash = String::from("u09tunq"); // position par défaut (démo Paris)
                                                // Phase 3.6 — endpoint de santé désactivé par défaut (opt-in explicite).
     let mut health_port: Option<u16> = None;
+    // T32 — transport TCP réel : OFF par défaut (rétro-compatible). Le
+    // serveur n'écoute QUE si --listen est passé ; les pairs ne sont joints
+    // QUE s'ils sont listés dans --peers.
+    let mut tcp_listen: Option<std::net::SocketAddr> = None;
+    let mut tcp_peers: Vec<std::net::SocketAddr> = Vec::new();
 
     let mut i = 1;
     while i < args.len() {
@@ -78,6 +84,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     return Err("--health-port expects a value <port>".to_string().into());
                 }
             }
+            "--listen" => {
+                if i + 1 < args.len() {
+                    match args[i + 1].parse::<std::net::SocketAddr>() {
+                        Ok(addr) => tcp_listen = Some(addr),
+                        Err(_) => {
+                            return Err(format!(
+                                "--listen expects an ip:port address, got {:?}",
+                                args[i + 1]
+                            )
+                            .into())
+                        }
+                    }
+                    i += 1;
+                } else {
+                    return Err("--listen expects a value <ip:port>".to_string().into());
+                }
+            }
+            "--peers" => {
+                if i + 1 < args.len() {
+                    for entry in args[i + 1].split(',') {
+                        let entry = entry.trim();
+                        if entry.is_empty() {
+                            continue;
+                        }
+                        match entry.parse::<std::net::SocketAddr>() {
+                            Ok(addr) => tcp_peers.push(addr),
+                            Err(_) => {
+                                return Err(format!(
+                                    "--peers expects comma-separated ip:port addresses, got {:?}",
+                                    entry
+                                )
+                                .into())
+                            }
+                        }
+                    }
+                    i += 1;
+                } else {
+                    return Err("--peers expects a value <ip:port[,ip:port…]>"
+                        .to_string()
+                        .into());
+                }
+            }
             "--geohash" => {
                 if i + 1 < args.len() {
                     geohash = args[i + 1].clone();
@@ -99,6 +147,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
                 println!("  --health-port <port>     Serve GET /health JSON on 127.0.0.1:<port>");
                 println!("                           (0 = ephemeral port; disabled by default)");
+                println!(
+                    "  --listen <ip:port>       Serveur TCP mesh : accepter les pairs sur <ip:port>"
+                );
+                println!("                           (ex. 0.0.0.0:9333 ; désactivé par défaut)");
+                println!(
+                    "  --peers <a,b,c>          Pairs TCP à joindre, séparés par des virgules"
+                );
+                println!(
+                    "                           (ex. 192.168.1.12:9333 ; reconnexion automatique)"
+                );
                 println!("  --help, -h               Show this help");
                 return Ok(());
             }
@@ -175,9 +233,75 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let status = node.status().await;
     tracing::info!("Node status: {:#?}", status);
 
-    // Wait for shutdown signal
-    tracing::info!("Node running. Press Ctrl+C to stop.");
-    signal::ctrl_c().await?;
+    // T32 — transport TCP réel (opt-in : --listen / --peers). Sans ces
+    // flags, le comportement est identique à l'avant-T32 (attente Ctrl+C
+    // passive). Avec : serveur borné + fils clients + pump gossip ⇆ TCP sur
+    // ce fil (le Node n'est pas partagé entre fils — même modèle que les
+    // tests e2e). Une frame TCP suit EXACTEMENT le chemin d'un événement de
+    // pair gossip : from_wire_bytes → gate d'admission → handlers métier.
+    let transport: Option<TcpTransport> = if tcp_listen.is_none() && tcp_peers.is_empty() {
+        None
+    } else {
+        let config = TcpTransportConfig {
+            listen: tcp_listen,
+            peers: tcp_peers,
+            ..TcpTransportConfig::default()
+        };
+        let transport = TcpTransport::new(config);
+        // Bind demandé explicitement par l'opérateur → échec = fatal explicite.
+        transport
+            .start()
+            .map_err(|e| format!("tcp mesh transport start failed: {e}"))?;
+        if let Some(addr) = transport.listen_addr() {
+            tracing::info!("event=tcp_mesh_listen addr={addr}");
+        }
+        tracing::info!("event=tcp_mesh_peers count={}", transport.peer_keys().len());
+        Some(transport)
+    };
+
+    const PUMP_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
+    match &transport {
+        None => {
+            // Comportement historique inchangé.
+            tracing::info!("Node running. Press Ctrl+C to stop.");
+            signal::ctrl_c().await?;
+        }
+        Some(transport) => {
+            tracing::info!("Node running with TCP mesh transport. Press Ctrl+C to stop.");
+            loop {
+                tokio::select! {
+                    _ = tokio::time::sleep(PUMP_INTERVAL) => {
+                        let outbound = flush_outbound(&mut node, transport);
+                        let inbound = process_inbound(&mut node, transport);
+                        if outbound.frames_queued_outbound > 0 {
+                            tracing::debug!(
+                                "event=tcp_pump_outbound frames={}",
+                                outbound.frames_queued_outbound
+                            );
+                        }
+                        if inbound.frames_received > 0 {
+                            tracing::debug!(
+                                "event=tcp_pump_inbound received={} ingested={} rejected={}",
+                                inbound.frames_received,
+                                inbound.events_ingested,
+                                inbound.events_rejected
+                            );
+                        }
+                    }
+                    _ = signal::ctrl_c() => break,
+                }
+            }
+        }
+    }
+
+    if let Some(transport) = &transport {
+        transport.stop();
+        tracing::info!(
+            "event=tcp_mesh_stats sent={} received={}",
+            transport.stats().frames_sent,
+            transport.stats().frames_received
+        );
+    }
 
     tracing::info!("Shutting down...");
     node.stop().await;

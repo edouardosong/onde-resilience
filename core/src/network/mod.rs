@@ -32,6 +32,8 @@ impl TransportType {
     }
 }
 
+pub mod tcp;
+
 /// Interface for mesh transport
 #[async_trait::async_trait]
 pub trait MeshTransport: Send + Sync {
