@@ -1,0 +1,21 @@
+--- src/health.rs
++++ replace += with -= in accept_loop
+@@ -166,17 +166,17 @@
+                     // (le client retentera) sans jamais paniquer.
+                     continue;
+                 }
+             }
+             Err(e) => {
+                 if stop_flag.load(Ordering::Acquire) {
+                     break clean_stop();
+                 }
+-                consecutive_errors += 1;
++                consecutive_errors -= /* ~ changed by cargo-mutants ~ */ 1;
+                 tracing::warn!("event=health_accept_error count={consecutive_errors} error={e}");
+                 if consecutive_errors >= MAX_CONSECUTIVE_ACCEPT_ERRORS {
+                     tracing::error!(
+                         "event=health_listener_died consecutive_errors={consecutive_errors}"
+                     );
+                     return;
+                 }
+             }

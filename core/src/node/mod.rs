@@ -509,6 +509,10 @@ pub struct Node {
     /// courte post-retour-de-partition pendant laquelle le budget anti-spam
     /// par auteur est étendu pour absorber le rattrapage. 0 = jamais ouverte.
     heal_grace_until: u64,
+    /// Phase 3.6 — registre de métriques partagé (compteurs atomiques) :
+    /// alimenté par les points d'instrumentation du nœud et lu par l'endpoint
+    /// de santé (`--health-port`) ainsi que par le log structuré de démarrage.
+    pub metrics: std::sync::Arc<crate::metrics::NodeMetrics>,
 }
 
 impl Node {
@@ -610,7 +614,10 @@ impl Node {
             None => None,
         };
 
-        Self {
+        // Phase 3.6 — registre de métriques partagé entre le nœud, la outbox
+        // gossip et le magasin hiérarchique (hooks optionnels ci-dessous).
+        let metrics = std::sync::Arc::new(crate::metrics::NodeMetrics::new());
+        let mut node = Self {
             config,
             identity,
             identity_rotator: RotatingIdentity::new(6 * 3600), // rotation toutes les 6 h
@@ -637,7 +644,11 @@ impl Node {
             social_store,
             peer_last_seen: std::collections::HashMap::new(),
             heal_grace_until: 0,
-        }
+            metrics: metrics.clone(),
+        };
+        node.gossip.set_metrics(metrics.clone());
+        node.message_store.set_metrics(metrics);
+        node
     }
 
     /// Start the node
@@ -1453,6 +1464,9 @@ impl Node {
             return AdmissionDecision::Admitted;
         }
         if self.gossip.is_known(&event.id) {
+            // Phase 3.6 — écho de relais dédupliqué (preuve de connectivité,
+            // aucun retraitement) : compteur `messages_duplicated`.
+            self.metrics.record_duplicated();
             return AdmissionDecision::Admitted;
         }
         if self.reputation.action_for(author, now) == TrustAction::Ignore {
@@ -1493,7 +1507,40 @@ impl Node {
     /// normal du réseau, ils ne pénalisent personne. Seuls les payloads
     /// malformés signés par leur auteur (`InvalidEvent`) et les PoW
     /// insuffisants (`InsufficientPow`) pèsent sur la réputation.
+    ///
+    /// Phase 3.6 : chaque issue alimente le registre de métriques
+    /// ([`NodeMetrics`]) — `messages_ingested` (traité avec succès),
+    /// `messages_rejected` (gate/payload invalide). Les issues neutres
+    /// (`AlertNotStored`, `Other`, social `Ignored`) ne comptent dans aucune
+    /// des deux catégories : l'événement est relayer sans être retenu, ou
+    /// d'un kind non géré.
     pub fn receive_peer_event(&mut self, now: u64, event: &MeshEvent) -> PeerEventOutcome {
+        let outcome = self.receive_peer_event_inner(now, event);
+        match &outcome {
+            PeerEventOutcome::AlertStored
+            | PeerEventOutcome::EndorsementApplied
+            | PeerEventOutcome::AbuseReportApplied(_)
+            | PeerEventOutcome::Social(
+                SocialEventOutcome::PostStored(_)
+                | SocialEventOutcome::CommentStored(_)
+                | SocialEventOutcome::VoteApplied
+                | SocialEventOutcome::FollowApplied
+                | SocialEventOutcome::MessageStored
+                | SocialEventOutcome::ModerationApplied,
+            ) => self.metrics.record_ingested(),
+            PeerEventOutcome::Rejected(_)
+            | PeerEventOutcome::EndorsementRejected(_)
+            | PeerEventOutcome::AbuseReportRejected(_) => self.metrics.record_rejected(),
+            // Neutre : admis mais non retenu localement (sharding/budget),
+            // kind non géré ou événement ignoré — ni ingéré ni rejeté.
+            _ => {}
+        }
+        outcome
+    }
+
+    /// Corps historique du dispatcher (gate + routage), extrait pour laisser
+    /// [`Self::receive_peer_event`] classifier l'issue côté métriques.
+    fn receive_peer_event_inner(&mut self, now: u64, event: &MeshEvent) -> PeerEventOutcome {
         if let AdmissionDecision::Rejected(reason) = self.admit_peer_event(now, event) {
             return PeerEventOutcome::Rejected(reason);
         }
@@ -1584,6 +1631,17 @@ impl Node {
         if partition_ended {
             self.heal_grace_until = now.saturating_add(HEAL_GRACE_SECS);
         }
+        // Phase 3.6 — jauges de connectivité : connus vs synchronisés
+        // (contact plus récent que le seuil de partition). Scan O(pairs)
+        // borné par la taille du book (~max_peer_connections) — négligeable
+        // face au travail déjà fait par événement (signature, PoW, routage).
+        let known = self.peer_last_seen.len() as u64;
+        let synced = self
+            .peer_last_seen
+            .values()
+            .filter(|&&last| now.saturating_sub(last) < PARTITION_SILENCE_THRESHOLD_SECS)
+            .count() as u64;
+        self.metrics.set_peers(known, synced);
     }
 
     /// Partition soupçonnée à l'instant injecté `now` ? Heuristique
@@ -4083,5 +4141,162 @@ mod tests {
         let status = node.status().await;
         assert!(!status.partition_suspected);
         assert!(!status.heal_grace_active);
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // Phase 3.6 — Observabilité : métriques du nœud cohérentes avec les
+    // événements ingérés (ingérés / rejetés / gossipés / dupliqués, pairs,
+    // stockage). Aucun port fixe, aucun sleep.
+    // ────────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_metrics_track_full_ingestion_lifecycle() {
+        let mut receiver = Node::new(NodeConfig::default());
+        let peer = test_identity(7);
+        receiver
+            .reputation
+            .set_trusted(&peer.pubkey_hex(), crate::reputation::GENESIS_TRUST);
+
+        // 1. Publication locale : gossiped +1, storage +1 — ni ingéré ni rejeté.
+        receiver
+            .publish_alert("alerte locale".to_string())
+            .await
+            .unwrap();
+
+        // 2. Alerte de pair valide et nouvelle : ingested +1, gossiped +1,
+        //    storage +1, peers known=1 synced=1.
+        let valid = signed_spam_alert(&peer, "alerte pair valide", 0);
+        match receiver.receive_peer_event(T0, &valid) {
+            PeerEventOutcome::AlertStored => {}
+            other => panic!("expected AlertStored, got {other:?}"),
+        }
+
+        // 3. Signature invalide : rejected +1, aucun effet de bord storage/gossip.
+        let mut forged = signed_spam_alert(&peer, "falsifiée", 0);
+        forged.sig = String::new();
+        match receiver.receive_peer_event(T0 + 1, &forged) {
+            PeerEventOutcome::Rejected(_) => {}
+            other => panic!("expected Rejected, got {other:?}"),
+        }
+
+        // 4. Doublon relayé (même ID déjà connu) : duplicated +1, ni ingéré
+        //    ni gossiped ni storage.
+        match receiver.receive_peer_event(T0 + 2, &valid) {
+            PeerEventOutcome::AlertNotStored => {}
+            other => panic!("expected AlertNotStored for duplicate, got {other:?}"),
+        }
+
+        let snap = receiver.metrics.snapshot();
+        assert_eq!(snap.metrics.messages_ingested, 1);
+        assert_eq!(snap.metrics.messages_rejected, 1);
+        assert_eq!(snap.metrics.messages_gossiped, 2); // local + première réception
+        assert_eq!(snap.metrics.messages_duplicated, 1);
+        // Pairs : le doublon prouve lui aussi la connectivité (Phase 3.4).
+        assert_eq!(snap.peers.known, 1);
+        assert_eq!(snap.peers.synced, 1);
+        // Stockage : alerte locale + alerte du pair uniquement.
+        assert_eq!(
+            snap.storage.events as usize,
+            receiver.message_store.total_count()
+        );
+        assert_eq!(snap.storage.events, 2);
+        // NB : sur des payloads minuscules, deflate peut GONFLER (en-tête) —
+        // on vérifie seulement que les deux compteurs sont alimentés.
+        assert!(snap.storage.bytes_stored > 0);
+        assert!(snap.storage.bytes_raw > 0);
+    }
+
+    #[tokio::test]
+    async fn test_metrics_storage_gauges_follow_sweep_and_restore() {
+        use crate::storage::{MessageTier, TieredMessage};
+        let mut receiver = Node::new(NodeConfig::default());
+        let peer = test_identity(9);
+        receiver
+            .reputation
+            .set_trusted(&peer.pubkey_hex(), crate::reputation::GENESIS_TRUST);
+
+        let ev = signed_spam_alert(&peer, "à purger", 0);
+        receiver.receive_peer_event(T0, &ev);
+        assert_eq!(receiver.metrics.snapshot().storage.events, 1);
+
+        // Purge à une date postérieure à la rétention Critical (7 j) → la
+        // jauge retombe à zéro (jamais négative), en cohérence avec le magasin
+        // réel. Temps injecté directement dans le magasin (déterministe,
+        // indépendant de l'horloge : u64::MAX est postérieur à tout created_at).
+        let swept = receiver.message_store.sweep_expired(u64::MAX);
+        assert_eq!(swept, 1);
+        let snap = receiver.metrics.snapshot();
+        assert_eq!(snap.storage.events, 0);
+        assert_eq!(snap.storage.bytes_raw, 0);
+        assert_eq!(snap.storage.bytes_stored, 0);
+
+        // Restauration post-crash : la jauge remonte avec le message restauré.
+        let restored_msg = TieredMessage {
+            id: "restauré-1".to_string(),
+            tier: MessageTier::Critical,
+            created_at: T0,
+            original_size: 42,
+            payload: vec![7u8; 20],
+            geohash: "u09tunq".to_string(),
+        };
+        assert!(receiver
+            .message_store
+            .restore(restored_msg.clone())
+            .unwrap());
+        let snap = receiver.metrics.snapshot();
+        assert_eq!(snap.storage.events, 1);
+        assert_eq!(snap.storage.bytes_raw, 42);
+        assert_eq!(snap.storage.bytes_stored, 20);
+    }
+
+    #[tokio::test]
+    async fn test_health_endpoint_reflects_node_ingestion() {
+        use std::io::{Read, Write};
+        use std::net::TcpStream;
+        use std::sync::Arc;
+
+        let mut receiver = Node::new(NodeConfig::default());
+        let peer = test_identity(11);
+        receiver
+            .reputation
+            .set_trusted(&peer.pubkey_hex(), crate::reputation::GENESIS_TRUST);
+        receiver
+            .publish_alert("locale avant santé".to_string())
+            .await
+            .unwrap();
+        receiver.receive_peer_event(T0, &signed_spam_alert(&peer, "du pair", 0));
+
+        // Port éphémère : CI-safe (aucun port fixe).
+        let handle = crate::health::spawn_health_server(0, Arc::clone(&receiver.metrics))
+            .expect("ephemeral health bind");
+
+        let mut stream = TcpStream::connect(("127.0.0.1", handle.port)).unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .unwrap();
+        let mut raw = String::new();
+        stream.read_to_string(&mut raw).unwrap();
+
+        assert!(raw.starts_with("HTTP/1.1 200 OK"), "got: {raw}");
+        let body_start = raw.find("\r\n\r\n").expect("separator") + 4;
+        let v: serde_json::Value =
+            serde_json::from_str(raw[body_start..].trim()).expect("JSON parseable");
+
+        // Valeurs COHÉRENTES avec l'ingestion réelle ci-dessus.
+        assert_eq!(v["status"], "ok");
+        assert_eq!(v["peers"]["known"], 1);
+        assert_eq!(v["peers"]["synced"], 1);
+        assert_eq!(v["metrics"]["messages_ingested"], 1);
+        assert_eq!(v["metrics"]["messages_gossiped"], 2);
+        assert_eq!(v["metrics"]["messages_duplicated"], 0);
+        assert_eq!(
+            v["storage"]["events"].as_u64().unwrap() as usize,
+            receiver.message_store.total_count(),
+            "storage gauge must mirror the real store"
+        );
+        handle.shutdown();
     }
 }

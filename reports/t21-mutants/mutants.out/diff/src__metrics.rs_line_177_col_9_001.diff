@@ -1,0 +1,21 @@
+--- src/metrics.rs
++++ replace NodeMetrics::uptime_secs -> u64 with 1
+@@ -169,17 +169,17 @@
+         self.health_requests.fetch_add(1, Ordering::Relaxed);
+     }
+ 
+     // ---- Lectures (consommateurs : santé, logs) --------------------
+ 
+     /// Uptime en secondes depuis la création du registre (saturé à 0 si
+     /// l'horloge système recule).
+     pub fn uptime_secs(&self) -> u64 {
+-        unix_now().saturating_sub(self.started_at.load(Ordering::Relaxed))
++        1 /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Pairs connus (book de présence).
+     pub fn peers_known(&self) -> u64 {
+         self.peers_known.load(Ordering::Relaxed)
+     }
+ 
+     /// Pairs synchronisés (contact plus récent que le seuil de partition).

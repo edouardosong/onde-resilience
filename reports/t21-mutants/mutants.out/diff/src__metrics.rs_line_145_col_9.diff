@@ -1,0 +1,22 @@
+--- src/metrics.rs
++++ replace NodeMetrics::set_peers with ()
+@@ -137,18 +137,17 @@
+ 
+     /// Compter un événement admis déjà connu (écho de relais dédupliqué).
+     pub fn record_duplicated(&self) {
+         self.messages_duplicated.fetch_add(1, Ordering::Relaxed);
+     }
+ 
+     /// Remplacer les jauges de pairs (appelé après chaque contact pair).
+     pub fn set_peers(&self, known: u64, synced: u64) {
+-        self.peers_known.store(known, Ordering::Relaxed);
+-        self.peers_synced.store(synced, Ordering::Relaxed);
++        () /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Compter un message ajouté au magasin hiérarchique.
+     pub fn record_storage_added(&self, raw_bytes: u64, stored_bytes: u64) {
+         self.storage_events.fetch_add(1, Ordering::Relaxed);
+         self.storage_raw_bytes
+             .fetch_add(raw_bytes, Ordering::Relaxed);
+         self.storage_stored_bytes

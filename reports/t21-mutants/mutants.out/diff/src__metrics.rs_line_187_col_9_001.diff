@@ -1,0 +1,21 @@
+--- src/metrics.rs
++++ replace NodeMetrics::peers_synced -> u64 with 1
+@@ -179,17 +179,17 @@
+ 
+     /// Pairs connus (book de présence).
+     pub fn peers_known(&self) -> u64 {
+         self.peers_known.load(Ordering::Relaxed)
+     }
+ 
+     /// Pairs synchronisés (contact plus récent que le seuil de partition).
+     pub fn peers_synced(&self) -> u64 {
+-        self.peers_synced.load(Ordering::Relaxed)
++        1 /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Instantané complet sérialisable ([`serde::Serialize`]) — c'est le
+     /// corps exact servi par `GET /health`.
+     ///
+     /// ```
+     /// use onde_core::metrics::NodeMetrics;
+     /// let m = NodeMetrics::new();

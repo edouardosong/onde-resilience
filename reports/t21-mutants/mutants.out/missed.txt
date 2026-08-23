@@ -1,0 +1,18 @@
+src/health.rs:50:36: replace * with +
+src/health.rs:50:36: replace * with /
+src/health.rs:83:9: replace HealthHandle::shutdown with ()
+src/health.rs:174:36: replace += with -= in accept_loop
+src/health.rs:174:36: replace += with *= in accept_loop
+src/health.rs:176:39: replace >= with < in accept_loop
+src/health.rs:189:5: replace clean_stop with ()
+src/health.rs:194:5: replace serve_inline_busy with ()
+src/health.rs:214:45: replace == with != in handle_connection
+src/health.rs:253:30: replace > with == in read_request_head
+src/health.rs:253:30: replace > with < in read_request_head
+src/health.rs:253:30: replace > with >= in read_request_head
+src/metrics.rs:42:5: replace unix_now -> u64 with 0
+src/metrics.rs:42:5: replace unix_now -> u64 with 1
+src/metrics.rs:133:14: replace > with >= in NodeMetrics::record_gossiped
+src/metrics.rs:177:9: replace NodeMetrics::uptime_secs -> u64 with 0
+src/metrics.rs:177:9: replace NodeMetrics::uptime_secs -> u64 with 1
+src/metrics.rs:245:9: replace NodeMetrics::log_startup_snapshot with ()

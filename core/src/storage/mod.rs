@@ -526,6 +526,12 @@ pub struct TieredMessageStore {
     /// retient localement que les messages de notre voisinage (ou les
     /// alertes critiques). Les autres sont simplement routés (non stockés).
     my_geohash: String,
+    /// Phase 3.6 — hook de métriques optionnel : jauges `storage.*` tenues
+    /// à jour par add/store/restore/purge. Coût : quelques atomiques, hors
+    /// du chemin critique (compression déjà dominante dans [`Self::store`]).
+    /// Hors sérialisation (runtime-only, re-branché après désérialisation).
+    #[serde(skip)]
+    metrics: Option<std::sync::Arc<crate::metrics::NodeMetrics>>,
 }
 
 impl TieredMessageStore {
@@ -544,12 +550,19 @@ impl TieredMessageStore {
                 StoragePolicy::Gateway => 16 * 1024 * 1024,
             },
             my_geohash: my_geohash.to_string(),
+            metrics: None,
         }
     }
 
     /// Changer la position locale (après un fix GPS, par exemple).
     pub fn set_my_geohash(&mut self, geohash: &str) {
         self.my_geohash = geohash.to_string();
+    }
+
+    /// Brancher le registre de métriques du nœud (Phase 3.6). Sans appel,
+    /// le magasin fonctionne à l'identique (hook `None`, zéro surcoût).
+    pub fn set_metrics(&mut self, metrics: std::sync::Arc<crate::metrics::NodeMetrics>) {
+        self.metrics = Some(metrics);
     }
 
     /// Longueur de préfixe commun exigée pour le stockage local, selon le
@@ -612,6 +625,8 @@ impl TieredMessageStore {
             return Ok(false);
         }
         let compressed = Self::compress(payload);
+        // Taille capturée avant move du payload compressé (zéro copie ajoutée).
+        let compressed_len = compressed.len();
         self.messages.push(TieredMessage {
             id: id.to_string(),
             tier,
@@ -620,6 +635,10 @@ impl TieredMessageStore {
             payload: compressed,
             geohash: geohash.to_string(),
         });
+        // Phase 3.6 — jauges storage.* : octets bruts logiques vs compressés.
+        if let Some(m) = &self.metrics {
+            m.record_storage_added(payload.len() as u64, compressed_len as u64);
+        }
         Ok(true)
     }
 
@@ -646,6 +665,10 @@ impl TieredMessageStore {
         if self.used_raw_bytes() + msg.original_size as u64 > self.policy.max_bytes() {
             return Ok(false);
         }
+        // Phase 3.6 — jauges storage.* pour la restauration post-crash.
+        if let Some(m) = &self.metrics {
+            m.record_storage_added(msg.original_size as u64, msg.payload.len() as u64);
+        }
         self.messages.push(msg);
         Ok(true)
     }
@@ -654,8 +677,23 @@ impl TieredMessageStore {
     /// de messages purgés.
     pub fn sweep_expired(&mut self, now: u64) -> usize {
         let before = self.messages.len();
-        self.messages
-            .retain(|m| now.saturating_sub(m.created_at) < m.tier.retention_secs());
+        // Phase 3.6 — comptabiliser la purge AVANT retrait pour maintenir
+        // exactement les jauges storage.* (sweep rare : coût négligeable).
+        let mut purged_count = 0u64;
+        let mut purged_raw = 0u64;
+        let mut purged_stored = 0u64;
+        self.messages.retain(|m| {
+            let keep = now.saturating_sub(m.created_at) < m.tier.retention_secs();
+            if !keep {
+                purged_count += 1;
+                purged_raw += m.original_size as u64;
+                purged_stored += m.payload.len() as u64;
+            }
+            keep
+        });
+        if let Some(m) = &self.metrics {
+            m.record_storage_removed(purged_count, purged_raw, purged_stored);
+        }
         before - self.messages.len()
     }
 

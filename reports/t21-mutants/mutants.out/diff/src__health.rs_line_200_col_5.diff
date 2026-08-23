@@ -1,0 +1,57 @@
+--- src/health.rs
++++ replace handle_connection with ()
+@@ -192,53 +192,17 @@
+ /// Réponse 503 servie inline quand le plafond de connexions est atteint.
+ fn serve_inline_busy(mut stream: TcpStream) {
+     let body = "{\"error\":\"busy\"}";
+     let _ = write_response(&mut stream, "503 Service Unavailable", body);
+ }
+ 
+ /// Traite UNE connexion : parse la ligne de requête, route, répond, ferme.
+ fn handle_connection(mut stream: TcpStream, metrics: &Arc<NodeMetrics>) {
+-    let _ = stream.set_read_timeout(Some(SOCKET_TIMEOUT));
+-    let _ = stream.set_write_timeout(Some(SOCKET_TIMEOUT));
+-
+-    let request_line = match read_request_head(&mut stream) {
+-        Some(line) => line,
+-        None => return, // timeout, connexion vide ou requête surdimensionnée
+-    };
+-
+-    let mut parts = request_line.split_whitespace();
+-    let method = parts.next().unwrap_or("");
+-    let path = parts.next().unwrap_or("");
+-    let is_get = method == "GET";
+-    let is_health_path = path == "/health" || path == "/health?";
+-
+-    let (status, body) = if !is_get && path == "/health" {
+-        (
+-            "405 Method Not Allowed",
+-            "{\"error\":\"method not allowed\"}".to_string(),
+-        )
+-    } else if is_get && is_health_path {
+-        metrics.record_health_request();
+-        let body = metrics.snapshot_json();
+-        tracing::debug!(
+-            "event=health_request path=/health status=200 count={}",
+-            body.len()
+-        );
+-        ("200 OK", body)
+-    } else if is_get {
+-        ("404 Not Found", "{\"error\":\"not found\"}".to_string())
+-    } else {
+-        (
+-            "405 Method Not Allowed",
+-            "{\"error\":\"method not allowed\"}".to_string(),
+-        )
+-    };
+-    let _ = write_response(&mut stream, status, &body);
+-    let _ = stream.shutdown(SocketShutdown::Both);
++    () /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// Lit l'en-tête HTTP jusqu'à la première ligne complète (CRLF), borné à
+ /// [`MAX_REQUEST_BYTES`]. Retourne la request-line, ou None si rien de
+ /// valable n'arrive à temps.
+ fn read_request_head(stream: &mut TcpStream) -> Option<String> {
+     let mut buf = Vec::with_capacity(256);
+     let mut chunk = [0u8; 512];

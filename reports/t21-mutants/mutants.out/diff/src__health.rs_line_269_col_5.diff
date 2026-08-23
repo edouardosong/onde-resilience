@@ -1,0 +1,26 @@
+--- src/health.rs
++++ replace write_response -> std::io::Result<()> with Ok(())
+@@ -261,22 +261,17 @@
+ 
+ /// Position du premier `\r\n` dans `buf`, si présent.
+ fn find_crlf(buf: &[u8]) -> Option<usize> {
+     buf.windows(2).position(|w| w == b"\r\n")
+ }
+ 
+ /// Écrit une réponse HTTP/1.1 minimale JSON + `Connection: close`.
+ fn write_response(stream: &mut TcpStream, status: &str, body: &str) -> std::io::Result<()> {
+-    let response = format!(
+-        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+-        body.len()
+-    );
+-    stream.write_all(response.as_bytes())?;
+-    stream.flush()
++    Ok(()) /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+     use serde_json::Value;
+ 
+     /// Vérifie que `port` finit par refuser les connexions (listener bien

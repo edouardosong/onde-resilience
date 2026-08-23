@@ -1,0 +1,23 @@
+--- src/metrics.rs
++++ replace NodeMetrics::record_gossiped with ()
+@@ -125,19 +125,17 @@
+     /// Compter un événement refusé (gate ou payload invalide signé).
+     pub fn record_rejected(&self) {
+         self.messages_rejected.fetch_add(1, Ordering::Relaxed);
+     }
+ 
+     /// Compter `n` événements enregistrés nouveaux dans l'outbox gossip
+     /// (`n = 0` → no-op).
+     pub fn record_gossiped(&self, n: u64) {
+-        if n > 0 {
+-            self.messages_gossiped.fetch_add(n, Ordering::Relaxed);
+-        }
++        () /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Compter un événement admis déjà connu (écho de relais dédupliqué).
+     pub fn record_duplicated(&self) {
+         self.messages_duplicated.fetch_add(1, Ordering::Relaxed);
+     }
+ 
+     /// Remplacer les jauges de pairs (appelé après chaque contact pair).

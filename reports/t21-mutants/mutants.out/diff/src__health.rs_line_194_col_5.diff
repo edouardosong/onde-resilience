@@ -1,0 +1,22 @@
+--- src/health.rs
++++ replace serve_inline_busy with ()
+@@ -186,18 +186,17 @@
+ 
+ /// Arrêt propre de la boucle d'acceptation (log structuré unique).
+ fn clean_stop() {
+     tracing::info!("event=health_stopped reason=shutdown");
+ }
+ 
+ /// Réponse 503 servie inline quand le plafond de connexions est atteint.
+ fn serve_inline_busy(mut stream: TcpStream) {
+-    let body = "{\"error\":\"busy\"}";
+-    let _ = write_response(&mut stream, "503 Service Unavailable", body);
++    () /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// Traite UNE connexion : parse la ligne de requête, route, répond, ferme.
+ fn handle_connection(mut stream: TcpStream, metrics: &Arc<NodeMetrics>) {
+     let _ = stream.set_read_timeout(Some(SOCKET_TIMEOUT));
+     let _ = stream.set_write_timeout(Some(SOCKET_TIMEOUT));
+ 
+     let request_line = match read_request_head(&mut stream) {

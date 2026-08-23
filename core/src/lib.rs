@@ -6,6 +6,8 @@
 
 pub mod ai;
 pub mod crypto;
+pub mod health;
+pub mod metrics;
 pub mod network;
 pub mod node;
 pub mod protocol;

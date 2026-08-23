@@ -1,0 +1,1832 @@
+[
+  {
+    "diff": "--- src/health.rs\n+++ replace * with +\n@@ -42,17 +42,17 @@\n use std::net::{Shutdown as SocketShutdown, TcpListener, TcpStream};\n use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};\n use std::sync::Arc;\n use std::time::Duration;\n \n use crate::metrics::NodeMetrics;\n \n /// Taille maximale acceptée pour une requête (octets) — au-delà → 431.\n-const MAX_REQUEST_BYTES: usize = 8 * 1024;\n+const MAX_REQUEST_BYTES: usize = 8 + /* ~ changed by cargo-mutants ~ */ 1024;\n \n /// Timeout borné appliqué à chaque socket client (lecture ET écriture).\n const SOCKET_TIMEOUT: Duration = Duration::from_secs(2);\n \n /// Plafond de threads de connexion actifs ; au-delà, réponse 503 servie en\n /// ligne par la boucle d'acceptation (jamais de spawn illimité).\n const MAX_CONCURRENT_CONNECTIONS: usize = 16;\n \n",
+    "file": "src/health.rs",
+    "function": null,
+    "genre": "BinaryOperator",
+    "name": "src/health.rs:50:36: replace * with +",
+    "package": "onde-core",
+    "replacement": "+",
+    "span": {
+      "end": {
+        "column": 37,
+        "line": 50
+      },
+      "start": {
+        "column": 36,
+        "line": 50
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace * with /\n@@ -42,17 +42,17 @@\n use std::net::{Shutdown as SocketShutdown, TcpListener, TcpStream};\n use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};\n use std::sync::Arc;\n use std::time::Duration;\n \n use crate::metrics::NodeMetrics;\n \n /// Taille maximale acceptée pour une requête (octets) — au-delà → 431.\n-const MAX_REQUEST_BYTES: usize = 8 * 1024;\n+const MAX_REQUEST_BYTES: usize = 8 / /* ~ changed by cargo-mutants ~ */ 1024;\n \n /// Timeout borné appliqué à chaque socket client (lecture ET écriture).\n const SOCKET_TIMEOUT: Duration = Duration::from_secs(2);\n \n /// Plafond de threads de connexion actifs ; au-delà, réponse 503 servie en\n /// ligne par la boucle d'acceptation (jamais de spawn illimité).\n const MAX_CONCURRENT_CONNECTIONS: usize = 16;\n \n",
+    "file": "src/health.rs",
+    "function": null,
+    "genre": "BinaryOperator",
+    "name": "src/health.rs:50:36: replace * with /",
+    "package": "onde-core",
+    "replacement": "/",
+    "span": {
+      "end": {
+        "column": 37,
+        "line": 50
+      },
+      "start": {
+        "column": 36,
+        "line": 50
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace HealthHandle::shutdown with ()\n@@ -75,17 +75,17 @@\n     /// réveiller `accept()`.\n     thread_listener: Option<TcpListener>,\n }\n \n impl HealthHandle {\n     /// Arrêt propre : ferme le listener et signale la boucle d'acceptation.\n     /// Les requêtes déjà acceptées se terminent seules (timeouts bornés).\n     pub fn shutdown(mut self) {\n-        self.stop_internal();\n+        () /* ~ changed by cargo-mutants ~ */\n         // `self.thread_listener` est fermée par `stop_internal`.\n     }\n \n     fn stop_internal(&mut self) {\n         self.stop_flag.store(true, Ordering::Release);\n         // Fermer le clone du listener réveille immédiatement un accept()\n         // bloquant dans le thread serveur.\n         self.thread_listener = None;\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "HealthHandle::shutdown",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 85
+        },
+        "start": {
+          "column": 5,
+          "line": 80
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/health.rs:83:9: replace HealthHandle::shutdown with ()",
+    "package": "onde-core",
+    "replacement": "()",
+    "span": {
+      "end": {
+        "column": 30,
+        "line": 83
+      },
+      "start": {
+        "column": 9,
+        "line": 83
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace HealthHandle::stop_internal with ()\n@@ -80,20 +80,17 @@\n     /// Arrêt propre : ferme le listener et signale la boucle d'acceptation.\n     /// Les requêtes déjà acceptées se terminent seules (timeouts bornés).\n     pub fn shutdown(mut self) {\n         self.stop_internal();\n         // `self.thread_listener` est fermée par `stop_internal`.\n     }\n \n     fn stop_internal(&mut self) {\n-        self.stop_flag.store(true, Ordering::Release);\n-        // Fermer le clone du listener réveille immédiatement un accept()\n-        // bloquant dans le thread serveur.\n-        self.thread_listener = None;\n+        () /* ~ changed by cargo-mutants ~ */\n     }\n }\n \n impl Drop for HealthHandle {\n     fn drop(&mut self) {\n         self.stop_internal();\n     }\n }\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "HealthHandle::stop_internal",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 92
+        },
+        "start": {
+          "column": 5,
+          "line": 87
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/health.rs:88:9: replace HealthHandle::stop_internal with ()",
+    "package": "onde-core",
+    "replacement": "()",
+    "span": {
+      "end": {
+        "column": 37,
+        "line": 91
+      },
+      "start": {
+        "column": 9,
+        "line": 88
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace <impl Drop for HealthHandle>::drop with ()\n@@ -89,17 +89,17 @@\n         // Fermer le clone du listener réveille immédiatement un accept()\n         // bloquant dans le thread serveur.\n         self.thread_listener = None;\n     }\n }\n \n impl Drop for HealthHandle {\n     fn drop(&mut self) {\n-        self.stop_internal();\n+        () /* ~ changed by cargo-mutants ~ */\n     }\n }\n \n /// Démarre le serveur de santé lié à `127.0.0.1:port`.\n ///\n /// `port = 0` → bind éphémère choisi par l'OS ; le port effectif est exposé\n /// par [`HealthHandle::port`]. Le thread d'acceptation est détaché (le nœud\n /// n'a pas à attendre sa fin) mais reste propre : erreurs persistantes ou\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "<impl Drop for HealthHandle>::drop",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 98
+        },
+        "start": {
+          "column": 5,
+          "line": 96
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/health.rs:97:9: replace <impl Drop for HealthHandle>::drop with ()",
+    "package": "onde-core",
+    "replacement": "()",
+    "span": {
+      "end": {
+        "column": 30,
+        "line": 97
+      },
+      "start": {
+        "column": 9,
+        "line": 97
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace spawn_health_server -> std::io::Result<HealthHandle> with Ok(Default::default())\n@@ -106,32 +106,17 @@\n /// signal d'arrêt → sortie nette avec log structuré.\n ///\n /// # Erreurs\n ///\n /// Retourne l'erreur `std::io` du bind (port occupé, privilèges…) —\n /// l'appelant décide : fatal pour un daemon demandant explicitement la\n /// santé, jamais silencieux.\n pub fn spawn_health_server(port: u16, metrics: Arc<NodeMetrics>) -> std::io::Result<HealthHandle> {\n-    let listener = TcpListener::bind((\"127.0.0.1\", port))?;\n-    let effective_port = listener.local_addr()?.port();\n-    let thread_listener = listener.try_clone()?;\n-    let stop_flag = Arc::new(AtomicBool::new(false));\n-    let stop_thread = stop_flag.clone();\n-    let active = Arc::new(AtomicUsize::new(0));\n-\n-    std::thread::Builder::new()\n-        .name(\"onde-health\".to_string())\n-        .spawn(move || accept_loop(listener, metrics, active, stop_thread))?;\n-\n-    Ok(HealthHandle {\n-        port: effective_port,\n-        stop_flag,\n-        thread_listener: Some(thread_listener),\n-    })\n+    Ok(Default::default()) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Boucle d'acceptation : sert chaque connexion (thread dédié plafonné),\n /// s'arrête proprement sur signal d'arrêt, erreur persistante ou listener\n /// fermé.\n fn accept_loop(\n     listener: TcpListener,\n     metrics: Arc<NodeMetrics>,\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "spawn_health_server",
+      "return_type": "-> std::io::Result<HealthHandle>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 130
+        },
+        "start": {
+          "column": 1,
+          "line": 101
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/health.rs:114:5: replace spawn_health_server -> std::io::Result<HealthHandle> with Ok(Default::default())",
+    "package": "onde-core",
+    "replacement": "Ok(Default::default())",
+    "span": {
+      "end": {
+        "column": 7,
+        "line": 129
+      },
+      "start": {
+        "column": 5,
+        "line": 114
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace accept_loop with ()\n@@ -133,60 +133,17 @@\n /// s'arrête proprement sur signal d'arrêt, erreur persistante ou listener\n /// fermé.\n fn accept_loop(\n     listener: TcpListener,\n     metrics: Arc<NodeMetrics>,\n     active: Arc<AtomicUsize>,\n     stop_flag: Arc<AtomicBool>,\n ) {\n-    let mut consecutive_errors: u32 = 0;\n-    loop {\n-        if stop_flag.load(Ordering::Acquire) {\n-            break clean_stop();\n-        }\n-        match listener.accept() {\n-            Ok((stream, _peer)) => {\n-                consecutive_errors = 0;\n-                if active.load(Ordering::Relaxed) >= MAX_CONCURRENT_CONNECTIONS {\n-                    // Surchargé (impossible en pratique sur localhost) :\n-                    // refus explicite servi inline, aucun thread spawned.\n-                    serve_inline_busy(stream);\n-                    continue;\n-                }\n-                let m = metrics.clone();\n-                let a = active.clone();\n-                let spawned = std::thread::Builder::new()\n-                    .name(\"onde-health-conn\".to_string())\n-                    .spawn(move || {\n-                        a.fetch_add(1, Ordering::Relaxed);\n-                        handle_connection(stream, &m);\n-                        a.fetch_sub(1, Ordering::Relaxed);\n-                    });\n-                if spawned.is_err() {\n-                    // Épuisement de threads OS : on ignore cette connexion\n-                    // (le client retentera) sans jamais paniquer.\n-                    continue;\n-                }\n-            }\n-            Err(e) => {\n-                if stop_flag.load(Ordering::Acquire) {\n-                    break clean_stop();\n-                }\n-                consecutive_errors += 1;\n-                tracing::warn!(\"event=health_accept_error count={consecutive_errors} error={e}\");\n-                if consecutive_errors >= MAX_CONSECUTIVE_ACCEPT_ERRORS {\n-                    tracing::error!(\n-                        \"event=health_listener_died consecutive_errors={consecutive_errors}\"\n-                    );\n-                    return;\n-                }\n-            }\n-        }\n-    }\n+    () /* ~ changed by cargo-mutants ~ */\n }\n \n /// Arrêt propre de la boucle d'acceptation (log structuré unique).\n fn clean_stop() {\n     tracing::info!(\"event=health_stopped reason=shutdown\");\n }\n \n /// Réponse 503 servie inline quand le plafond de connexions est atteint.\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "accept_loop",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 185
+        },
+        "start": {
+          "column": 1,
+          "line": 132
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/health.rs:141:5: replace accept_loop with ()",
+    "package": "onde-core",
+    "replacement": "()",
+    "span": {
+      "end": {
+        "column": 6,
+        "line": 184
+      },
+      "start": {
+        "column": 5,
+        "line": 141
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace >= with < in accept_loop\n@@ -141,17 +141,17 @@\n     let mut consecutive_errors: u32 = 0;\n     loop {\n         if stop_flag.load(Ordering::Acquire) {\n             break clean_stop();\n         }\n         match listener.accept() {\n             Ok((stream, _peer)) => {\n                 consecutive_errors = 0;\n-                if active.load(Ordering::Relaxed) >= MAX_CONCURRENT_CONNECTIONS {\n+                if active.load(Ordering::Relaxed) < /* ~ changed by cargo-mutants ~ */ MAX_CONCURRENT_CONNECTIONS {\n                     // Surchargé (impossible en pratique sur localhost) :\n                     // refus explicite servi inline, aucun thread spawned.\n                     serve_inline_busy(stream);\n                     continue;\n                 }\n                 let m = metrics.clone();\n                 let a = active.clone();\n                 let spawned = std::thread::Builder::new()\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "accept_loop",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 185
+        },
+        "start": {
+          "column": 1,
+          "line": 132
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/health.rs:149:51: replace >= with < in accept_loop",
+    "package": "onde-core",
+    "replacement": "<",
+    "span": {
+      "end": {
+        "column": 53,
+        "line": 149
+      },
+      "start": {
+        "column": 51,
+        "line": 149
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace += with -= in accept_loop\n@@ -166,17 +166,17 @@\n                     // (le client retentera) sans jamais paniquer.\n                     continue;\n                 }\n             }\n             Err(e) => {\n                 if stop_flag.load(Ordering::Acquire) {\n                     break clean_stop();\n                 }\n-                consecutive_errors += 1;\n+                consecutive_errors -= /* ~ changed by cargo-mutants ~ */ 1;\n                 tracing::warn!(\"event=health_accept_error count={consecutive_errors} error={e}\");\n                 if consecutive_errors >= MAX_CONSECUTIVE_ACCEPT_ERRORS {\n                     tracing::error!(\n                         \"event=health_listener_died consecutive_errors={consecutive_errors}\"\n                     );\n                     return;\n                 }\n             }\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "accept_loop",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 185
+        },
+        "start": {
+          "column": 1,
+          "line": 132
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/health.rs:174:36: replace += with -= in accept_loop",
+    "package": "onde-core",
+    "replacement": "-=",
+    "span": {
+      "end": {
+        "column": 38,
+        "line": 174
+      },
+      "start": {
+        "column": 36,
+        "line": 174
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace += with *= in accept_loop\n@@ -166,17 +166,17 @@\n                     // (le client retentera) sans jamais paniquer.\n                     continue;\n                 }\n             }\n             Err(e) => {\n                 if stop_flag.load(Ordering::Acquire) {\n                     break clean_stop();\n                 }\n-                consecutive_errors += 1;\n+                consecutive_errors *= /* ~ changed by cargo-mutants ~ */ 1;\n                 tracing::warn!(\"event=health_accept_error count={consecutive_errors} error={e}\");\n                 if consecutive_errors >= MAX_CONSECUTIVE_ACCEPT_ERRORS {\n                     tracing::error!(\n                         \"event=health_listener_died consecutive_errors={consecutive_errors}\"\n                     );\n                     return;\n                 }\n             }\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "accept_loop",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 185
+        },
+        "start": {
+          "column": 1,
+          "line": 132
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/health.rs:174:36: replace += with *= in accept_loop",
+    "package": "onde-core",
+    "replacement": "*=",
+    "span": {
+      "end": {
+        "column": 38,
+        "line": 174
+      },
+      "start": {
+        "column": 36,
+        "line": 174
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace >= with < in accept_loop\n@@ -168,17 +168,17 @@\n                 }\n             }\n             Err(e) => {\n                 if stop_flag.load(Ordering::Acquire) {\n                     break clean_stop();\n                 }\n                 consecutive_errors += 1;\n                 tracing::warn!(\"event=health_accept_error count={consecutive_errors} error={e}\");\n-                if consecutive_errors >= MAX_CONSECUTIVE_ACCEPT_ERRORS {\n+                if consecutive_errors < /* ~ changed by cargo-mutants ~ */ MAX_CONSECUTIVE_ACCEPT_ERRORS {\n                     tracing::error!(\n                         \"event=health_listener_died consecutive_errors={consecutive_errors}\"\n                     );\n                     return;\n                 }\n             }\n         }\n     }\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "accept_loop",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 185
+        },
+        "start": {
+          "column": 1,
+          "line": 132
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/health.rs:176:39: replace >= with < in accept_loop",
+    "package": "onde-core",
+    "replacement": "<",
+    "span": {
+      "end": {
+        "column": 41,
+        "line": 176
+      },
+      "start": {
+        "column": 39,
+        "line": 176
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace clean_stop with ()\n@@ -181,17 +181,17 @@\n                 }\n             }\n         }\n     }\n }\n \n /// Arrêt propre de la boucle d'acceptation (log structuré unique).\n fn clean_stop() {\n-    tracing::info!(\"event=health_stopped reason=shutdown\");\n+    () /* ~ changed by cargo-mutants ~ */\n }\n \n /// Réponse 503 servie inline quand le plafond de connexions est atteint.\n fn serve_inline_busy(mut stream: TcpStream) {\n     let body = \"{\\\"error\\\":\\\"busy\\\"}\";\n     let _ = write_response(&mut stream, \"503 Service Unavailable\", body);\n }\n \n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "clean_stop",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 190
+        },
+        "start": {
+          "column": 1,
+          "line": 187
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/health.rs:189:5: replace clean_stop with ()",
+    "package": "onde-core",
+    "replacement": "()",
+    "span": {
+      "end": {
+        "column": 60,
+        "line": 189
+      },
+      "start": {
+        "column": 5,
+        "line": 189
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace serve_inline_busy with ()\n@@ -186,18 +186,17 @@\n \n /// Arrêt propre de la boucle d'acceptation (log structuré unique).\n fn clean_stop() {\n     tracing::info!(\"event=health_stopped reason=shutdown\");\n }\n \n /// Réponse 503 servie inline quand le plafond de connexions est atteint.\n fn serve_inline_busy(mut stream: TcpStream) {\n-    let body = \"{\\\"error\\\":\\\"busy\\\"}\";\n-    let _ = write_response(&mut stream, \"503 Service Unavailable\", body);\n+    () /* ~ changed by cargo-mutants ~ */\n }\n \n /// Traite UNE connexion : parse la ligne de requête, route, répond, ferme.\n fn handle_connection(mut stream: TcpStream, metrics: &Arc<NodeMetrics>) {\n     let _ = stream.set_read_timeout(Some(SOCKET_TIMEOUT));\n     let _ = stream.set_write_timeout(Some(SOCKET_TIMEOUT));\n \n     let request_line = match read_request_head(&mut stream) {\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "serve_inline_busy",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 196
+        },
+        "start": {
+          "column": 1,
+          "line": 192
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/health.rs:194:5: replace serve_inline_busy with ()",
+    "package": "onde-core",
+    "replacement": "()",
+    "span": {
+      "end": {
+        "column": 74,
+        "line": 195
+      },
+      "start": {
+        "column": 5,
+        "line": 194
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace handle_connection with ()\n@@ -192,53 +192,17 @@\n /// Réponse 503 servie inline quand le plafond de connexions est atteint.\n fn serve_inline_busy(mut stream: TcpStream) {\n     let body = \"{\\\"error\\\":\\\"busy\\\"}\";\n     let _ = write_response(&mut stream, \"503 Service Unavailable\", body);\n }\n \n /// Traite UNE connexion : parse la ligne de requête, route, répond, ferme.\n fn handle_connection(mut stream: TcpStream, metrics: &Arc<NodeMetrics>) {\n-    let _ = stream.set_read_timeout(Some(SOCKET_TIMEOUT));\n-    let _ = stream.set_write_timeout(Some(SOCKET_TIMEOUT));\n-\n-    let request_line = match read_request_head(&mut stream) {\n-        Some(line) => line,\n-        None => return, // timeout, connexion vide ou requête surdimensionnée\n-    };\n-\n-    let mut parts = request_line.split_whitespace();\n-    let method = parts.next().unwrap_or(\"\");\n-    let path = parts.next().unwrap_or(\"\");\n-    let is_get = method == \"GET\";\n-    let is_health_path = path == \"/health\" || path == \"/health?\";\n-\n-    let (status, body) = if !is_get && path == \"/health\" {\n-        (\n-            \"405 Method Not Allowed\",\n-            \"{\\\"error\\\":\\\"method not allowed\\\"}\".to_string(),\n-        )\n-    } else if is_get && is_health_path {\n-        metrics.record_health_request();\n-        let body = metrics.snapshot_json();\n-        tracing::debug!(\n-            \"event=health_request path=/health status=200 count={}\",\n-            body.len()\n-        );\n-        (\"200 OK\", body)\n-    } else if is_get {\n-        (\"404 Not Found\", \"{\\\"error\\\":\\\"not found\\\"}\".to_string())\n-    } else {\n-        (\n-            \"405 Method Not Allowed\",\n-            \"{\\\"error\\\":\\\"method not allowed\\\"}\".to_string(),\n-        )\n-    };\n-    let _ = write_response(&mut stream, status, &body);\n-    let _ = stream.shutdown(SocketShutdown::Both);\n+    () /* ~ changed by cargo-mutants ~ */\n }\n \n /// Lit l'en-tête HTTP jusqu'à la première ligne complète (CRLF), borné à\n /// [`MAX_REQUEST_BYTES`]. Retourne la request-line, ou None si rien de\n /// valable n'arrive à temps.\n fn read_request_head(stream: &mut TcpStream) -> Option<String> {\n     let mut buf = Vec::with_capacity(256);\n     let mut chunk = [0u8; 512];\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "handle_connection",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 237
+        },
+        "start": {
+          "column": 1,
+          "line": 198
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/health.rs:200:5: replace handle_connection with ()",
+    "package": "onde-core",
+    "replacement": "()",
+    "span": {
+      "end": {
+        "column": 51,
+        "line": 236
+      },
+      "start": {
+        "column": 5,
+        "line": 200
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace == with != in handle_connection\n@@ -203,17 +203,17 @@\n     let request_line = match read_request_head(&mut stream) {\n         Some(line) => line,\n         None => return, // timeout, connexion vide ou requête surdimensionnée\n     };\n \n     let mut parts = request_line.split_whitespace();\n     let method = parts.next().unwrap_or(\"\");\n     let path = parts.next().unwrap_or(\"\");\n-    let is_get = method == \"GET\";\n+    let is_get = method != /* ~ changed by cargo-mutants ~ */ \"GET\";\n     let is_health_path = path == \"/health\" || path == \"/health?\";\n \n     let (status, body) = if !is_get && path == \"/health\" {\n         (\n             \"405 Method Not Allowed\",\n             \"{\\\"error\\\":\\\"method not allowed\\\"}\".to_string(),\n         )\n     } else if is_get && is_health_path {\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "handle_connection",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 237
+        },
+        "start": {
+          "column": 1,
+          "line": 198
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/health.rs:211:25: replace == with != in handle_connection",
+    "package": "onde-core",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 27,
+        "line": 211
+      },
+      "start": {
+        "column": 25,
+        "line": 211
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace || with && in handle_connection\n@@ -204,17 +204,17 @@\n         Some(line) => line,\n         None => return, // timeout, connexion vide ou requête surdimensionnée\n     };\n \n     let mut parts = request_line.split_whitespace();\n     let method = parts.next().unwrap_or(\"\");\n     let path = parts.next().unwrap_or(\"\");\n     let is_get = method == \"GET\";\n-    let is_health_path = path == \"/health\" || path == \"/health?\";\n+    let is_health_path = path == \"/health\" && /* ~ changed by cargo-mutants ~ */ path == \"/health?\";\n \n     let (status, body) = if !is_get && path == \"/health\" {\n         (\n             \"405 Method Not Allowed\",\n             \"{\\\"error\\\":\\\"method not allowed\\\"}\".to_string(),\n         )\n     } else if is_get && is_health_path {\n         metrics.record_health_request();\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "handle_connection",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 237
+        },
+        "start": {
+          "column": 1,
+          "line": 198
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/health.rs:212:44: replace || with && in handle_connection",
+    "package": "onde-core",
+    "replacement": "&&",
+    "span": {
+      "end": {
+        "column": 46,
+        "line": 212
+      },
+      "start": {
+        "column": 44,
+        "line": 212
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace == with != in handle_connection\n@@ -204,17 +204,17 @@\n         Some(line) => line,\n         None => return, // timeout, connexion vide ou requête surdimensionnée\n     };\n \n     let mut parts = request_line.split_whitespace();\n     let method = parts.next().unwrap_or(\"\");\n     let path = parts.next().unwrap_or(\"\");\n     let is_get = method == \"GET\";\n-    let is_health_path = path == \"/health\" || path == \"/health?\";\n+    let is_health_path = path != /* ~ changed by cargo-mutants ~ */ \"/health\" || path == \"/health?\";\n \n     let (status, body) = if !is_get && path == \"/health\" {\n         (\n             \"405 Method Not Allowed\",\n             \"{\\\"error\\\":\\\"method not allowed\\\"}\".to_string(),\n         )\n     } else if is_get && is_health_path {\n         metrics.record_health_request();\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "handle_connection",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 237
+        },
+        "start": {
+          "column": 1,
+          "line": 198
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/health.rs:212:31: replace == with != in handle_connection",
+    "package": "onde-core",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 33,
+        "line": 212
+      },
+      "start": {
+        "column": 31,
+        "line": 212
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace == with != in handle_connection\n@@ -204,17 +204,17 @@\n         Some(line) => line,\n         None => return, // timeout, connexion vide ou requête surdimensionnée\n     };\n \n     let mut parts = request_line.split_whitespace();\n     let method = parts.next().unwrap_or(\"\");\n     let path = parts.next().unwrap_or(\"\");\n     let is_get = method == \"GET\";\n-    let is_health_path = path == \"/health\" || path == \"/health?\";\n+    let is_health_path = path == \"/health\" || path != /* ~ changed by cargo-mutants ~ */ \"/health?\";\n \n     let (status, body) = if !is_get && path == \"/health\" {\n         (\n             \"405 Method Not Allowed\",\n             \"{\\\"error\\\":\\\"method not allowed\\\"}\".to_string(),\n         )\n     } else if is_get && is_health_path {\n         metrics.record_health_request();\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "handle_connection",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 237
+        },
+        "start": {
+          "column": 1,
+          "line": 198
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/health.rs:212:52: replace == with != in handle_connection",
+    "package": "onde-core",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 54,
+        "line": 212
+      },
+      "start": {
+        "column": 52,
+        "line": 212
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace && with || in handle_connection\n@@ -206,17 +206,17 @@\n     };\n \n     let mut parts = request_line.split_whitespace();\n     let method = parts.next().unwrap_or(\"\");\n     let path = parts.next().unwrap_or(\"\");\n     let is_get = method == \"GET\";\n     let is_health_path = path == \"/health\" || path == \"/health?\";\n \n-    let (status, body) = if !is_get && path == \"/health\" {\n+    let (status, body) = if !is_get || /* ~ changed by cargo-mutants ~ */ path == \"/health\" {\n         (\n             \"405 Method Not Allowed\",\n             \"{\\\"error\\\":\\\"method not allowed\\\"}\".to_string(),\n         )\n     } else if is_get && is_health_path {\n         metrics.record_health_request();\n         let body = metrics.snapshot_json();\n         tracing::debug!(\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "handle_connection",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 237
+        },
+        "start": {
+          "column": 1,
+          "line": 198
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/health.rs:214:37: replace && with || in handle_connection",
+    "package": "onde-core",
+    "replacement": "||",
+    "span": {
+      "end": {
+        "column": 39,
+        "line": 214
+      },
+      "start": {
+        "column": 37,
+        "line": 214
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ delete ! in handle_connection\n@@ -206,17 +206,17 @@\n     };\n \n     let mut parts = request_line.split_whitespace();\n     let method = parts.next().unwrap_or(\"\");\n     let path = parts.next().unwrap_or(\"\");\n     let is_get = method == \"GET\";\n     let is_health_path = path == \"/health\" || path == \"/health?\";\n \n-    let (status, body) = if !is_get && path == \"/health\" {\n+    let (status, body) = if  /* ~ changed by cargo-mutants ~ */is_get && path == \"/health\" {\n         (\n             \"405 Method Not Allowed\",\n             \"{\\\"error\\\":\\\"method not allowed\\\"}\".to_string(),\n         )\n     } else if is_get && is_health_path {\n         metrics.record_health_request();\n         let body = metrics.snapshot_json();\n         tracing::debug!(\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "handle_connection",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 237
+        },
+        "start": {
+          "column": 1,
+          "line": 198
+        }
+      }
+    },
+    "genre": "UnaryOperator",
+    "name": "src/health.rs:214:29: delete ! in handle_connection",
+    "package": "onde-core",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 30,
+        "line": 214
+      },
+      "start": {
+        "column": 29,
+        "line": 214
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace == with != in handle_connection\n@@ -206,17 +206,17 @@\n     };\n \n     let mut parts = request_line.split_whitespace();\n     let method = parts.next().unwrap_or(\"\");\n     let path = parts.next().unwrap_or(\"\");\n     let is_get = method == \"GET\";\n     let is_health_path = path == \"/health\" || path == \"/health?\";\n \n-    let (status, body) = if !is_get && path == \"/health\" {\n+    let (status, body) = if !is_get && path != /* ~ changed by cargo-mutants ~ */ \"/health\" {\n         (\n             \"405 Method Not Allowed\",\n             \"{\\\"error\\\":\\\"method not allowed\\\"}\".to_string(),\n         )\n     } else if is_get && is_health_path {\n         metrics.record_health_request();\n         let body = metrics.snapshot_json();\n         tracing::debug!(\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "handle_connection",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 237
+        },
+        "start": {
+          "column": 1,
+          "line": 198
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/health.rs:214:45: replace == with != in handle_connection",
+    "package": "onde-core",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 47,
+        "line": 214
+      },
+      "start": {
+        "column": 45,
+        "line": 214
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace && with || in handle_connection\n@@ -211,17 +211,17 @@\n     let is_get = method == \"GET\";\n     let is_health_path = path == \"/health\" || path == \"/health?\";\n \n     let (status, body) = if !is_get && path == \"/health\" {\n         (\n             \"405 Method Not Allowed\",\n             \"{\\\"error\\\":\\\"method not allowed\\\"}\".to_string(),\n         )\n-    } else if is_get && is_health_path {\n+    } else if is_get || /* ~ changed by cargo-mutants ~ */ is_health_path {\n         metrics.record_health_request();\n         let body = metrics.snapshot_json();\n         tracing::debug!(\n             \"event=health_request path=/health status=200 count={}\",\n             body.len()\n         );\n         (\"200 OK\", body)\n     } else if is_get {\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "handle_connection",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 237
+        },
+        "start": {
+          "column": 1,
+          "line": 198
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/health.rs:219:22: replace && with || in handle_connection",
+    "package": "onde-core",
+    "replacement": "||",
+    "span": {
+      "end": {
+        "column": 24,
+        "line": 219
+      },
+      "start": {
+        "column": 22,
+        "line": 219
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace read_request_head -> Option<String> with None\n@@ -235,33 +235,17 @@\n     let _ = write_response(&mut stream, status, &body);\n     let _ = stream.shutdown(SocketShutdown::Both);\n }\n \n /// Lit l'en-tête HTTP jusqu'à la première ligne complète (CRLF), borné à\n /// [`MAX_REQUEST_BYTES`]. Retourne la request-line, ou None si rien de\n /// valable n'arrive à temps.\n fn read_request_head(stream: &mut TcpStream) -> Option<String> {\n-    let mut buf = Vec::with_capacity(256);\n-    let mut chunk = [0u8; 512];\n-    loop {\n-        match stream.read(&mut chunk) {\n-            Ok(0) => return None, // fermeture sans requête complète\n-            Ok(n) => {\n-                buf.extend_from_slice(&chunk[..n]);\n-                if let Some(pos) = find_crlf(&buf) {\n-                    return Some(String::from_utf8_lossy(&buf[..pos]).into_owned());\n-                }\n-                if buf.len() > MAX_REQUEST_BYTES {\n-                    return None;\n-                }\n-            }\n-            Err(_) => return None, // timeout lecture (> SOCKET_TIMEOUT)\n-        }\n-    }\n+    None /* ~ changed by cargo-mutants ~ */\n }\n \n /// Position du premier `\\r\\n` dans `buf`, si présent.\n fn find_crlf(buf: &[u8]) -> Option<usize> {\n     buf.windows(2).position(|w| w == b\"\\r\\n\")\n }\n \n /// Écrit une réponse HTTP/1.1 minimale JSON + `Connection: close`.\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "read_request_head",
+      "return_type": "-> Option<String>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 260
+        },
+        "start": {
+          "column": 1,
+          "line": 239
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/health.rs:243:5: replace read_request_head -> Option<String> with None",
+    "package": "onde-core",
+    "replacement": "None",
+    "span": {
+      "end": {
+        "column": 6,
+        "line": 259
+      },
+      "start": {
+        "column": 5,
+        "line": 243
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace read_request_head -> Option<String> with Some(String::new())\n@@ -235,33 +235,17 @@\n     let _ = write_response(&mut stream, status, &body);\n     let _ = stream.shutdown(SocketShutdown::Both);\n }\n \n /// Lit l'en-tête HTTP jusqu'à la première ligne complète (CRLF), borné à\n /// [`MAX_REQUEST_BYTES`]. Retourne la request-line, ou None si rien de\n /// valable n'arrive à temps.\n fn read_request_head(stream: &mut TcpStream) -> Option<String> {\n-    let mut buf = Vec::with_capacity(256);\n-    let mut chunk = [0u8; 512];\n-    loop {\n-        match stream.read(&mut chunk) {\n-            Ok(0) => return None, // fermeture sans requête complète\n-            Ok(n) => {\n-                buf.extend_from_slice(&chunk[..n]);\n-                if let Some(pos) = find_crlf(&buf) {\n-                    return Some(String::from_utf8_lossy(&buf[..pos]).into_owned());\n-                }\n-                if buf.len() > MAX_REQUEST_BYTES {\n-                    return None;\n-                }\n-            }\n-            Err(_) => return None, // timeout lecture (> SOCKET_TIMEOUT)\n-        }\n-    }\n+    Some(String::new()) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Position du premier `\\r\\n` dans `buf`, si présent.\n fn find_crlf(buf: &[u8]) -> Option<usize> {\n     buf.windows(2).position(|w| w == b\"\\r\\n\")\n }\n \n /// Écrit une réponse HTTP/1.1 minimale JSON + `Connection: close`.\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "read_request_head",
+      "return_type": "-> Option<String>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 260
+        },
+        "start": {
+          "column": 1,
+          "line": 239
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/health.rs:243:5: replace read_request_head -> Option<String> with Some(String::new())",
+    "package": "onde-core",
+    "replacement": "Some(String::new())",
+    "span": {
+      "end": {
+        "column": 6,
+        "line": 259
+      },
+      "start": {
+        "column": 5,
+        "line": 243
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace read_request_head -> Option<String> with Some(\"xyzzy\".into())\n@@ -235,33 +235,17 @@\n     let _ = write_response(&mut stream, status, &body);\n     let _ = stream.shutdown(SocketShutdown::Both);\n }\n \n /// Lit l'en-tête HTTP jusqu'à la première ligne complète (CRLF), borné à\n /// [`MAX_REQUEST_BYTES`]. Retourne la request-line, ou None si rien de\n /// valable n'arrive à temps.\n fn read_request_head(stream: &mut TcpStream) -> Option<String> {\n-    let mut buf = Vec::with_capacity(256);\n-    let mut chunk = [0u8; 512];\n-    loop {\n-        match stream.read(&mut chunk) {\n-            Ok(0) => return None, // fermeture sans requête complète\n-            Ok(n) => {\n-                buf.extend_from_slice(&chunk[..n]);\n-                if let Some(pos) = find_crlf(&buf) {\n-                    return Some(String::from_utf8_lossy(&buf[..pos]).into_owned());\n-                }\n-                if buf.len() > MAX_REQUEST_BYTES {\n-                    return None;\n-                }\n-            }\n-            Err(_) => return None, // timeout lecture (> SOCKET_TIMEOUT)\n-        }\n-    }\n+    Some(\"xyzzy\".into()) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Position du premier `\\r\\n` dans `buf`, si présent.\n fn find_crlf(buf: &[u8]) -> Option<usize> {\n     buf.windows(2).position(|w| w == b\"\\r\\n\")\n }\n \n /// Écrit une réponse HTTP/1.1 minimale JSON + `Connection: close`.\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "read_request_head",
+      "return_type": "-> Option<String>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 260
+        },
+        "start": {
+          "column": 1,
+          "line": 239
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/health.rs:243:5: replace read_request_head -> Option<String> with Some(\"xyzzy\".into())",
+    "package": "onde-core",
+    "replacement": "Some(\"xyzzy\".into())",
+    "span": {
+      "end": {
+        "column": 6,
+        "line": 259
+      },
+      "start": {
+        "column": 5,
+        "line": 243
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace > with == in read_request_head\n@@ -245,17 +245,17 @@\n     loop {\n         match stream.read(&mut chunk) {\n             Ok(0) => return None, // fermeture sans requête complète\n             Ok(n) => {\n                 buf.extend_from_slice(&chunk[..n]);\n                 if let Some(pos) = find_crlf(&buf) {\n                     return Some(String::from_utf8_lossy(&buf[..pos]).into_owned());\n                 }\n-                if buf.len() > MAX_REQUEST_BYTES {\n+                if buf.len() == /* ~ changed by cargo-mutants ~ */ MAX_REQUEST_BYTES {\n                     return None;\n                 }\n             }\n             Err(_) => return None, // timeout lecture (> SOCKET_TIMEOUT)\n         }\n     }\n }\n \n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "read_request_head",
+      "return_type": "-> Option<String>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 260
+        },
+        "start": {
+          "column": 1,
+          "line": 239
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/health.rs:253:30: replace > with == in read_request_head",
+    "package": "onde-core",
+    "replacement": "==",
+    "span": {
+      "end": {
+        "column": 31,
+        "line": 253
+      },
+      "start": {
+        "column": 30,
+        "line": 253
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace > with < in read_request_head\n@@ -245,17 +245,17 @@\n     loop {\n         match stream.read(&mut chunk) {\n             Ok(0) => return None, // fermeture sans requête complète\n             Ok(n) => {\n                 buf.extend_from_slice(&chunk[..n]);\n                 if let Some(pos) = find_crlf(&buf) {\n                     return Some(String::from_utf8_lossy(&buf[..pos]).into_owned());\n                 }\n-                if buf.len() > MAX_REQUEST_BYTES {\n+                if buf.len() < /* ~ changed by cargo-mutants ~ */ MAX_REQUEST_BYTES {\n                     return None;\n                 }\n             }\n             Err(_) => return None, // timeout lecture (> SOCKET_TIMEOUT)\n         }\n     }\n }\n \n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "read_request_head",
+      "return_type": "-> Option<String>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 260
+        },
+        "start": {
+          "column": 1,
+          "line": 239
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/health.rs:253:30: replace > with < in read_request_head",
+    "package": "onde-core",
+    "replacement": "<",
+    "span": {
+      "end": {
+        "column": 31,
+        "line": 253
+      },
+      "start": {
+        "column": 30,
+        "line": 253
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace > with >= in read_request_head\n@@ -245,17 +245,17 @@\n     loop {\n         match stream.read(&mut chunk) {\n             Ok(0) => return None, // fermeture sans requête complète\n             Ok(n) => {\n                 buf.extend_from_slice(&chunk[..n]);\n                 if let Some(pos) = find_crlf(&buf) {\n                     return Some(String::from_utf8_lossy(&buf[..pos]).into_owned());\n                 }\n-                if buf.len() > MAX_REQUEST_BYTES {\n+                if buf.len() >= /* ~ changed by cargo-mutants ~ */ MAX_REQUEST_BYTES {\n                     return None;\n                 }\n             }\n             Err(_) => return None, // timeout lecture (> SOCKET_TIMEOUT)\n         }\n     }\n }\n \n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "read_request_head",
+      "return_type": "-> Option<String>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 260
+        },
+        "start": {
+          "column": 1,
+          "line": 239
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/health.rs:253:30: replace > with >= in read_request_head",
+    "package": "onde-core",
+    "replacement": ">=",
+    "span": {
+      "end": {
+        "column": 31,
+        "line": 253
+      },
+      "start": {
+        "column": 30,
+        "line": 253
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace find_crlf -> Option<usize> with None\n@@ -256,17 +256,17 @@\n             }\n             Err(_) => return None, // timeout lecture (> SOCKET_TIMEOUT)\n         }\n     }\n }\n \n /// Position du premier `\\r\\n` dans `buf`, si présent.\n fn find_crlf(buf: &[u8]) -> Option<usize> {\n-    buf.windows(2).position(|w| w == b\"\\r\\n\")\n+    None /* ~ changed by cargo-mutants ~ */\n }\n \n /// Écrit une réponse HTTP/1.1 minimale JSON + `Connection: close`.\n fn write_response(stream: &mut TcpStream, status: &str, body: &str) -> std::io::Result<()> {\n     let response = format!(\n         \"HTTP/1.1 {status}\\r\\nContent-Type: application/json\\r\\nContent-Length: {}\\r\\nConnection: close\\r\\n\\r\\n{body}\",\n         body.len()\n     );\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "find_crlf",
+      "return_type": "-> Option<usize>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 265
+        },
+        "start": {
+          "column": 1,
+          "line": 262
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/health.rs:264:5: replace find_crlf -> Option<usize> with None",
+    "package": "onde-core",
+    "replacement": "None",
+    "span": {
+      "end": {
+        "column": 46,
+        "line": 264
+      },
+      "start": {
+        "column": 5,
+        "line": 264
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace find_crlf -> Option<usize> with Some(0)\n@@ -256,17 +256,17 @@\n             }\n             Err(_) => return None, // timeout lecture (> SOCKET_TIMEOUT)\n         }\n     }\n }\n \n /// Position du premier `\\r\\n` dans `buf`, si présent.\n fn find_crlf(buf: &[u8]) -> Option<usize> {\n-    buf.windows(2).position(|w| w == b\"\\r\\n\")\n+    Some(0) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Écrit une réponse HTTP/1.1 minimale JSON + `Connection: close`.\n fn write_response(stream: &mut TcpStream, status: &str, body: &str) -> std::io::Result<()> {\n     let response = format!(\n         \"HTTP/1.1 {status}\\r\\nContent-Type: application/json\\r\\nContent-Length: {}\\r\\nConnection: close\\r\\n\\r\\n{body}\",\n         body.len()\n     );\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "find_crlf",
+      "return_type": "-> Option<usize>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 265
+        },
+        "start": {
+          "column": 1,
+          "line": 262
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/health.rs:264:5: replace find_crlf -> Option<usize> with Some(0)",
+    "package": "onde-core",
+    "replacement": "Some(0)",
+    "span": {
+      "end": {
+        "column": 46,
+        "line": 264
+      },
+      "start": {
+        "column": 5,
+        "line": 264
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace find_crlf -> Option<usize> with Some(1)\n@@ -256,17 +256,17 @@\n             }\n             Err(_) => return None, // timeout lecture (> SOCKET_TIMEOUT)\n         }\n     }\n }\n \n /// Position du premier `\\r\\n` dans `buf`, si présent.\n fn find_crlf(buf: &[u8]) -> Option<usize> {\n-    buf.windows(2).position(|w| w == b\"\\r\\n\")\n+    Some(1) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Écrit une réponse HTTP/1.1 minimale JSON + `Connection: close`.\n fn write_response(stream: &mut TcpStream, status: &str, body: &str) -> std::io::Result<()> {\n     let response = format!(\n         \"HTTP/1.1 {status}\\r\\nContent-Type: application/json\\r\\nContent-Length: {}\\r\\nConnection: close\\r\\n\\r\\n{body}\",\n         body.len()\n     );\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "find_crlf",
+      "return_type": "-> Option<usize>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 265
+        },
+        "start": {
+          "column": 1,
+          "line": 262
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/health.rs:264:5: replace find_crlf -> Option<usize> with Some(1)",
+    "package": "onde-core",
+    "replacement": "Some(1)",
+    "span": {
+      "end": {
+        "column": 46,
+        "line": 264
+      },
+      "start": {
+        "column": 5,
+        "line": 264
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace == with != in find_crlf\n@@ -256,17 +256,17 @@\n             }\n             Err(_) => return None, // timeout lecture (> SOCKET_TIMEOUT)\n         }\n     }\n }\n \n /// Position du premier `\\r\\n` dans `buf`, si présent.\n fn find_crlf(buf: &[u8]) -> Option<usize> {\n-    buf.windows(2).position(|w| w == b\"\\r\\n\")\n+    buf.windows(2).position(|w| w != /* ~ changed by cargo-mutants ~ */ b\"\\r\\n\")\n }\n \n /// Écrit une réponse HTTP/1.1 minimale JSON + `Connection: close`.\n fn write_response(stream: &mut TcpStream, status: &str, body: &str) -> std::io::Result<()> {\n     let response = format!(\n         \"HTTP/1.1 {status}\\r\\nContent-Type: application/json\\r\\nContent-Length: {}\\r\\nConnection: close\\r\\n\\r\\n{body}\",\n         body.len()\n     );\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "find_crlf",
+      "return_type": "-> Option<usize>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 265
+        },
+        "start": {
+          "column": 1,
+          "line": 262
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/health.rs:264:35: replace == with != in find_crlf",
+    "package": "onde-core",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 37,
+        "line": 264
+      },
+      "start": {
+        "column": 35,
+        "line": 264
+      }
+    }
+  },
+  {
+    "diff": "--- src/health.rs\n+++ replace write_response -> std::io::Result<()> with Ok(())\n@@ -261,22 +261,17 @@\n \n /// Position du premier `\\r\\n` dans `buf`, si présent.\n fn find_crlf(buf: &[u8]) -> Option<usize> {\n     buf.windows(2).position(|w| w == b\"\\r\\n\")\n }\n \n /// Écrit une réponse HTTP/1.1 minimale JSON + `Connection: close`.\n fn write_response(stream: &mut TcpStream, status: &str, body: &str) -> std::io::Result<()> {\n-    let response = format!(\n-        \"HTTP/1.1 {status}\\r\\nContent-Type: application/json\\r\\nContent-Length: {}\\r\\nConnection: close\\r\\n\\r\\n{body}\",\n-        body.len()\n-    );\n-    stream.write_all(response.as_bytes())?;\n-    stream.flush()\n+    Ok(()) /* ~ changed by cargo-mutants ~ */\n }\n \n #[cfg(test)]\n mod tests {\n     use super::*;\n     use serde_json::Value;\n \n     /// Vérifie que `port` finit par refuser les connexions (listener bien\n",
+    "file": "src/health.rs",
+    "function": {
+      "function_name": "write_response",
+      "return_type": "-> std::io::Result<()>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 275
+        },
+        "start": {
+          "column": 1,
+          "line": 267
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/health.rs:269:5: replace write_response -> std::io::Result<()> with Ok(())",
+    "package": "onde-core",
+    "replacement": "Ok(())",
+    "span": {
+      "end": {
+        "column": 19,
+        "line": 274
+      },
+      "start": {
+        "column": 5,
+        "line": 269
+      }
+    }
+  },
+  {
+    "diff": "--- src/metrics.rs\n+++ replace unix_now -> u64 with 0\n@@ -34,20 +34,17 @@\n //! let json = metrics.snapshot_json();\n //! assert!(json.contains(\"\\\"status\\\":\\\"ok\\\"\"));\n //! ```\n use std::sync::atomic::{AtomicU64, Ordering};\n use std::time::{SystemTime, UNIX_EPOCH};\n \n /// Instant unix courant en secondes (0 si l'horloge système est invalide).\n fn unix_now() -> u64 {\n-    SystemTime::now()\n-        .duration_since(UNIX_EPOCH)\n-        .map(|d| d.as_secs())\n-        .unwrap_or(0)\n+    0 /* ~ changed by cargo-mutants ~ */\n }\n \n /// Soustraction **saturante** lock-free sur une jauge atomique : ne descend\n /// jamais sous 0 (les purges concurrentes avec des ajouts restent cohérentes).\n fn saturating_sub(counter: &AtomicU64, value: u64) {\n     let mut current = counter.load(Ordering::Relaxed);\n     loop {\n         let next = current.saturating_sub(value);\n",
+    "file": "src/metrics.rs",
+    "function": {
+      "function_name": "unix_now",
+      "return_type": "-> u64",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 46
+        },
+        "start": {
+          "column": 1,
+          "line": 40
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/metrics.rs:42:5: replace unix_now -> u64 with 0",
+    "package": "onde-core",
+    "replacement": "0",
+    "span": {
+      "end": {
+        "column": 22,
+        "line": 45
+      },
+      "start": {
+        "column": 5,
+        "line": 42
+      }
+    }
+  },
+  {
+    "diff": "--- src/metrics.rs\n+++ replace unix_now -> u64 with 1\n@@ -34,20 +34,17 @@\n //! let json = metrics.snapshot_json();\n //! assert!(json.contains(\"\\\"status\\\":\\\"ok\\\"\"));\n //! ```\n use std::sync::atomic::{AtomicU64, Ordering};\n use std::time::{SystemTime, UNIX_EPOCH};\n \n /// Instant unix courant en secondes (0 si l'horloge système est invalide).\n fn unix_now() -> u64 {\n-    SystemTime::now()\n-        .duration_since(UNIX_EPOCH)\n-        .map(|d| d.as_secs())\n-        .unwrap_or(0)\n+    1 /* ~ changed by cargo-mutants ~ */\n }\n \n /// Soustraction **saturante** lock-free sur une jauge atomique : ne descend\n /// jamais sous 0 (les purges concurrentes avec des ajouts restent cohérentes).\n fn saturating_sub(counter: &AtomicU64, value: u64) {\n     let mut current = counter.load(Ordering::Relaxed);\n     loop {\n         let next = current.saturating_sub(value);\n",
+    "file": "src/metrics.rs",
+    "function": {
+      "function_name": "unix_now",
+      "return_type": "-> u64",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 46
+        },
+        "start": {
+          "column": 1,
+          "line": 40
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/metrics.rs:42:5: replace unix_now -> u64 with 1",
+    "package": "onde-core",
+    "replacement": "1",
+    "span": {
+      "end": {
+        "column": 22,
+        "line": 45
+      },
+      "start": {
+        "column": 5,
+        "line": 42
+      }
+    }
+  },
+  {
+    "diff": "--- src/metrics.rs\n+++ replace saturating_sub with ()\n@@ -43,24 +43,17 @@\n         .duration_since(UNIX_EPOCH)\n         .map(|d| d.as_secs())\n         .unwrap_or(0)\n }\n \n /// Soustraction **saturante** lock-free sur une jauge atomique : ne descend\n /// jamais sous 0 (les purges concurrentes avec des ajouts restent cohérentes).\n fn saturating_sub(counter: &AtomicU64, value: u64) {\n-    let mut current = counter.load(Ordering::Relaxed);\n-    loop {\n-        let next = current.saturating_sub(value);\n-        match counter.compare_exchange_weak(current, next, Ordering::Relaxed, Ordering::Relaxed) {\n-            Ok(_) => return,\n-            Err(actual) => current = actual,\n-        }\n-    }\n+    () /* ~ changed by cargo-mutants ~ */\n }\n \n /// Registre de métriques du nœud — compteurs/jauges atomiques partagés.\n ///\n /// Le même [`Arc<NodeMetrics>`] est détenu par le nœud (producteur : points\n /// d'instrumentation) et par le serveur de santé (consommateur : snapshots\n /// JSON). Toutes les opérations sont lock-free (`AtomicU64`, ordering\n /// `Relaxed` suffisant : ce sont des compteurs indépendants, jamais des\n",
+    "file": "src/metrics.rs",
+    "function": {
+      "function_name": "saturating_sub",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 59
+        },
+        "start": {
+          "column": 1,
+          "line": 48
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/metrics.rs:51:5: replace saturating_sub with ()",
+    "package": "onde-core",
+    "replacement": "()",
+    "span": {
+      "end": {
+        "column": 6,
+        "line": 58
+      },
+      "start": {
+        "column": 5,
+        "line": 51
+      }
+    }
+  },
+  {
+    "diff": "--- src/metrics.rs\n+++ replace NodeMetrics::record_ingested with ()\n@@ -114,17 +114,17 @@\n             health_requests: AtomicU64::new(0),\n         }\n     }\n \n     // ---- Points d'instrumentation (producteurs) --------------------\n \n     /// Compter un événement admis et traité avec succès.\n     pub fn record_ingested(&self) {\n-        self.messages_ingested.fetch_add(1, Ordering::Relaxed);\n+        () /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Compter un événement refusé (gate ou payload invalide signé).\n     pub fn record_rejected(&self) {\n         self.messages_rejected.fetch_add(1, Ordering::Relaxed);\n     }\n \n     /// Compter `n` événements enregistrés nouveaux dans l'outbox gossip\n",
+    "file": "src/metrics.rs",
+    "function": {
+      "function_name": "NodeMetrics::record_ingested",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 123
+        },
+        "start": {
+          "column": 5,
+          "line": 120
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/metrics.rs:122:9: replace NodeMetrics::record_ingested with ()",
+    "package": "onde-core",
+    "replacement": "()",
+    "span": {
+      "end": {
+        "column": 64,
+        "line": 122
+      },
+      "start": {
+        "column": 9,
+        "line": 122
+      }
+    }
+  },
+  {
+    "diff": "--- src/metrics.rs\n+++ replace NodeMetrics::record_rejected with ()\n@@ -119,17 +119,17 @@\n \n     /// Compter un événement admis et traité avec succès.\n     pub fn record_ingested(&self) {\n         self.messages_ingested.fetch_add(1, Ordering::Relaxed);\n     }\n \n     /// Compter un événement refusé (gate ou payload invalide signé).\n     pub fn record_rejected(&self) {\n-        self.messages_rejected.fetch_add(1, Ordering::Relaxed);\n+        () /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Compter `n` événements enregistrés nouveaux dans l'outbox gossip\n     /// (`n = 0` → no-op).\n     pub fn record_gossiped(&self, n: u64) {\n         if n > 0 {\n             self.messages_gossiped.fetch_add(n, Ordering::Relaxed);\n         }\n",
+    "file": "src/metrics.rs",
+    "function": {
+      "function_name": "NodeMetrics::record_rejected",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 128
+        },
+        "start": {
+          "column": 5,
+          "line": 125
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/metrics.rs:127:9: replace NodeMetrics::record_rejected with ()",
+    "package": "onde-core",
+    "replacement": "()",
+    "span": {
+      "end": {
+        "column": 64,
+        "line": 127
+      },
+      "start": {
+        "column": 9,
+        "line": 127
+      }
+    }
+  },
+  {
+    "diff": "--- src/metrics.rs\n+++ replace NodeMetrics::record_gossiped with ()\n@@ -125,19 +125,17 @@\n     /// Compter un événement refusé (gate ou payload invalide signé).\n     pub fn record_rejected(&self) {\n         self.messages_rejected.fetch_add(1, Ordering::Relaxed);\n     }\n \n     /// Compter `n` événements enregistrés nouveaux dans l'outbox gossip\n     /// (`n = 0` → no-op).\n     pub fn record_gossiped(&self, n: u64) {\n-        if n > 0 {\n-            self.messages_gossiped.fetch_add(n, Ordering::Relaxed);\n-        }\n+        () /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Compter un événement admis déjà connu (écho de relais dédupliqué).\n     pub fn record_duplicated(&self) {\n         self.messages_duplicated.fetch_add(1, Ordering::Relaxed);\n     }\n \n     /// Remplacer les jauges de pairs (appelé après chaque contact pair).\n",
+    "file": "src/metrics.rs",
+    "function": {
+      "function_name": "NodeMetrics::record_gossiped",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 136
+        },
+        "start": {
+          "column": 5,
+          "line": 130
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/metrics.rs:133:9: replace NodeMetrics::record_gossiped with ()",
+    "package": "onde-core",
+    "replacement": "()",
+    "span": {
+      "end": {
+        "column": 10,
+        "line": 135
+      },
+      "start": {
+        "column": 9,
+        "line": 133
+      }
+    }
+  },
+  {
+    "diff": "--- src/metrics.rs\n+++ replace > with == in NodeMetrics::record_gossiped\n@@ -125,17 +125,17 @@\n     /// Compter un événement refusé (gate ou payload invalide signé).\n     pub fn record_rejected(&self) {\n         self.messages_rejected.fetch_add(1, Ordering::Relaxed);\n     }\n \n     /// Compter `n` événements enregistrés nouveaux dans l'outbox gossip\n     /// (`n = 0` → no-op).\n     pub fn record_gossiped(&self, n: u64) {\n-        if n > 0 {\n+        if n == /* ~ changed by cargo-mutants ~ */ 0 {\n             self.messages_gossiped.fetch_add(n, Ordering::Relaxed);\n         }\n     }\n \n     /// Compter un événement admis déjà connu (écho de relais dédupliqué).\n     pub fn record_duplicated(&self) {\n         self.messages_duplicated.fetch_add(1, Ordering::Relaxed);\n     }\n",
+    "file": "src/metrics.rs",
+    "function": {
+      "function_name": "NodeMetrics::record_gossiped",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 136
+        },
+        "start": {
+          "column": 5,
+          "line": 130
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/metrics.rs:133:14: replace > with == in NodeMetrics::record_gossiped",
+    "package": "onde-core",
+    "replacement": "==",
+    "span": {
+      "end": {
+        "column": 15,
+        "line": 133
+      },
+      "start": {
+        "column": 14,
+        "line": 133
+      }
+    }
+  },
+  {
+    "diff": "--- src/metrics.rs\n+++ replace > with < in NodeMetrics::record_gossiped\n@@ -125,17 +125,17 @@\n     /// Compter un événement refusé (gate ou payload invalide signé).\n     pub fn record_rejected(&self) {\n         self.messages_rejected.fetch_add(1, Ordering::Relaxed);\n     }\n \n     /// Compter `n` événements enregistrés nouveaux dans l'outbox gossip\n     /// (`n = 0` → no-op).\n     pub fn record_gossiped(&self, n: u64) {\n-        if n > 0 {\n+        if n < /* ~ changed by cargo-mutants ~ */ 0 {\n             self.messages_gossiped.fetch_add(n, Ordering::Relaxed);\n         }\n     }\n \n     /// Compter un événement admis déjà connu (écho de relais dédupliqué).\n     pub fn record_duplicated(&self) {\n         self.messages_duplicated.fetch_add(1, Ordering::Relaxed);\n     }\n",
+    "file": "src/metrics.rs",
+    "function": {
+      "function_name": "NodeMetrics::record_gossiped",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 136
+        },
+        "start": {
+          "column": 5,
+          "line": 130
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/metrics.rs:133:14: replace > with < in NodeMetrics::record_gossiped",
+    "package": "onde-core",
+    "replacement": "<",
+    "span": {
+      "end": {
+        "column": 15,
+        "line": 133
+      },
+      "start": {
+        "column": 14,
+        "line": 133
+      }
+    }
+  },
+  {
+    "diff": "--- src/metrics.rs\n+++ replace > with >= in NodeMetrics::record_gossiped\n@@ -125,17 +125,17 @@\n     /// Compter un événement refusé (gate ou payload invalide signé).\n     pub fn record_rejected(&self) {\n         self.messages_rejected.fetch_add(1, Ordering::Relaxed);\n     }\n \n     /// Compter `n` événements enregistrés nouveaux dans l'outbox gossip\n     /// (`n = 0` → no-op).\n     pub fn record_gossiped(&self, n: u64) {\n-        if n > 0 {\n+        if n >= /* ~ changed by cargo-mutants ~ */ 0 {\n             self.messages_gossiped.fetch_add(n, Ordering::Relaxed);\n         }\n     }\n \n     /// Compter un événement admis déjà connu (écho de relais dédupliqué).\n     pub fn record_duplicated(&self) {\n         self.messages_duplicated.fetch_add(1, Ordering::Relaxed);\n     }\n",
+    "file": "src/metrics.rs",
+    "function": {
+      "function_name": "NodeMetrics::record_gossiped",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 136
+        },
+        "start": {
+          "column": 5,
+          "line": 130
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/metrics.rs:133:14: replace > with >= in NodeMetrics::record_gossiped",
+    "package": "onde-core",
+    "replacement": ">=",
+    "span": {
+      "end": {
+        "column": 15,
+        "line": 133
+      },
+      "start": {
+        "column": 14,
+        "line": 133
+      }
+    }
+  },
+  {
+    "diff": "--- src/metrics.rs\n+++ replace NodeMetrics::record_duplicated with ()\n@@ -132,17 +132,17 @@\n     pub fn record_gossiped(&self, n: u64) {\n         if n > 0 {\n             self.messages_gossiped.fetch_add(n, Ordering::Relaxed);\n         }\n     }\n \n     /// Compter un événement admis déjà connu (écho de relais dédupliqué).\n     pub fn record_duplicated(&self) {\n-        self.messages_duplicated.fetch_add(1, Ordering::Relaxed);\n+        () /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Remplacer les jauges de pairs (appelé après chaque contact pair).\n     pub fn set_peers(&self, known: u64, synced: u64) {\n         self.peers_known.store(known, Ordering::Relaxed);\n         self.peers_synced.store(synced, Ordering::Relaxed);\n     }\n \n",
+    "file": "src/metrics.rs",
+    "function": {
+      "function_name": "NodeMetrics::record_duplicated",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 141
+        },
+        "start": {
+          "column": 5,
+          "line": 138
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/metrics.rs:140:9: replace NodeMetrics::record_duplicated with ()",
+    "package": "onde-core",
+    "replacement": "()",
+    "span": {
+      "end": {
+        "column": 66,
+        "line": 140
+      },
+      "start": {
+        "column": 9,
+        "line": 140
+      }
+    }
+  },
+  {
+    "diff": "--- src/metrics.rs\n+++ replace NodeMetrics::set_peers with ()\n@@ -137,18 +137,17 @@\n \n     /// Compter un événement admis déjà connu (écho de relais dédupliqué).\n     pub fn record_duplicated(&self) {\n         self.messages_duplicated.fetch_add(1, Ordering::Relaxed);\n     }\n \n     /// Remplacer les jauges de pairs (appelé après chaque contact pair).\n     pub fn set_peers(&self, known: u64, synced: u64) {\n-        self.peers_known.store(known, Ordering::Relaxed);\n-        self.peers_synced.store(synced, Ordering::Relaxed);\n+        () /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Compter un message ajouté au magasin hiérarchique.\n     pub fn record_storage_added(&self, raw_bytes: u64, stored_bytes: u64) {\n         self.storage_events.fetch_add(1, Ordering::Relaxed);\n         self.storage_raw_bytes\n             .fetch_add(raw_bytes, Ordering::Relaxed);\n         self.storage_stored_bytes\n",
+    "file": "src/metrics.rs",
+    "function": {
+      "function_name": "NodeMetrics::set_peers",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 147
+        },
+        "start": {
+          "column": 5,
+          "line": 143
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/metrics.rs:145:9: replace NodeMetrics::set_peers with ()",
+    "package": "onde-core",
+    "replacement": "()",
+    "span": {
+      "end": {
+        "column": 60,
+        "line": 146
+      },
+      "start": {
+        "column": 9,
+        "line": 145
+      }
+    }
+  },
+  {
+    "diff": "--- src/metrics.rs\n+++ replace NodeMetrics::record_storage_added with ()\n@@ -143,21 +143,17 @@\n     /// Remplacer les jauges de pairs (appelé après chaque contact pair).\n     pub fn set_peers(&self, known: u64, synced: u64) {\n         self.peers_known.store(known, Ordering::Relaxed);\n         self.peers_synced.store(synced, Ordering::Relaxed);\n     }\n \n     /// Compter un message ajouté au magasin hiérarchique.\n     pub fn record_storage_added(&self, raw_bytes: u64, stored_bytes: u64) {\n-        self.storage_events.fetch_add(1, Ordering::Relaxed);\n-        self.storage_raw_bytes\n-            .fetch_add(raw_bytes, Ordering::Relaxed);\n-        self.storage_stored_bytes\n-            .fetch_add(stored_bytes, Ordering::Relaxed);\n+        () /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Compter `count` messages purgés du magasin (sweep). Les jauges sont\n     /// **saturantes** : elles ne peuvent jamais passer sous zéro (pas de\n     /// wrapping `u64` dans le JSON de santé).\n     pub fn record_storage_removed(&self, count: u64, raw_bytes: u64, stored_bytes: u64) {\n         saturating_sub(&self.storage_events, count);\n         saturating_sub(&self.storage_raw_bytes, raw_bytes);\n",
+    "file": "src/metrics.rs",
+    "function": {
+      "function_name": "NodeMetrics::record_storage_added",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 156
+        },
+        "start": {
+          "column": 5,
+          "line": 149
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/metrics.rs:151:9: replace NodeMetrics::record_storage_added with ()",
+    "package": "onde-core",
+    "replacement": "()",
+    "span": {
+      "end": {
+        "column": 57,
+        "line": 155
+      },
+      "start": {
+        "column": 9,
+        "line": 151
+      }
+    }
+  },
+  {
+    "diff": "--- src/metrics.rs\n+++ replace NodeMetrics::record_storage_removed with ()\n@@ -154,19 +154,17 @@\n         self.storage_stored_bytes\n             .fetch_add(stored_bytes, Ordering::Relaxed);\n     }\n \n     /// Compter `count` messages purgés du magasin (sweep). Les jauges sont\n     /// **saturantes** : elles ne peuvent jamais passer sous zéro (pas de\n     /// wrapping `u64` dans le JSON de santé).\n     pub fn record_storage_removed(&self, count: u64, raw_bytes: u64, stored_bytes: u64) {\n-        saturating_sub(&self.storage_events, count);\n-        saturating_sub(&self.storage_raw_bytes, raw_bytes);\n-        saturating_sub(&self.storage_stored_bytes, stored_bytes);\n+        () /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Compter une requête servie par l'endpoint de santé.\n     pub fn record_health_request(&self) {\n         self.health_requests.fetch_add(1, Ordering::Relaxed);\n     }\n \n     // ---- Lectures (consommateurs : santé, logs) --------------------\n",
+    "file": "src/metrics.rs",
+    "function": {
+      "function_name": "NodeMetrics::record_storage_removed",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 165
+        },
+        "start": {
+          "column": 5,
+          "line": 158
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/metrics.rs:162:9: replace NodeMetrics::record_storage_removed with ()",
+    "package": "onde-core",
+    "replacement": "()",
+    "span": {
+      "end": {
+        "column": 66,
+        "line": 164
+      },
+      "start": {
+        "column": 9,
+        "line": 162
+      }
+    }
+  },
+  {
+    "diff": "--- src/metrics.rs\n+++ replace NodeMetrics::record_health_request with ()\n@@ -161,17 +161,17 @@\n     pub fn record_storage_removed(&self, count: u64, raw_bytes: u64, stored_bytes: u64) {\n         saturating_sub(&self.storage_events, count);\n         saturating_sub(&self.storage_raw_bytes, raw_bytes);\n         saturating_sub(&self.storage_stored_bytes, stored_bytes);\n     }\n \n     /// Compter une requête servie par l'endpoint de santé.\n     pub fn record_health_request(&self) {\n-        self.health_requests.fetch_add(1, Ordering::Relaxed);\n+        () /* ~ changed by cargo-mutants ~ */\n     }\n \n     // ---- Lectures (consommateurs : santé, logs) --------------------\n \n     /// Uptime en secondes depuis la création du registre (saturé à 0 si\n     /// l'horloge système recule).\n     pub fn uptime_secs(&self) -> u64 {\n         unix_now().saturating_sub(self.started_at.load(Ordering::Relaxed))\n",
+    "file": "src/metrics.rs",
+    "function": {
+      "function_name": "NodeMetrics::record_health_request",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 170
+        },
+        "start": {
+          "column": 5,
+          "line": 167
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/metrics.rs:169:9: replace NodeMetrics::record_health_request with ()",
+    "package": "onde-core",
+    "replacement": "()",
+    "span": {
+      "end": {
+        "column": 62,
+        "line": 169
+      },
+      "start": {
+        "column": 9,
+        "line": 169
+      }
+    }
+  },
+  {
+    "diff": "--- src/metrics.rs\n+++ replace NodeMetrics::uptime_secs -> u64 with 0\n@@ -169,17 +169,17 @@\n         self.health_requests.fetch_add(1, Ordering::Relaxed);\n     }\n \n     // ---- Lectures (consommateurs : santé, logs) --------------------\n \n     /// Uptime en secondes depuis la création du registre (saturé à 0 si\n     /// l'horloge système recule).\n     pub fn uptime_secs(&self) -> u64 {\n-        unix_now().saturating_sub(self.started_at.load(Ordering::Relaxed))\n+        0 /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Pairs connus (book de présence).\n     pub fn peers_known(&self) -> u64 {\n         self.peers_known.load(Ordering::Relaxed)\n     }\n \n     /// Pairs synchronisés (contact plus récent que le seuil de partition).\n",
+    "file": "src/metrics.rs",
+    "function": {
+      "function_name": "NodeMetrics::uptime_secs",
+      "return_type": "-> u64",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 178
+        },
+        "start": {
+          "column": 5,
+          "line": 174
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/metrics.rs:177:9: replace NodeMetrics::uptime_secs -> u64 with 0",
+    "package": "onde-core",
+    "replacement": "0",
+    "span": {
+      "end": {
+        "column": 75,
+        "line": 177
+      },
+      "start": {
+        "column": 9,
+        "line": 177
+      }
+    }
+  },
+  {
+    "diff": "--- src/metrics.rs\n+++ replace NodeMetrics::uptime_secs -> u64 with 1\n@@ -169,17 +169,17 @@\n         self.health_requests.fetch_add(1, Ordering::Relaxed);\n     }\n \n     // ---- Lectures (consommateurs : santé, logs) --------------------\n \n     /// Uptime en secondes depuis la création du registre (saturé à 0 si\n     /// l'horloge système recule).\n     pub fn uptime_secs(&self) -> u64 {\n-        unix_now().saturating_sub(self.started_at.load(Ordering::Relaxed))\n+        1 /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Pairs connus (book de présence).\n     pub fn peers_known(&self) -> u64 {\n         self.peers_known.load(Ordering::Relaxed)\n     }\n \n     /// Pairs synchronisés (contact plus récent que le seuil de partition).\n",
+    "file": "src/metrics.rs",
+    "function": {
+      "function_name": "NodeMetrics::uptime_secs",
+      "return_type": "-> u64",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 178
+        },
+        "start": {
+          "column": 5,
+          "line": 174
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/metrics.rs:177:9: replace NodeMetrics::uptime_secs -> u64 with 1",
+    "package": "onde-core",
+    "replacement": "1",
+    "span": {
+      "end": {
+        "column": 75,
+        "line": 177
+      },
+      "start": {
+        "column": 9,
+        "line": 177
+      }
+    }
+  },
+  {
+    "diff": "--- src/metrics.rs\n+++ replace NodeMetrics::peers_known -> u64 with 0\n@@ -174,17 +174,17 @@\n     /// Uptime en secondes depuis la création du registre (saturé à 0 si\n     /// l'horloge système recule).\n     pub fn uptime_secs(&self) -> u64 {\n         unix_now().saturating_sub(self.started_at.load(Ordering::Relaxed))\n     }\n \n     /// Pairs connus (book de présence).\n     pub fn peers_known(&self) -> u64 {\n-        self.peers_known.load(Ordering::Relaxed)\n+        0 /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Pairs synchronisés (contact plus récent que le seuil de partition).\n     pub fn peers_synced(&self) -> u64 {\n         self.peers_synced.load(Ordering::Relaxed)\n     }\n \n     /// Instantané complet sérialisable ([`serde::Serialize`]) — c'est le\n",
+    "file": "src/metrics.rs",
+    "function": {
+      "function_name": "NodeMetrics::peers_known",
+      "return_type": "-> u64",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 183
+        },
+        "start": {
+          "column": 5,
+          "line": 180
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/metrics.rs:182:9: replace NodeMetrics::peers_known -> u64 with 0",
+    "package": "onde-core",
+    "replacement": "0",
+    "span": {
+      "end": {
+        "column": 49,
+        "line": 182
+      },
+      "start": {
+        "column": 9,
+        "line": 182
+      }
+    }
+  },
+  {
+    "diff": "--- src/metrics.rs\n+++ replace NodeMetrics::peers_known -> u64 with 1\n@@ -174,17 +174,17 @@\n     /// Uptime en secondes depuis la création du registre (saturé à 0 si\n     /// l'horloge système recule).\n     pub fn uptime_secs(&self) -> u64 {\n         unix_now().saturating_sub(self.started_at.load(Ordering::Relaxed))\n     }\n \n     /// Pairs connus (book de présence).\n     pub fn peers_known(&self) -> u64 {\n-        self.peers_known.load(Ordering::Relaxed)\n+        1 /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Pairs synchronisés (contact plus récent que le seuil de partition).\n     pub fn peers_synced(&self) -> u64 {\n         self.peers_synced.load(Ordering::Relaxed)\n     }\n \n     /// Instantané complet sérialisable ([`serde::Serialize`]) — c'est le\n",
+    "file": "src/metrics.rs",
+    "function": {
+      "function_name": "NodeMetrics::peers_known",
+      "return_type": "-> u64",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 183
+        },
+        "start": {
+          "column": 5,
+          "line": 180
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/metrics.rs:182:9: replace NodeMetrics::peers_known -> u64 with 1",
+    "package": "onde-core",
+    "replacement": "1",
+    "span": {
+      "end": {
+        "column": 49,
+        "line": 182
+      },
+      "start": {
+        "column": 9,
+        "line": 182
+      }
+    }
+  },
+  {
+    "diff": "--- src/metrics.rs\n+++ replace NodeMetrics::peers_synced -> u64 with 0\n@@ -179,17 +179,17 @@\n \n     /// Pairs connus (book de présence).\n     pub fn peers_known(&self) -> u64 {\n         self.peers_known.load(Ordering::Relaxed)\n     }\n \n     /// Pairs synchronisés (contact plus récent que le seuil de partition).\n     pub fn peers_synced(&self) -> u64 {\n-        self.peers_synced.load(Ordering::Relaxed)\n+        0 /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Instantané complet sérialisable ([`serde::Serialize`]) — c'est le\n     /// corps exact servi par `GET /health`.\n     ///\n     /// ```\n     /// use onde_core::metrics::NodeMetrics;\n     /// let m = NodeMetrics::new();\n",
+    "file": "src/metrics.rs",
+    "function": {
+      "function_name": "NodeMetrics::peers_synced",
+      "return_type": "-> u64",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 188
+        },
+        "start": {
+          "column": 5,
+          "line": 185
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/metrics.rs:187:9: replace NodeMetrics::peers_synced -> u64 with 0",
+    "package": "onde-core",
+    "replacement": "0",
+    "span": {
+      "end": {
+        "column": 50,
+        "line": 187
+      },
+      "start": {
+        "column": 9,
+        "line": 187
+      }
+    }
+  },
+  {
+    "diff": "--- src/metrics.rs\n+++ replace NodeMetrics::peers_synced -> u64 with 1\n@@ -179,17 +179,17 @@\n \n     /// Pairs connus (book de présence).\n     pub fn peers_known(&self) -> u64 {\n         self.peers_known.load(Ordering::Relaxed)\n     }\n \n     /// Pairs synchronisés (contact plus récent que le seuil de partition).\n     pub fn peers_synced(&self) -> u64 {\n-        self.peers_synced.load(Ordering::Relaxed)\n+        1 /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Instantané complet sérialisable ([`serde::Serialize`]) — c'est le\n     /// corps exact servi par `GET /health`.\n     ///\n     /// ```\n     /// use onde_core::metrics::NodeMetrics;\n     /// let m = NodeMetrics::new();\n",
+    "file": "src/metrics.rs",
+    "function": {
+      "function_name": "NodeMetrics::peers_synced",
+      "return_type": "-> u64",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 188
+        },
+        "start": {
+          "column": 5,
+          "line": 185
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/metrics.rs:187:9: replace NodeMetrics::peers_synced -> u64 with 1",
+    "package": "onde-core",
+    "replacement": "1",
+    "span": {
+      "end": {
+        "column": 50,
+        "line": 187
+      },
+      "start": {
+        "column": 9,
+        "line": 187
+      }
+    }
+  },
+  {
+    "diff": "--- src/metrics.rs\n+++ replace NodeMetrics::snapshot -> MetricsSnapshot with Default::default()\n@@ -195,36 +195,17 @@\n     /// let m = NodeMetrics::new();\n     /// m.record_rejected();\n     /// let snap = m.snapshot();\n     /// assert_eq!(snap.status, \"ok\");\n     /// assert_eq!(snap.metrics.messages_rejected, 1);\n     /// assert_eq!(snap.storage.events, 0);\n     /// ```\n     pub fn snapshot(&self) -> MetricsSnapshot {\n-        MetricsSnapshot {\n-            status: \"ok\",\n-            uptime_s: self.uptime_secs(),\n-            peers: PeerHealth {\n-                known: self.peers_known(),\n-                synced: self.peers_synced(),\n-            },\n-            metrics: CounterSet {\n-                messages_ingested: self.messages_ingested.load(Ordering::Relaxed),\n-                messages_rejected: self.messages_rejected.load(Ordering::Relaxed),\n-                messages_gossiped: self.messages_gossiped.load(Ordering::Relaxed),\n-                messages_duplicated: self.messages_duplicated.load(Ordering::Relaxed),\n-                health_requests: self.health_requests.load(Ordering::Relaxed),\n-            },\n-            storage: StorageHealth {\n-                events: self.storage_events.load(Ordering::Relaxed),\n-                bytes_raw: self.storage_raw_bytes.load(Ordering::Relaxed),\n-                bytes_stored: self.storage_stored_bytes.load(Ordering::Relaxed),\n-            },\n-        }\n+        Default::default() /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Instantané en JSON compact (une ligne) — corps de `/health` et format\n     /// du log structuré de démarrage.\n     ///\n     /// ```\n     /// use onde_core::metrics::NodeMetrics;\n     /// let json = NodeMetrics::new().snapshot_json();\n",
+    "file": "src/metrics.rs",
+    "function": {
+      "function_name": "NodeMetrics::snapshot",
+      "return_type": "-> MetricsSnapshot",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 223
+        },
+        "start": {
+          "column": 5,
+          "line": 190
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/metrics.rs:203:9: replace NodeMetrics::snapshot -> MetricsSnapshot with Default::default()",
+    "package": "onde-core",
+    "replacement": "Default::default()",
+    "span": {
+      "end": {
+        "column": 10,
+        "line": 222
+      },
+      "start": {
+        "column": 9,
+        "line": 203
+      }
+    }
+  },
+  {
+    "diff": "--- src/metrics.rs\n+++ replace NodeMetrics::snapshot_json -> String with String::new()\n@@ -230,17 +230,17 @@\n     /// let json = NodeMetrics::new().snapshot_json();\n     /// let v: serde_json::Value = serde_json::from_str(&json).expect(\"JSON valide\");\n     /// assert_eq!(v[\"status\"], \"ok\");\n     /// assert!(v[\"uptime_s\"].is_u64());\n     /// assert!(v[\"peers\"][\"known\"].is_u64());\n     /// assert!(v[\"storage\"][\"events\"].is_u64());\n     /// ```\n     pub fn snapshot_json(&self) -> String {\n-        serde_json::to_string(&self.snapshot()).unwrap_or_else(|_| \"{}\".to_string())\n+        String::new() /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Log structuré UNIQUE de démarrage : une ligne JSON contenant le\n     /// snapshot complet + identité affichable du nœud. La seed Ed25519 et\n     /// toute donnée secrète ne sont JAMAIS incluses.\n     pub fn log_startup_snapshot(&self, node_name: &str) {\n         let mut value = match serde_json::to_value(self.snapshot()) {\n             Ok(serde_json::Value::Object(map)) => map,\n",
+    "file": "src/metrics.rs",
+    "function": {
+      "function_name": "NodeMetrics::snapshot_json",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 239
+        },
+        "start": {
+          "column": 5,
+          "line": 225
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/metrics.rs:238:9: replace NodeMetrics::snapshot_json -> String with String::new()",
+    "package": "onde-core",
+    "replacement": "String::new()",
+    "span": {
+      "end": {
+        "column": 85,
+        "line": 238
+      },
+      "start": {
+        "column": 9,
+        "line": 238
+      }
+    }
+  },
+  {
+    "diff": "--- src/metrics.rs\n+++ replace NodeMetrics::snapshot_json -> String with \"xyzzy\".into()\n@@ -230,17 +230,17 @@\n     /// let json = NodeMetrics::new().snapshot_json();\n     /// let v: serde_json::Value = serde_json::from_str(&json).expect(\"JSON valide\");\n     /// assert_eq!(v[\"status\"], \"ok\");\n     /// assert!(v[\"uptime_s\"].is_u64());\n     /// assert!(v[\"peers\"][\"known\"].is_u64());\n     /// assert!(v[\"storage\"][\"events\"].is_u64());\n     /// ```\n     pub fn snapshot_json(&self) -> String {\n-        serde_json::to_string(&self.snapshot()).unwrap_or_else(|_| \"{}\".to_string())\n+        \"xyzzy\".into() /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Log structuré UNIQUE de démarrage : une ligne JSON contenant le\n     /// snapshot complet + identité affichable du nœud. La seed Ed25519 et\n     /// toute donnée secrète ne sont JAMAIS incluses.\n     pub fn log_startup_snapshot(&self, node_name: &str) {\n         let mut value = match serde_json::to_value(self.snapshot()) {\n             Ok(serde_json::Value::Object(map)) => map,\n",
+    "file": "src/metrics.rs",
+    "function": {
+      "function_name": "NodeMetrics::snapshot_json",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 239
+        },
+        "start": {
+          "column": 5,
+          "line": 225
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/metrics.rs:238:9: replace NodeMetrics::snapshot_json -> String with \"xyzzy\".into()",
+    "package": "onde-core",
+    "replacement": "\"xyzzy\".into()",
+    "span": {
+      "end": {
+        "column": 85,
+        "line": 238
+      },
+      "start": {
+        "column": 9,
+        "line": 238
+      }
+    }
+  },
+  {
+    "diff": "--- src/metrics.rs\n+++ replace NodeMetrics::log_startup_snapshot with ()\n@@ -237,23 +237,17 @@\n     pub fn snapshot_json(&self) -> String {\n         serde_json::to_string(&self.snapshot()).unwrap_or_else(|_| \"{}\".to_string())\n     }\n \n     /// Log structuré UNIQUE de démarrage : une ligne JSON contenant le\n     /// snapshot complet + identité affichable du nœud. La seed Ed25519 et\n     /// toute donnée secrète ne sont JAMAIS incluses.\n     pub fn log_startup_snapshot(&self, node_name: &str) {\n-        let mut value = match serde_json::to_value(self.snapshot()) {\n-            Ok(serde_json::Value::Object(map)) => map,\n-            _ => return, // sérialisation impossible → pas de log trompeur\n-        };\n-        value.insert(\"event\".into(), serde_json::json!(\"startup\"));\n-        value.insert(\"node\".into(), serde_json::json!(node_name));\n-        tracing::info!(\"{}\", serde_json::Value::Object(value));\n+        () /* ~ changed by cargo-mutants ~ */\n     }\n }\n \n /// Instantané complet du nœud — corps JSON exact de `GET /health`.\n #[derive(Debug, Clone, PartialEq, serde::Serialize)]\n pub struct MetricsSnapshot {\n     /// Toujours `\"ok\"` tant que l'endpoint répond (la santé détaillée vit\n     /// dans les jauges ; un nœud qui répond prouve son runtime).\n",
+    "file": "src/metrics.rs",
+    "function": {
+      "function_name": "NodeMetrics::log_startup_snapshot",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 252
+        },
+        "start": {
+          "column": 5,
+          "line": 241
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/metrics.rs:245:9: replace NodeMetrics::log_startup_snapshot with ()",
+    "package": "onde-core",
+    "replacement": "()",
+    "span": {
+      "end": {
+        "column": 64,
+        "line": 251
+      },
+      "start": {
+        "column": 9,
+        "line": 245
+      }
+    }
+  },
+  {
+    "diff": "--- src/metrics.rs\n+++ delete match arm Ok(serde_json::Value::Object(map)) in NodeMetrics::log_startup_snapshot\n@@ -238,17 +238,17 @@\n         serde_json::to_string(&self.snapshot()).unwrap_or_else(|_| \"{}\".to_string())\n     }\n \n     /// Log structuré UNIQUE de démarrage : une ligne JSON contenant le\n     /// snapshot complet + identité affichable du nœud. La seed Ed25519 et\n     /// toute donnée secrète ne sont JAMAIS incluses.\n     pub fn log_startup_snapshot(&self, node_name: &str) {\n         let mut value = match serde_json::to_value(self.snapshot()) {\n-            Ok(serde_json::Value::Object(map)) => map,\n+             /* ~ changed by cargo-mutants ~ */\n             _ => return, // sérialisation impossible → pas de log trompeur\n         };\n         value.insert(\"event\".into(), serde_json::json!(\"startup\"));\n         value.insert(\"node\".into(), serde_json::json!(node_name));\n         tracing::info!(\"{}\", serde_json::Value::Object(value));\n     }\n }\n \n",
+    "file": "src/metrics.rs",
+    "function": {
+      "function_name": "NodeMetrics::log_startup_snapshot",
+      "return_type": "",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 252
+        },
+        "start": {
+          "column": 5,
+          "line": 241
+        }
+      }
+    },
+    "genre": "MatchArm",
+    "name": "src/metrics.rs:246:13: delete match arm Ok(serde_json::Value::Object(map)) in NodeMetrics::log_startup_snapshot",
+    "package": "onde-core",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 55,
+        "line": 246
+      },
+      "start": {
+        "column": 13,
+        "line": 246
+      }
+    }
+  }
+]

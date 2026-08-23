@@ -1,0 +1,24 @@
+--- src/health.rs
++++ replace HealthHandle::stop_internal with ()
+@@ -80,20 +80,17 @@
+     /// Arrêt propre : ferme le listener et signale la boucle d'acceptation.
+     /// Les requêtes déjà acceptées se terminent seules (timeouts bornés).
+     pub fn shutdown(mut self) {
+         self.stop_internal();
+         // `self.thread_listener` est fermée par `stop_internal`.
+     }
+ 
+     fn stop_internal(&mut self) {
+-        self.stop_flag.store(true, Ordering::Release);
+-        // Fermer le clone du listener réveille immédiatement un accept()
+-        // bloquant dans le thread serveur.
+-        self.thread_listener = None;
++        () /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ impl Drop for HealthHandle {
+     fn drop(&mut self) {
+         self.stop_internal();
+     }
+ }

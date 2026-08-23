@@ -1,0 +1,21 @@
+--- src/metrics.rs
++++ replace NodeMetrics::snapshot_json -> String with "xyzzy".into()
+@@ -230,17 +230,17 @@
+     /// let json = NodeMetrics::new().snapshot_json();
+     /// let v: serde_json::Value = serde_json::from_str(&json).expect("JSON valide");
+     /// assert_eq!(v["status"], "ok");
+     /// assert!(v["uptime_s"].is_u64());
+     /// assert!(v["peers"]["known"].is_u64());
+     /// assert!(v["storage"]["events"].is_u64());
+     /// ```
+     pub fn snapshot_json(&self) -> String {
+-        serde_json::to_string(&self.snapshot()).unwrap_or_else(|_| "{}".to_string())
++        "xyzzy".into() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Log structuré UNIQUE de démarrage : une ligne JSON contenant le
+     /// snapshot complet + identité affichable du nœud. La seed Ed25519 et
+     /// toute donnée secrète ne sont JAMAIS incluses.
+     pub fn log_startup_snapshot(&self, node_name: &str) {
+         let mut value = match serde_json::to_value(self.snapshot()) {
+             Ok(serde_json::Value::Object(map)) => map,
