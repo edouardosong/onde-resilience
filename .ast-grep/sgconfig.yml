@@ -1,0 +1,7 @@
+# ONDE — configuration ast-grep (tree-sitter)
+# Outil : ast-grep (MIT, binaire machine — zéro dépendance Cargo/npm projet).
+# Usage checker :  ast-grep scan -c .ast-grep/sgconfig.yml
+# Politique : les findings NOUVEAUX (vs baseline reports/ast-grep-baseline.txt)
+# sont des findings de gate ; la baseline historique n'est PAS une régression.
+ruleDirs:
+  - rules

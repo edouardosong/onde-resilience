@@ -1,0 +1,69 @@
+# Règles critiques Rust ONDE — modules crypto/network/storage/protocol/reputation
+# (cf. onde-loop §6 : modules critiques = contrat + chemins d'erreur propres)
+
+id: onde-rust-unwrap-critical
+message: unwrap() hors tests dans un module critique ONDE — retourner Result, ou expect(msg) avec justification en commentaire (gate qualité onde-loop §6)
+severity: error
+language: Rust
+files:
+  - "core/src/crypto/**"
+  - "core/src/network/**"
+  - "core/src/storage/**"
+  - "core/src/protocol/**"
+  - "core/src/reputation/**"
+rule:
+  all:
+    - pattern: $OBJ.unwrap()
+    - not:
+        any:
+          - inside: { stopBy: end, pattern: "mod tests { $$$B }" }
+          - inside: { stopBy: end, pattern: "mod test { $$$B }" }
+
+---
+id: onde-rust-unsafe-critical
+message: bloc unsafe dans un module critique ONDE hors tests — interdit sans ADR + revue security-auditor obligatoire (règle §8.4 onde-loop)
+severity: error
+language: Rust
+files:
+  - "core/src/crypto/**"
+  - "core/src/network/**"
+  - "core/src/storage/**"
+  - "core/src/protocol/**"
+  - "core/src/reputation/**"
+rule:
+  all:
+    - kind: unsafe_block
+    - not:
+        any:
+          - inside: { stopBy: end, pattern: "mod tests { $$$B }" }
+          - inside: { stopBy: end, pattern: "mod test { $$$B }" }
+
+---
+id: onde-rust-expect-critical
+message: expect() hors tests dans un module critique — vérifier que le message documente l'invariant non tenu (info checker)
+severity: info
+language: Rust
+files:
+  - "core/src/crypto/**"
+  - "core/src/network/**"
+  - "core/src/storage/**"
+  - "core/src/protocol/**"
+  - "core/src/reputation/**"
+rule:
+  all:
+    - pattern: $OBJ.expect($MSG)
+    - not:
+        any:
+          - inside: { stopBy: end, pattern: "mod tests { $$$B }" }
+          - inside: { stopBy: end, pattern: "mod test { $$$B }" }
+
+---
+id: onde-rust-todo-no-ticket
+message: TODO/FIXME sans référence de ticket/backlog ONDE (Txx) — tracer dans STATE.md §3 ou supprimer
+severity: info
+language: Rust
+files:
+  - core/src/
+rule:
+  kind: line_comment
+  regex: "(TODO|FIXME)"
