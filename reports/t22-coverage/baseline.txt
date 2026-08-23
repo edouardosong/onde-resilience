@@ -1,0 +1,79 @@
+# T22 — Baseline coverage core (cargo-llvm-cov)
+
+- **Date** : 2026-08-23 16:16 UTC
+- **Outil** : cargo-llvm-cov 0.9.0 (`cargo install cargo-llvm-cov --locked` + composant rustup `llvm-tools-preview`) — outil 100 % gratuit/open source (licences MIT/Apache-2.0), installé sur la MACHINE, zéro dépendance ajoutée au projet
+- **Toolchain** : rustc 1.96.0 / cargo 1.96.0 (rust-toolchain.toml du dépôt)
+- **Commit de référence** : 6cf50db (= main au moment de la mesure, branche loop/t22-coverage, arbre propre)
+- **Commande exacte** : `cd core && cargo llvm-cov --workspace --summary-only` (build debug, tests par défaut `cargo test`)
+- **Exit code** : 0
+- **Verrouillage dépendances** : `git diff main --stat -- '*Cargo.lock*'` = VIDE avant/après mesure (aucun changement Cargo.toml/Cargo.lock)
+
+## Récapitulatif TOTAL (workspace core, 27 fichiers sources mesurés)
+
+| Métrique | Couverture | Détail |
+|---|---|---|
+| Régions | 90,40 % | 1907 régions manquées / 19867 |
+| Fonctions exécutées | 82,86 % | 207 fonctions manquées / 1208 |
+| **Lignes** | **89,80 %** | **1194 lignes manquées / 11705** |
+
+## 5 fichiers les moins couverts (tri par % lignes)
+
+- `src/bin/node.rs` : **0.00%** lignes (118/118 lignes manquées)
+- `crates/llm-inference/src/lib.rs` : **66.67%** lignes (36/108 lignes manquées)
+- `src/network/mod.rs` : **73.02%** lignes (34/126 lignes manquées)
+- `crates/zim-parser/src/lib.rs` : **75.15%** lignes (82/330 lignes manquées)
+- `src/ai/mod.rs` : **77.27%** lignes (5/22 lignes manquées)
+
+Note factuelle : `src/bin/node.rs` à 0,00 % est le binaire CLI `node` (fonction `main` + glue runtime) — jamais exercé par les tests unitaires ; c'est le candidat naturel des tests d'intégration e2e, pas d'une gate de coverage par fichier.
+
+## Tableau summary complet (sortie brute de la commande)
+
+```
+Filename                             Regions    Missed Regions     Cover   Functions  Missed Functions  Executed       Lines      Missed Lines     Cover    Branches   Missed Branches     Cover
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+crates/dtn-router/src/lib.rs             677                 9    98.67%          41                 0   100.00%         333                 5    98.50%           0                 0         -
+crates/llama-bind/src/lib.rs             442                48    89.14%          42                 5    88.10%         288                45    84.38%           0                 0         -
+crates/llm-inference/src/lib.rs          138                38    72.46%          22                 9    59.09%         108                36    66.67%           0                 0         -
+crates/mbtiles-parser/src/lib.rs        1588               142    91.06%          92                11    88.04%         979                81    91.73%           0                 0         -
+crates/whisper-stt/src/error.rs           54                 9    83.33%           4                 0   100.00%          38                 6    84.21%           0                 0         -
+crates/whisper-stt/src/lib.rs            295                34    88.47%          33                 4    87.88%         205                29    85.85%           0                 0         -
+crates/whisper-stt/src/wav.rs            317                28    91.17%          16                 3    81.25%         170                11    93.53%           0                 0         -
+crates/zim-parser/src/content.rs         503                37    92.64%          23                 1    95.65%         249                23    90.76%           0                 0         -
+crates/zim-parser/src/entries.rs         212                23    89.15%          10                 0   100.00%         130                26    80.00%           0                 0         -
+crates/zim-parser/src/header.rs          300                28    90.67%          14                 0   100.00%         166                10    93.98%           0                 0         -
+crates/zim-parser/src/lib.rs             587               137    76.66%          32                 9    71.88%         330                82    75.15%           0                 0         -
+src/ai/mod.rs                             28                 7    75.00%           5                 1    80.00%          22                 5    77.27%           0                 0         -
+src/bin/node.rs                          162               162     0.00%           2                 2     0.00%         118               118     0.00%           0                 0         -
+src/crypto/mod.rs                       1310                34    97.40%          80                 6    92.50%         698                20    97.13%           0                 0         -
+src/health.rs                            786                45    94.27%          32                 0   100.00%         410                33    91.95%           0                 0         -
+src/metrics.rs                           397                10    97.48%          28                 2    92.86%         233                 6    97.42%           0                 0         -
+src/network/mod.rs                       201                40    80.10%          26                 8    69.23%         126                34    73.02%           0                 0         -
+src/node/mod.rs                         4485               471    89.50%         219                26    88.13%        2679               277    89.66%           0                 0         -
+src/protocol/mod.rs                     1680               114    93.21%          88                13    85.23%         959                72    92.49%           0                 0         -
+src/reputation/mod.rs                    992                21    97.88%          48                 3    93.75%         498                12    97.59%           0                 0         -
+src/reputation/spam.rs                   359                12    96.66%          24                 2    91.67%         191                 9    95.29%           0                 0         -
+src/social.rs                            244                28    88.52%          12                 2    83.33%         151                25    83.44%           0                 0         -
+src/social_store.rs                     1440               257    82.15%         128                68    46.88%         986               118    88.03%           0                 0         -
+src/storage/mod.rs                      1118                39    96.51%          90                 9    90.00%         716                30    95.81%           0                 0         -
+src/storage/persistence.rs               473                40    91.54%          37                12    67.57%         264                12    95.45%           0                 0         -
+src/update/mod.rs                       1079                94    91.29%          60                11    81.67%         658                69    89.51%           0                 0         -
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+TOTAL                                  19867              1907    90.40%        1208               207    82.86%       11705              1194    89.80%           0                 0         -
+```
+
+## Rapport HTML détaillé (archivé, NON commité — >50 Ko, règle artefacts)
+
+- Chemin dans la worktree : `reports/t22-coverage/html/html/index.html`
+- Taille : ~4,1 Mo
+- Commande : `cd core && cargo llvm-cov --workspace --html --output-dir ../reports/t22-coverage/html` (exit 0)
+- Exclu du versioning via `reports/t22-coverage/.gitignore`
+
+## Reproductibilité (machine du maker)
+
+```bash
+rustup component add llvm-tools-preview        # une seule fois
+cargo install cargo-llvm-cov --locked          # une seule fois (~5 min compile, v0.9.0)
+cd core && cargo llvm-cov --workspace --summary-only
+```
+
+La mesure est déterministe à ±0,1 pt près selon les tests flaky éventuels ; rejouer la même commande donne un tableau comparable fichier par fichier.
