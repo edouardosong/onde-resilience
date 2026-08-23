@@ -25,3 +25,4 @@
 - 2026-08-23 : reprise boucle après migration clone (~/Documents/onde-repo) — 2 lanes mortes-silencieuses détectées et relancées (filet heartbeat respecté) ; T23 mergée it.13 (checker reprise APPROVED 1re passe, 0 gate rejetée) ; finding MEDIUM ouvert → T24 ; artefacts checker archivés reports/t23-checker-r2/.
 - 2026-08-23 : incident zombie (session ancien orchestrateur réveillée) — détournement checkout t20 + suppression passagère worktree t24 ; récupéré sans perte (FROZEN.md, règle vérif .git, cherry-pick e20db17 planifié).
 - 2026-08-23 : T24 mergée it.14 (mutant idle 198:20 tué, preuve négative rejouée par checker) ; T22 coverage lancée.
+- 2026-08-23 : T22 mergée it.15 (baseline coverage 89,80 % lignes vérifiée à l'identique par le checker Δ0,00 pt ; outil cargo-llvm-cov disponible pour gates futures) ; backlog quasi épuisé — reste T20 (en cours), décision seuil gate (utilisateur), dettes INFO.
