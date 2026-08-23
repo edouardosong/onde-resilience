@@ -1,0 +1,21 @@
+--- src/health.rs
++++ replace clean_stop with ()
+@@ -219,17 +219,17 @@
+                 std::thread::sleep(ACCEPT_POLL_INTERVAL);
+             }
+         }
+     }
+ }
+ 
+ /// Arrêt propre de la boucle d'acceptation (log structuré unique).
+ fn clean_stop() {
+-    tracing::info!("event=health_stopped reason=shutdown");
++    () /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// Réponse 503 servie inline quand le plafond de connexions est atteint.
+ ///
+ /// La fermeture passe par `shutdown(BOTH)` AVANT le drop : fermer un socket
+ /// dont le tampon de réception contient encore la requête du client émettrait
+ /// un RST (le client verrait « Connection reset » au lieu de notre 503).
+ fn serve_inline_busy(mut stream: TcpStream) {

@@ -1,0 +1,21 @@
+--- src/health.rs
++++ replace handle_connection with ()
+@@ -235,17 +235,17 @@
+ fn serve_inline_busy(mut stream: TcpStream) {
+     let body = "{\"error\":\"busy\"}";
+     let _ = write_response(&mut stream, "503 Service Unavailable", body);
+     let _ = stream.shutdown(SocketShutdown::Both);
+ }
+ 
+ /// Traite UNE connexion avec le budget total par défaut.
+ fn handle_connection(stream: TcpStream, metrics: &Arc<NodeMetrics>) {
+-    handle_connection_with_budget(stream, metrics, CONNECTION_BUDGET);
++    () /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// Traite UNE connexion avec un budget de temps **TOTAL** (lectures cumulées)
+ /// : parse la ligne de requête, route, répond, ferme. Un client qui drippe
+ /// ses octets assez vite pour rester sous chaque timeout individuel est
+ /// coupé dès que le budget global est épuisé — aucune connexion ne peut
+ /// retenir un thread indéfiniment.
+ fn handle_connection_with_budget(

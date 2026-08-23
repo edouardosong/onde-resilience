@@ -1,0 +1,21 @@
+--- src/health.rs
++++ replace >= with < in accept_loop
+@@ -166,17 +166,17 @@
+         }
+         match listener.accept() {
+             Ok((stream, _peer)) => {
+                 consecutive_errors = 0;
+                 // Admission DANS LE PARENT, atomique et AVANT tout spawn :
+                 // le compteur est incrémenté au moment de la décision, donc
+                 // une rafale ne peut pas dépasser le plafond (pas de fenêtre
+                 // TOCTOU entre la décision et l'incrément côté thread enfant).
+-                if active.fetch_add(1, Ordering::AcqRel) >= MAX_CONCURRENT_CONNECTIONS {
++                if active.fetch_add(1, Ordering::AcqRel) < /* ~ changed by cargo-mutants ~ */ MAX_CONCURRENT_CONNECTIONS {
+                     active.fetch_sub(1, Ordering::Release);
+                     // Surchargé : refus explicite servi inline par la boucle
+                     // d'acceptation elle-même, aucun thread spawned.
+                     serve_inline_busy(stream);
+                     continue;
+                 }
+                 let m = metrics.clone();
+                 let a = active.clone();

@@ -1,0 +1,28 @@
+--- src/metrics.rs
++++ replace saturating_sub with ()
+@@ -43,24 +43,17 @@
+         .duration_since(UNIX_EPOCH)
+         .map(|d| d.as_secs())
+         .unwrap_or(0)
+ }
+ 
+ /// Soustraction **saturante** lock-free sur une jauge atomique : ne descend
+ /// jamais sous 0 (les purges concurrentes avec des ajouts restent cohérentes).
+ fn saturating_sub(counter: &AtomicU64, value: u64) {
+-    let mut current = counter.load(Ordering::Relaxed);
+-    loop {
+-        let next = current.saturating_sub(value);
+-        match counter.compare_exchange_weak(current, next, Ordering::Relaxed, Ordering::Relaxed) {
+-            Ok(_) => return,
+-            Err(actual) => current = actual,
+-        }
+-    }
++    () /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// Registre de métriques du nœud — compteurs/jauges atomiques partagés.
+ ///
+ /// Le même [`Arc<NodeMetrics>`] est détenu par le nœud (producteur : points
+ /// d'instrumentation) et par le serveur de santé (consommateur : snapshots
+ /// JSON). Toutes les opérations sont lock-free (`AtomicU64`, ordering
+ /// `Relaxed` suffisant : ce sont des compteurs indépendants, jamais des

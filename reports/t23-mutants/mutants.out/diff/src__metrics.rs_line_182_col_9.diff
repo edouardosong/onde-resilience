@@ -1,0 +1,21 @@
+--- src/metrics.rs
++++ replace NodeMetrics::peers_known -> u64 with 0
+@@ -174,17 +174,17 @@
+     /// Uptime en secondes depuis la création du registre (saturé à 0 si
+     /// l'horloge système recule).
+     pub fn uptime_secs(&self) -> u64 {
+         unix_now().saturating_sub(self.started_at.load(Ordering::Relaxed))
+     }
+ 
+     /// Pairs connus (book de présence).
+     pub fn peers_known(&self) -> u64 {
+-        self.peers_known.load(Ordering::Relaxed)
++        0 /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Pairs synchronisés (contact plus récent que le seuil de partition).
+     pub fn peers_synced(&self) -> u64 {
+         self.peers_synced.load(Ordering::Relaxed)
+     }
+ 
+     /// Instantané complet sérialisable ([`serde::Serialize`]) — c'est le

@@ -1,0 +1,21 @@
+--- src/health.rs
++++ replace * with /
+@@ -51,17 +51,17 @@
+ use std::net::{Shutdown as SocketShutdown, TcpListener, TcpStream};
+ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+ use std::sync::Arc;
+ use std::time::{Duration, Instant};
+ 
+ use crate::metrics::NodeMetrics;
+ 
+ /// Taille maximale acceptée pour une requête (octets) — au-delà → 431.
+-const MAX_REQUEST_BYTES: usize = 8 * 1024;
++const MAX_REQUEST_BYTES: usize = 8 / /* ~ changed by cargo-mutants ~ */ 1024;
+ 
+ /// Timeout borné appliqué à chaque socket client (lecture ET écriture) —
+ /// borne PAR OPÉRATION, complétée par le budget total ci-dessous.
+ const SOCKET_TIMEOUT: Duration = Duration::from_secs(2);
+ 
+ /// Budget de temps **TOTAL** par connexion (lectures cumulées) : un client
+ /// qui drippe ses octets assez vite pour éviter chaque timeout individuel
+ /// (slowloris) est coupé dès que ce budget global est épuisé. Aucune

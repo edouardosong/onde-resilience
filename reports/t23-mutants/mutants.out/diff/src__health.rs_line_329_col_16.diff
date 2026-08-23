@@ -1,0 +1,21 @@
+--- src/health.rs
++++ replace >= with < in read_request_head
+@@ -321,17 +321,17 @@
+ ///   est bornée par min([`SOCKET_TIMEOUT`], temps restant), et la boucle
+ ///   s'arrête dès que l'échéance globale est atteinte ;
+ /// - la tolérance RFC 7230 §3.5 : les lignes vides initiales sont ignorées.
+ fn read_request_head(stream: &mut TcpStream, deadline: Instant) -> RequestHead {
+     let mut buf: Vec<u8> = Vec::with_capacity(256);
+     let mut chunk = [0u8; 512];
+     loop {
+         let now = Instant::now();
+-        if now >= deadline {
++        if now < /* ~ changed by cargo-mutants ~ */ deadline {
+             return RequestHead::Dead; // budget total épuisé → coupure slowloris
+         }
+         // Timeout par opération = min(timeout socket, temps restant) :
+         // même sans vérification explicite, aucun read ne déborde du budget.
+         let _ = stream.set_read_timeout(Some(SOCKET_TIMEOUT.min(deadline - now)));
+         match stream.read(&mut chunk) {
+             Ok(0) => return RequestHead::Dead, // fermeture sans requête complète
+             Ok(n) => {

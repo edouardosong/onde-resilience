@@ -1,0 +1,68 @@
+--- src/health.rs
++++ replace handle_connection_with_budget with ()
+@@ -248,64 +248,17 @@
+ /// ses octets assez vite pour rester sous chaque timeout individuel est
+ /// coupé dès que le budget global est épuisé — aucune connexion ne peut
+ /// retenir un thread indéfiniment.
+ fn handle_connection_with_budget(
+     mut stream: TcpStream,
+     metrics: &Arc<NodeMetrics>,
+     budget: Duration,
+ ) {
+-    let deadline = Instant::now() + budget;
+-    let _ = stream.set_write_timeout(Some(SOCKET_TIMEOUT));
+-
+-    let request_line = match read_request_head(&mut stream, deadline) {
+-        RequestHead::Line(line) => line,
+-        RequestHead::TooLarge => {
+-            // Aligné sur la documentation : répondre 431 PUIS fermer, au
+-            // lieu d'une fermeture silencieuse (RST observé avant T23).
+-            let _ = write_response(
+-                &mut stream,
+-                "431 Request Header Fields Too Large",
+-                "{\"error\":\"request too large\"}",
+-            );
+-            let _ = stream.shutdown(SocketShutdown::Both);
+-            return;
+-        }
+-        RequestHead::Dead => return, // budget épuisé, timeout, connexion vide ou fermée
+-    };
+-
+-    let mut parts = request_line.split_whitespace();
+-    let method = parts.next().unwrap_or("");
+-    let path = parts.next().unwrap_or("");
+-    let is_get = method == "GET";
+-    let is_health_path = path == "/health" || path == "/health?";
+-
+-    let (status, body) = if !is_get && path == "/health" {
+-        (
+-            "405 Method Not Allowed",
+-            "{\"error\":\"method not allowed\"}".to_string(),
+-        )
+-    } else if is_get && is_health_path {
+-        metrics.record_health_request();
+-        let body = metrics.snapshot_json();
+-        tracing::debug!(
+-            "event=health_request path=/health status=200 count={}",
+-            body.len()
+-        );
+-        ("200 OK", body)
+-    } else if is_get {
+-        ("404 Not Found", "{\"error\":\"not found\"}".to_string())
+-    } else {
+-        (
+-            "405 Method Not Allowed",
+-            "{\"error\":\"method not allowed\"}".to_string(),
+-        )
+-    };
+-    let _ = write_response(&mut stream, status, &body);
+-    let _ = stream.shutdown(SocketShutdown::Both);
++    () /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// Issue de la lecture de la tête de requête.
+ enum RequestHead {
+     /// Ligne de requête complète (première ligne non vide terminée par CRLF).
+     Line(String),
+     /// Plafond de taille dépassé sans fin de ligne → le serveur répondra 431.
+     TooLarge,

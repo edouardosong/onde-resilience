@@ -1,0 +1,21 @@
+--- src/health.rs
++++ replace + with - in handle_connection_with_budget
+@@ -248,17 +248,17 @@
+ /// ses octets assez vite pour rester sous chaque timeout individuel est
+ /// coupé dès que le budget global est épuisé — aucune connexion ne peut
+ /// retenir un thread indéfiniment.
+ fn handle_connection_with_budget(
+     mut stream: TcpStream,
+     metrics: &Arc<NodeMetrics>,
+     budget: Duration,
+ ) {
+-    let deadline = Instant::now() + budget;
++    let deadline = Instant::now() - /* ~ changed by cargo-mutants ~ */ budget;
+     let _ = stream.set_write_timeout(Some(SOCKET_TIMEOUT));
+ 
+     let request_line = match read_request_head(&mut stream, deadline) {
+         RequestHead::Line(line) => line,
+         RequestHead::TooLarge => {
+             // Aligné sur la documentation : répondre 431 PUIS fermer, au
+             // lieu d'une fermeture silencieuse (RST observé avant T23).
+             let _ = write_response(

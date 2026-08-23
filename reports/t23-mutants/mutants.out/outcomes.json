@@ -1,0 +1,4083 @@
+{
+  "outcomes": [
+    {
+      "scenario": "Baseline",
+      "summary": "Success",
+      "log_path": "log/baseline.log",
+      "diff_path": null,
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.101599891,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 15.969650683,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:59:36: replace * with +",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": null,
+          "span": {
+            "start": {
+              "line": 59,
+              "column": 36
+            },
+            "end": {
+              "line": 59,
+              "column": 37
+            }
+          },
+          "replacement": "+",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__health.rs_line_59_col_36.log",
+      "diff_path": "diff/src__health.rs_line_59_col_36.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.00723151,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 11.627408243,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:59:36: replace * with /",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": null,
+          "span": {
+            "start": {
+              "line": 59,
+              "column": 36
+            },
+            "end": {
+              "line": 59,
+              "column": 37
+            }
+          },
+          "replacement": "/",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__health.rs_line_59_col_36_001.log",
+      "diff_path": "diff/src__health.rs_line_59_col_36_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.906259571,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 12.271888036,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:109:9: replace HealthHandle::shutdown with ()",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "HealthHandle::shutdown",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 102,
+                "column": 5
+              },
+              "end": {
+                "line": 110,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 109,
+              "column": 9
+            },
+            "end": {
+              "line": 109,
+              "column": 20
+            }
+          },
+          "replacement": "()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__health.rs_line_109_col_9.log",
+      "diff_path": "diff/src__health.rs_line_109_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.077517625,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 11.77566632,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:115:9: replace <impl Drop for HealthHandle>::drop with ()",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "<impl Drop for HealthHandle>::drop",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 114,
+                "column": 5
+              },
+              "end": {
+                "line": 116,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 115,
+              "column": 9
+            },
+            "end": {
+              "line": 115,
+              "column": 55
+            }
+          },
+          "replacement": "()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__health.rs_line_115_col_9.log",
+      "diff_path": "diff/src__health.rs_line_115_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.955201727,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 12.769510350000001,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:132:5: replace spawn_health_server -> std::io::Result<HealthHandle> with Ok(Default::default())",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "spawn_health_server",
+            "return_type": "-> std::io::Result<HealthHandle>",
+            "span": {
+              "start": {
+                "line": 119,
+                "column": 1
+              },
+              "end": {
+                "line": 151,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 132,
+              "column": 5
+            },
+            "end": {
+              "line": 150,
+              "column": 7
+            }
+          },
+          "replacement": "Ok(Default::default())",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src__health.rs_line_132_col_5.log",
+      "diff_path": "diff/src__health.rs_line_132_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.40257078,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:162:5: replace accept_loop with ()",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "accept_loop",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 153,
+                "column": 1
+              },
+              "end": {
+                "line": 223,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 162,
+              "column": 5
+            },
+            "end": {
+              "line": 222,
+              "column": 6
+            }
+          },
+          "replacement": "()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__health.rs_line_162_col_5.log",
+      "diff_path": "diff/src__health.rs_line_162_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.217317194,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 8.719102142,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:198:20: replace match guard matches!( e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted ) with true in accept_loop",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "accept_loop",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 153,
+                "column": 1
+              },
+              "end": {
+                "line": 223,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 198,
+              "column": 20
+            },
+            "end": {
+              "line": 201,
+              "column": 18
+            }
+          },
+          "replacement": "true",
+          "genre": "MatchArmGuard"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__health.rs_line_198_col_20.log",
+      "diff_path": "diff/src__health.rs_line_198_col_20.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.276034663,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 11.220178972,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:198:20: replace match guard matches!( e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted ) with false in accept_loop",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "accept_loop",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 153,
+                "column": 1
+              },
+              "end": {
+                "line": 223,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 198,
+              "column": 20
+            },
+            "end": {
+              "line": 201,
+              "column": 18
+            }
+          },
+          "replacement": "false",
+          "genre": "MatchArmGuard"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__health.rs_line_198_col_20_001.log",
+      "diff_path": "diff/src__health.rs_line_198_col_20_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.016425674,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 11.926128722,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:174:58: replace >= with < in accept_loop",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "accept_loop",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 153,
+                "column": 1
+              },
+              "end": {
+                "line": 223,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 174,
+              "column": 58
+            },
+            "end": {
+              "line": 174,
+              "column": 60
+            }
+          },
+          "replacement": "<",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__health.rs_line_174_col_58.log",
+      "diff_path": "diff/src__health.rs_line_174_col_58.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.055869525,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 13.738403757,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:211:36: replace += with -= in accept_loop",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "accept_loop",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 153,
+                "column": 1
+              },
+              "end": {
+                "line": 223,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 211,
+              "column": 36
+            },
+            "end": {
+              "line": 211,
+              "column": 38
+            }
+          },
+          "replacement": "-=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__health.rs_line_211_col_36.log",
+      "diff_path": "diff/src__health.rs_line_211_col_36.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.032854638,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 13.489495763,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:211:36: replace += with *= in accept_loop",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "accept_loop",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 153,
+                "column": 1
+              },
+              "end": {
+                "line": 223,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 211,
+              "column": 36
+            },
+            "end": {
+              "line": 211,
+              "column": 38
+            }
+          },
+          "replacement": "*=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__health.rs_line_211_col_36_001.log",
+      "diff_path": "diff/src__health.rs_line_211_col_36_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.860046281,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 12.870438838,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:213:39: replace >= with < in accept_loop",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "accept_loop",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 153,
+                "column": 1
+              },
+              "end": {
+                "line": 223,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 213,
+              "column": 39
+            },
+            "end": {
+              "line": 213,
+              "column": 41
+            }
+          },
+          "replacement": "<",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__health.rs_line_213_col_39.log",
+      "diff_path": "diff/src__health.rs_line_213_col_39.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.953529526,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 10.681216115,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:227:5: replace clean_stop with ()",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "clean_stop",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 225,
+                "column": 1
+              },
+              "end": {
+                "line": 228,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 227,
+              "column": 5
+            },
+            "end": {
+              "line": 227,
+              "column": 60
+            }
+          },
+          "replacement": "()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__health.rs_line_227_col_5.log",
+      "diff_path": "diff/src__health.rs_line_227_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.914764579,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 12.054525069,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:236:5: replace serve_inline_busy with ()",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "serve_inline_busy",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 230,
+                "column": 1
+              },
+              "end": {
+                "line": 239,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 236,
+              "column": 5
+            },
+            "end": {
+              "line": 238,
+              "column": 51
+            }
+          },
+          "replacement": "()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__health.rs_line_236_col_5.log",
+      "diff_path": "diff/src__health.rs_line_236_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.056558039,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 15.563183959,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:243:5: replace handle_connection with ()",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "handle_connection",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 241,
+                "column": 1
+              },
+              "end": {
+                "line": 244,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 243,
+              "column": 5
+            },
+            "end": {
+              "line": 243,
+              "column": 71
+            }
+          },
+          "replacement": "()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__health.rs_line_243_col_5.log",
+      "diff_path": "diff/src__health.rs_line_243_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.075070716,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.506361714,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:256:5: replace handle_connection_with_budget with ()",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "handle_connection_with_budget",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 246,
+                "column": 1
+              },
+              "end": {
+                "line": 304,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 256,
+              "column": 5
+            },
+            "end": {
+              "line": 303,
+              "column": 51
+            }
+          },
+          "replacement": "()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__health.rs_line_256_col_5.log",
+      "diff_path": "diff/src__health.rs_line_256_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.009754061,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 13.741799635,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:256:35: replace + with - in handle_connection_with_budget",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "handle_connection_with_budget",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 246,
+                "column": 1
+              },
+              "end": {
+                "line": 304,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 256,
+              "column": 35
+            },
+            "end": {
+              "line": 256,
+              "column": 36
+            }
+          },
+          "replacement": "-",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__health.rs_line_256_col_35.log",
+      "diff_path": "diff/src__health.rs_line_256_col_35.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.1769271749999999,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 13.033444059,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:256:35: replace + with * in handle_connection_with_budget",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "handle_connection_with_budget",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 246,
+                "column": 1
+              },
+              "end": {
+                "line": 304,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 256,
+              "column": 35
+            },
+            "end": {
+              "line": 256,
+              "column": 36
+            }
+          },
+          "replacement": "*",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src__health.rs_line_256_col_35_001.log",
+      "diff_path": "diff/src__health.rs_line_256_col_35_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.401784176,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:278:25: replace == with != in handle_connection_with_budget",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "handle_connection_with_budget",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 246,
+                "column": 1
+              },
+              "end": {
+                "line": 304,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 278,
+              "column": 25
+            },
+            "end": {
+              "line": 278,
+              "column": 27
+            }
+          },
+          "replacement": "!=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__health.rs_line_278_col_25.log",
+      "diff_path": "diff/src__health.rs_line_278_col_25.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.90773939,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 11.326880122,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:279:44: replace || with && in handle_connection_with_budget",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "handle_connection_with_budget",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 246,
+                "column": 1
+              },
+              "end": {
+                "line": 304,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 279,
+              "column": 44
+            },
+            "end": {
+              "line": 279,
+              "column": 46
+            }
+          },
+          "replacement": "&&",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__health.rs_line_279_col_44.log",
+      "diff_path": "diff/src__health.rs_line_279_col_44.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.959821144,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 13.937991757,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:279:31: replace == with != in handle_connection_with_budget",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "handle_connection_with_budget",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 246,
+                "column": 1
+              },
+              "end": {
+                "line": 304,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 279,
+              "column": 31
+            },
+            "end": {
+              "line": 279,
+              "column": 33
+            }
+          },
+          "replacement": "!=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__health.rs_line_279_col_31.log",
+      "diff_path": "diff/src__health.rs_line_279_col_31.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.909172851,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 10.524037241,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:279:52: replace == with != in handle_connection_with_budget",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "handle_connection_with_budget",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 246,
+                "column": 1
+              },
+              "end": {
+                "line": 304,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 279,
+              "column": 52
+            },
+            "end": {
+              "line": 279,
+              "column": 54
+            }
+          },
+          "replacement": "!=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__health.rs_line_279_col_52.log",
+      "diff_path": "diff/src__health.rs_line_279_col_52.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.968538162,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 12.729180174,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:281:37: replace && with || in handle_connection_with_budget",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "handle_connection_with_budget",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 246,
+                "column": 1
+              },
+              "end": {
+                "line": 304,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 281,
+              "column": 37
+            },
+            "end": {
+              "line": 281,
+              "column": 39
+            }
+          },
+          "replacement": "||",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__health.rs_line_281_col_37.log",
+      "diff_path": "diff/src__health.rs_line_281_col_37.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.031703543,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 16.990876388,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:281:29: delete ! in handle_connection_with_budget",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "handle_connection_with_budget",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 246,
+                "column": 1
+              },
+              "end": {
+                "line": 304,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 281,
+              "column": 29
+            },
+            "end": {
+              "line": 281,
+              "column": 30
+            }
+          },
+          "replacement": "",
+          "genre": "UnaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__health.rs_line_281_col_29.log",
+      "diff_path": "diff/src__health.rs_line_281_col_29.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.015543694,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 13.681666005,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:281:45: replace == with != in handle_connection_with_budget",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "handle_connection_with_budget",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 246,
+                "column": 1
+              },
+              "end": {
+                "line": 304,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 281,
+              "column": 45
+            },
+            "end": {
+              "line": 281,
+              "column": 47
+            }
+          },
+          "replacement": "!=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__health.rs_line_281_col_45.log",
+      "diff_path": "diff/src__health.rs_line_281_col_45.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.960557665,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 13.145463629,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:286:22: replace && with || in handle_connection_with_budget",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "handle_connection_with_budget",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 246,
+                "column": 1
+              },
+              "end": {
+                "line": 304,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 286,
+              "column": 22
+            },
+            "end": {
+              "line": 286,
+              "column": 24
+            }
+          },
+          "replacement": "||",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__health.rs_line_286_col_22.log",
+      "diff_path": "diff/src__health.rs_line_286_col_22.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.854704627,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 11.572366325,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:325:5: replace read_request_head -> RequestHead with Default::default()",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "read_request_head",
+            "return_type": "-> RequestHead",
+            "span": {
+              "start": {
+                "line": 317,
+                "column": 1
+              },
+              "end": {
+                "line": 361,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 325,
+              "column": 5
+            },
+            "end": {
+              "line": 360,
+              "column": 6
+            }
+          },
+          "replacement": "Default::default()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src__health.rs_line_325_col_5.log",
+      "diff_path": "diff/src__health.rs_line_325_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.451757617,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:329:16: replace >= with < in read_request_head",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "read_request_head",
+            "return_type": "-> RequestHead",
+            "span": {
+              "start": {
+                "line": 317,
+                "column": 1
+              },
+              "end": {
+                "line": 361,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 329,
+              "column": 16
+            },
+            "end": {
+              "line": 329,
+              "column": 18
+            }
+          },
+          "replacement": "<",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__health.rs_line_329_col_16.log",
+      "diff_path": "diff/src__health.rs_line_329_col_16.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.011517015,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 12.58256759,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:334:74: replace - with + in read_request_head",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "read_request_head",
+            "return_type": "-> RequestHead",
+            "span": {
+              "start": {
+                "line": 317,
+                "column": 1
+              },
+              "end": {
+                "line": 361,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 334,
+              "column": 74
+            },
+            "end": {
+              "line": 334,
+              "column": 75
+            }
+          },
+          "replacement": "+",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src__health.rs_line_334_col_74.log",
+      "diff_path": "diff/src__health.rs_line_334_col_74.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.451922014,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:334:74: replace - with / in read_request_head",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "read_request_head",
+            "return_type": "-> RequestHead",
+            "span": {
+              "start": {
+                "line": 317,
+                "column": 1
+              },
+              "end": {
+                "line": 361,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 334,
+              "column": 74
+            },
+            "end": {
+              "line": 334,
+              "column": 75
+            }
+          },
+          "replacement": "/",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src__health.rs_line_334_col_74_001.log",
+      "diff_path": "diff/src__health.rs_line_334_col_74_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.401793747,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:354:30: replace > with == in read_request_head",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "read_request_head",
+            "return_type": "-> RequestHead",
+            "span": {
+              "start": {
+                "line": 317,
+                "column": 1
+              },
+              "end": {
+                "line": 361,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 354,
+              "column": 30
+            },
+            "end": {
+              "line": 354,
+              "column": 31
+            }
+          },
+          "replacement": "==",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__health.rs_line_354_col_30.log",
+      "diff_path": "diff/src__health.rs_line_354_col_30.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.95986024,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 11.126486702,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:354:30: replace > with < in read_request_head",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "read_request_head",
+            "return_type": "-> RequestHead",
+            "span": {
+              "start": {
+                "line": 317,
+                "column": 1
+              },
+              "end": {
+                "line": 361,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 354,
+              "column": 30
+            },
+            "end": {
+              "line": 354,
+              "column": 31
+            }
+          },
+          "replacement": "<",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__health.rs_line_354_col_30_001.log",
+      "diff_path": "diff/src__health.rs_line_354_col_30_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.963670395,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 15.53807684,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:354:30: replace > with >= in read_request_head",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "read_request_head",
+            "return_type": "-> RequestHead",
+            "span": {
+              "start": {
+                "line": 317,
+                "column": 1
+              },
+              "end": {
+                "line": 361,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 354,
+              "column": 30
+            },
+            "end": {
+              "line": 354,
+              "column": 31
+            }
+          },
+          "replacement": ">=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__health.rs_line_354_col_30_002.log",
+      "diff_path": "diff/src__health.rs_line_354_col_30_002.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.010759636,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 12.529306695,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:365:5: replace find_crlf -> Option<usize> with None",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "find_crlf",
+            "return_type": "-> Option<usize>",
+            "span": {
+              "start": {
+                "line": 363,
+                "column": 1
+              },
+              "end": {
+                "line": 366,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 365,
+              "column": 5
+            },
+            "end": {
+              "line": 365,
+              "column": 46
+            }
+          },
+          "replacement": "None",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__health.rs_line_365_col_5.log",
+      "diff_path": "diff/src__health.rs_line_365_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.05502461,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.231269254,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:365:5: replace find_crlf -> Option<usize> with Some(0)",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "find_crlf",
+            "return_type": "-> Option<usize>",
+            "span": {
+              "start": {
+                "line": 363,
+                "column": 1
+              },
+              "end": {
+                "line": 366,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 365,
+              "column": 5
+            },
+            "end": {
+              "line": 365,
+              "column": 46
+            }
+          },
+          "replacement": "Some(0)",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__health.rs_line_365_col_5_001.log",
+      "diff_path": "diff/src__health.rs_line_365_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.913650331,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 11.832144079,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:365:5: replace find_crlf -> Option<usize> with Some(1)",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "find_crlf",
+            "return_type": "-> Option<usize>",
+            "span": {
+              "start": {
+                "line": 363,
+                "column": 1
+              },
+              "end": {
+                "line": 366,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 365,
+              "column": 5
+            },
+            "end": {
+              "line": 365,
+              "column": 46
+            }
+          },
+          "replacement": "Some(1)",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__health.rs_line_365_col_5_002.log",
+      "diff_path": "diff/src__health.rs_line_365_col_5_002.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.955370075,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 16.081782222,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:365:35: replace == with != in find_crlf",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "find_crlf",
+            "return_type": "-> Option<usize>",
+            "span": {
+              "start": {
+                "line": 363,
+                "column": 1
+              },
+              "end": {
+                "line": 366,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 365,
+              "column": 35
+            },
+            "end": {
+              "line": 365,
+              "column": 37
+            }
+          },
+          "replacement": "!=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__health.rs_line_365_col_35.log",
+      "diff_path": "diff/src__health.rs_line_365_col_35.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.916824202,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 13.627794287,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/health.rs:370:5: replace write_response -> std::io::Result<()> with Ok(())",
+          "package": "onde-core",
+          "file": "src/health.rs",
+          "function": {
+            "function_name": "write_response",
+            "return_type": "-> std::io::Result<()>",
+            "span": {
+              "start": {
+                "line": 368,
+                "column": 1
+              },
+              "end": {
+                "line": 376,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 370,
+              "column": 5
+            },
+            "end": {
+              "line": 375,
+              "column": 19
+            }
+          },
+          "replacement": "Ok(())",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__health.rs_line_370_col_5.log",
+      "diff_path": "diff/src__health.rs_line_370_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.018132382,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 12.083761448,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/metrics.rs:42:5: replace unix_now -> u64 with 0",
+          "package": "onde-core",
+          "file": "src/metrics.rs",
+          "function": {
+            "function_name": "unix_now",
+            "return_type": "-> u64",
+            "span": {
+              "start": {
+                "line": 40,
+                "column": 1
+              },
+              "end": {
+                "line": 46,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 42,
+              "column": 5
+            },
+            "end": {
+              "line": 45,
+              "column": 22
+            }
+          },
+          "replacement": "0",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__metrics.rs_line_42_col_5.log",
+      "diff_path": "diff/src__metrics.rs_line_42_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.128757529,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 16.833229945,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/metrics.rs:42:5: replace unix_now -> u64 with 1",
+          "package": "onde-core",
+          "file": "src/metrics.rs",
+          "function": {
+            "function_name": "unix_now",
+            "return_type": "-> u64",
+            "span": {
+              "start": {
+                "line": 40,
+                "column": 1
+              },
+              "end": {
+                "line": 46,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 42,
+              "column": 5
+            },
+            "end": {
+              "line": 45,
+              "column": 22
+            }
+          },
+          "replacement": "1",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__metrics.rs_line_42_col_5_001.log",
+      "diff_path": "diff/src__metrics.rs_line_42_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.977108272,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 12.179413727,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/metrics.rs:51:5: replace saturating_sub with ()",
+          "package": "onde-core",
+          "file": "src/metrics.rs",
+          "function": {
+            "function_name": "saturating_sub",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 48,
+                "column": 1
+              },
+              "end": {
+                "line": 59,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 51,
+              "column": 5
+            },
+            "end": {
+              "line": 58,
+              "column": 6
+            }
+          },
+          "replacement": "()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__metrics.rs_line_51_col_5.log",
+      "diff_path": "diff/src__metrics.rs_line_51_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.10549881,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.933377557,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/metrics.rs:122:9: replace NodeMetrics::record_ingested with ()",
+          "package": "onde-core",
+          "file": "src/metrics.rs",
+          "function": {
+            "function_name": "NodeMetrics::record_ingested",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 120,
+                "column": 5
+              },
+              "end": {
+                "line": 123,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 122,
+              "column": 9
+            },
+            "end": {
+              "line": 122,
+              "column": 64
+            }
+          },
+          "replacement": "()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__metrics.rs_line_122_col_9.log",
+      "diff_path": "diff/src__metrics.rs_line_122_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.111652912,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.721440441,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/metrics.rs:127:9: replace NodeMetrics::record_rejected with ()",
+          "package": "onde-core",
+          "file": "src/metrics.rs",
+          "function": {
+            "function_name": "NodeMetrics::record_rejected",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 125,
+                "column": 5
+              },
+              "end": {
+                "line": 128,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 127,
+              "column": 9
+            },
+            "end": {
+              "line": 127,
+              "column": 64
+            }
+          },
+          "replacement": "()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__metrics.rs_line_127_col_9.log",
+      "diff_path": "diff/src__metrics.rs_line_127_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.117783618,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 13.379883398,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/metrics.rs:133:9: replace NodeMetrics::record_gossiped with ()",
+          "package": "onde-core",
+          "file": "src/metrics.rs",
+          "function": {
+            "function_name": "NodeMetrics::record_gossiped",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 130,
+                "column": 5
+              },
+              "end": {
+                "line": 136,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 133,
+              "column": 9
+            },
+            "end": {
+              "line": 135,
+              "column": 10
+            }
+          },
+          "replacement": "()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__metrics.rs_line_133_col_9.log",
+      "diff_path": "diff/src__metrics.rs_line_133_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.005997851,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 12.336522151,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/metrics.rs:133:14: replace > with == in NodeMetrics::record_gossiped",
+          "package": "onde-core",
+          "file": "src/metrics.rs",
+          "function": {
+            "function_name": "NodeMetrics::record_gossiped",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 130,
+                "column": 5
+              },
+              "end": {
+                "line": 136,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 133,
+              "column": 14
+            },
+            "end": {
+              "line": 133,
+              "column": 15
+            }
+          },
+          "replacement": "==",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__metrics.rs_line_133_col_14.log",
+      "diff_path": "diff/src__metrics.rs_line_133_col_14.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.115737147,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 10.915234444,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/metrics.rs:133:14: replace > with < in NodeMetrics::record_gossiped",
+          "package": "onde-core",
+          "file": "src/metrics.rs",
+          "function": {
+            "function_name": "NodeMetrics::record_gossiped",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 130,
+                "column": 5
+              },
+              "end": {
+                "line": 136,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 133,
+              "column": 14
+            },
+            "end": {
+              "line": 133,
+              "column": 15
+            }
+          },
+          "replacement": "<",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__metrics.rs_line_133_col_14_001.log",
+      "diff_path": "diff/src__metrics.rs_line_133_col_14_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.934666737,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 18.359624041,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/metrics.rs:133:14: replace > with >= in NodeMetrics::record_gossiped",
+          "package": "onde-core",
+          "file": "src/metrics.rs",
+          "function": {
+            "function_name": "NodeMetrics::record_gossiped",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 130,
+                "column": 5
+              },
+              "end": {
+                "line": 136,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 133,
+              "column": 14
+            },
+            "end": {
+              "line": 133,
+              "column": 15
+            }
+          },
+          "replacement": ">=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__metrics.rs_line_133_col_14_002.log",
+      "diff_path": "diff/src__metrics.rs_line_133_col_14_002.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.909838819,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 11.283767678,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/metrics.rs:140:9: replace NodeMetrics::record_duplicated with ()",
+          "package": "onde-core",
+          "file": "src/metrics.rs",
+          "function": {
+            "function_name": "NodeMetrics::record_duplicated",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 138,
+                "column": 5
+              },
+              "end": {
+                "line": 141,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 140,
+              "column": 9
+            },
+            "end": {
+              "line": 140,
+              "column": 66
+            }
+          },
+          "replacement": "()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__metrics.rs_line_140_col_9.log",
+      "diff_path": "diff/src__metrics.rs_line_140_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.908596812,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 12.732197591,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/metrics.rs:145:9: replace NodeMetrics::set_peers with ()",
+          "package": "onde-core",
+          "file": "src/metrics.rs",
+          "function": {
+            "function_name": "NodeMetrics::set_peers",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 143,
+                "column": 5
+              },
+              "end": {
+                "line": 147,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 145,
+              "column": 9
+            },
+            "end": {
+              "line": 146,
+              "column": 60
+            }
+          },
+          "replacement": "()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__metrics.rs_line_145_col_9.log",
+      "diff_path": "diff/src__metrics.rs_line_145_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.863732946,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.054604194,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/metrics.rs:151:9: replace NodeMetrics::record_storage_added with ()",
+          "package": "onde-core",
+          "file": "src/metrics.rs",
+          "function": {
+            "function_name": "NodeMetrics::record_storage_added",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 149,
+                "column": 5
+              },
+              "end": {
+                "line": 156,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 151,
+              "column": 9
+            },
+            "end": {
+              "line": 155,
+              "column": 57
+            }
+          },
+          "replacement": "()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__metrics.rs_line_151_col_9.log",
+      "diff_path": "diff/src__metrics.rs_line_151_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.91212407,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 11.374485949,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/metrics.rs:162:9: replace NodeMetrics::record_storage_removed with ()",
+          "package": "onde-core",
+          "file": "src/metrics.rs",
+          "function": {
+            "function_name": "NodeMetrics::record_storage_removed",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 158,
+                "column": 5
+              },
+              "end": {
+                "line": 165,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 162,
+              "column": 9
+            },
+            "end": {
+              "line": 164,
+              "column": 66
+            }
+          },
+          "replacement": "()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__metrics.rs_line_162_col_9.log",
+      "diff_path": "diff/src__metrics.rs_line_162_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.956975767,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 13.323740493,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/metrics.rs:169:9: replace NodeMetrics::record_health_request with ()",
+          "package": "onde-core",
+          "file": "src/metrics.rs",
+          "function": {
+            "function_name": "NodeMetrics::record_health_request",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 167,
+                "column": 5
+              },
+              "end": {
+                "line": 170,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 169,
+              "column": 9
+            },
+            "end": {
+              "line": 169,
+              "column": 62
+            }
+          },
+          "replacement": "()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__metrics.rs_line_169_col_9.log",
+      "diff_path": "diff/src__metrics.rs_line_169_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.954527217,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 12.979206183,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/metrics.rs:177:9: replace NodeMetrics::uptime_secs -> u64 with 0",
+          "package": "onde-core",
+          "file": "src/metrics.rs",
+          "function": {
+            "function_name": "NodeMetrics::uptime_secs",
+            "return_type": "-> u64",
+            "span": {
+              "start": {
+                "line": 174,
+                "column": 5
+              },
+              "end": {
+                "line": 178,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 177,
+              "column": 9
+            },
+            "end": {
+              "line": 177,
+              "column": 75
+            }
+          },
+          "replacement": "0",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__metrics.rs_line_177_col_9.log",
+      "diff_path": "diff/src__metrics.rs_line_177_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.857628377,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 11.032106166,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/metrics.rs:177:9: replace NodeMetrics::uptime_secs -> u64 with 1",
+          "package": "onde-core",
+          "file": "src/metrics.rs",
+          "function": {
+            "function_name": "NodeMetrics::uptime_secs",
+            "return_type": "-> u64",
+            "span": {
+              "start": {
+                "line": 174,
+                "column": 5
+              },
+              "end": {
+                "line": 178,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 177,
+              "column": 9
+            },
+            "end": {
+              "line": 177,
+              "column": 75
+            }
+          },
+          "replacement": "1",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__metrics.rs_line_177_col_9_001.log",
+      "diff_path": "diff/src__metrics.rs_line_177_col_9_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.866746424,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 10.531277671,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/metrics.rs:182:9: replace NodeMetrics::peers_known -> u64 with 0",
+          "package": "onde-core",
+          "file": "src/metrics.rs",
+          "function": {
+            "function_name": "NodeMetrics::peers_known",
+            "return_type": "-> u64",
+            "span": {
+              "start": {
+                "line": 180,
+                "column": 5
+              },
+              "end": {
+                "line": 183,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 182,
+              "column": 9
+            },
+            "end": {
+              "line": 182,
+              "column": 49
+            }
+          },
+          "replacement": "0",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__metrics.rs_line_182_col_9.log",
+      "diff_path": "diff/src__metrics.rs_line_182_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.857569364,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 13.474410958,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/metrics.rs:182:9: replace NodeMetrics::peers_known -> u64 with 1",
+          "package": "onde-core",
+          "file": "src/metrics.rs",
+          "function": {
+            "function_name": "NodeMetrics::peers_known",
+            "return_type": "-> u64",
+            "span": {
+              "start": {
+                "line": 180,
+                "column": 5
+              },
+              "end": {
+                "line": 183,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 182,
+              "column": 9
+            },
+            "end": {
+              "line": 182,
+              "column": 49
+            }
+          },
+          "replacement": "1",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__metrics.rs_line_182_col_9_001.log",
+      "diff_path": "diff/src__metrics.rs_line_182_col_9_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.904867192,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 13.928481904,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/metrics.rs:187:9: replace NodeMetrics::peers_synced -> u64 with 0",
+          "package": "onde-core",
+          "file": "src/metrics.rs",
+          "function": {
+            "function_name": "NodeMetrics::peers_synced",
+            "return_type": "-> u64",
+            "span": {
+              "start": {
+                "line": 185,
+                "column": 5
+              },
+              "end": {
+                "line": 188,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 187,
+              "column": 9
+            },
+            "end": {
+              "line": 187,
+              "column": 50
+            }
+          },
+          "replacement": "0",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__metrics.rs_line_187_col_9.log",
+      "diff_path": "diff/src__metrics.rs_line_187_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.855933561,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 13.085813291,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/metrics.rs:187:9: replace NodeMetrics::peers_synced -> u64 with 1",
+          "package": "onde-core",
+          "file": "src/metrics.rs",
+          "function": {
+            "function_name": "NodeMetrics::peers_synced",
+            "return_type": "-> u64",
+            "span": {
+              "start": {
+                "line": 185,
+                "column": 5
+              },
+              "end": {
+                "line": 188,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 187,
+              "column": 9
+            },
+            "end": {
+              "line": 187,
+              "column": 50
+            }
+          },
+          "replacement": "1",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__metrics.rs_line_187_col_9_001.log",
+      "diff_path": "diff/src__metrics.rs_line_187_col_9_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.854880086,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 15.746379794,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/metrics.rs:203:9: replace NodeMetrics::snapshot -> MetricsSnapshot with Default::default()",
+          "package": "onde-core",
+          "file": "src/metrics.rs",
+          "function": {
+            "function_name": "NodeMetrics::snapshot",
+            "return_type": "-> MetricsSnapshot",
+            "span": {
+              "start": {
+                "line": 190,
+                "column": 5
+              },
+              "end": {
+                "line": 223,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 203,
+              "column": 9
+            },
+            "end": {
+              "line": 222,
+              "column": 10
+            }
+          },
+          "replacement": "Default::default()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src__metrics.rs_line_203_col_9.log",
+      "diff_path": "diff/src__metrics.rs_line_203_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.453588219,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/metrics.rs:238:9: replace NodeMetrics::snapshot_json -> String with String::new()",
+          "package": "onde-core",
+          "file": "src/metrics.rs",
+          "function": {
+            "function_name": "NodeMetrics::snapshot_json",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 225,
+                "column": 5
+              },
+              "end": {
+                "line": 239,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 238,
+              "column": 9
+            },
+            "end": {
+              "line": 238,
+              "column": 85
+            }
+          },
+          "replacement": "String::new()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__metrics.rs_line_238_col_9.log",
+      "diff_path": "diff/src__metrics.rs_line_238_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.016677842,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 15.64498988,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/metrics.rs:238:9: replace NodeMetrics::snapshot_json -> String with \"xyzzy\".into()",
+          "package": "onde-core",
+          "file": "src/metrics.rs",
+          "function": {
+            "function_name": "NodeMetrics::snapshot_json",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 225,
+                "column": 5
+              },
+              "end": {
+                "line": 239,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 238,
+              "column": 9
+            },
+            "end": {
+              "line": 238,
+              "column": 85
+            }
+          },
+          "replacement": "\"xyzzy\".into()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__metrics.rs_line_238_col_9_001.log",
+      "diff_path": "diff/src__metrics.rs_line_238_col_9_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.913291307,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 12.773160409,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/metrics.rs:251:9: replace NodeMetrics::log_startup_snapshot -> String with String::new()",
+          "package": "onde-core",
+          "file": "src/metrics.rs",
+          "function": {
+            "function_name": "NodeMetrics::log_startup_snapshot",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 241,
+                "column": 5
+              },
+              "end": {
+                "line": 260,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 251,
+              "column": 9
+            },
+            "end": {
+              "line": 259,
+              "column": 13
+            }
+          },
+          "replacement": "String::new()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__metrics.rs_line_251_col_9.log",
+      "diff_path": "diff/src__metrics.rs_line_251_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.817112627,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 15.148446058,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/metrics.rs:251:9: replace NodeMetrics::log_startup_snapshot -> String with \"xyzzy\".into()",
+          "package": "onde-core",
+          "file": "src/metrics.rs",
+          "function": {
+            "function_name": "NodeMetrics::log_startup_snapshot",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 241,
+                "column": 5
+              },
+              "end": {
+                "line": 260,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 251,
+              "column": 9
+            },
+            "end": {
+              "line": 259,
+              "column": 13
+            }
+          },
+          "replacement": "\"xyzzy\".into()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__metrics.rs_line_251_col_9_001.log",
+      "diff_path": "diff/src__metrics.rs_line_251_col_9_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.963842888,
+          "process_status": "Success",
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.525475244,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/metrics.rs:252:13: delete match arm Ok(serde_json::Value::Object(map)) in NodeMetrics::log_startup_snapshot",
+          "package": "onde-core",
+          "file": "src/metrics.rs",
+          "function": {
+            "function_name": "NodeMetrics::log_startup_snapshot",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 241,
+                "column": 5
+              },
+              "end": {
+                "line": 260,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 252,
+              "column": 13
+            },
+            "end": {
+              "line": 252,
+              "column": 55
+            }
+          },
+          "replacement": "",
+          "genre": "MatchArm"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src__metrics.rs_line_252_col_13.log",
+      "diff_path": "diff/src__metrics.rs_line_252_col_13.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.452505612,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=onde-core@0.2.0"
+          ]
+        }
+      ]
+    }
+  ],
+  "total_mutants": 64,
+  "missed": 9,
+  "caught": 48,
+  "timeout": 0,
+  "unviable": 7,
+  "success": 0,
+  "start_time": "2026-08-23T14:10:07.775714557Z",
+  "end_time": "2026-08-23T14:23:47.682311188Z",
+  "cargo_mutants_version": "27.1.0"
+}
