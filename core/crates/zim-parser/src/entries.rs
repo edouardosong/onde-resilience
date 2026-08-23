@@ -30,6 +30,14 @@ pub struct Dirent {
 impl Dirent {
     /// Parse a dirent located at byte `off` within `data`.
     pub fn parse(data: &[u8], off: usize) -> Result<Self, ZimError> {
+        // A pointer table entry may point past EOF (corrupt file): typed error,
+        // never an out-of-range slice panic.
+        if off >= data.len() {
+            return Err(ZimError::OutOfBounds {
+                offset: off as u32,
+                len: data.len() as u32,
+            });
+        }
         // URL (null-terminated).
         let url_end = data[off..]
             .iter()
