@@ -1,0 +1,21 @@
+--- src/health.rs
++++ replace || with && in handle_connection_with_budget
+@@ -271,17 +271,17 @@
+         }
+         RequestHead::Dead => return, // budget épuisé, timeout, connexion vide ou fermée
+     };
+ 
+     let mut parts = request_line.split_whitespace();
+     let method = parts.next().unwrap_or("");
+     let path = parts.next().unwrap_or("");
+     let is_get = method == "GET";
+-    let is_health_path = path == "/health" || path == "/health?";
++    let is_health_path = path == "/health" && /* ~ changed by cargo-mutants ~ */ path == "/health?";
+ 
+     let (status, body) = if !is_get && path == "/health" {
+         (
+             "405 Method Not Allowed",
+             "{\"error\":\"method not allowed\"}".to_string(),
+         )
+     } else if is_get && is_health_path {
+         metrics.record_health_request();

@@ -1,0 +1,21 @@
+--- src/health.rs
++++ replace HealthHandle::shutdown with ()
+@@ -101,17 +101,17 @@
+ impl HealthHandle {
+     /// Arrêt propre : arme le fanion d'arrêt ; le thread d'acceptation sort
+     /// de sa boucle sous [`ACCEPT_POLL_INTERVAL`], ferme le listener (port
+     /// libéré) et se termine. Les connexions déjà acceptées s'achèvent
+     /// seules, au plus tard au bout du budget total par connexion.
+     pub fn shutdown(self) {
+         // L'armement vit dans `Drop` (chemin unique, idempotent) : cette
+         // méthode nommée exprime l'intention sur les sites d'appel.
+-        drop(self);
++        () /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ impl Drop for HealthHandle {
+     fn drop(&mut self) {
+         self.stop_flag.store(true, Ordering::Release);
+     }
+ }

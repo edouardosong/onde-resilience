@@ -1,0 +1,24 @@
+--- src/health.rs
++++ replace match guard matches!( e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted ) with true in accept_loop
+@@ -190,20 +190,17 @@
+                     // Épuisement de threads OS : on ignore cette connexion
+                     // (le client retentera) sans jamais paniquer ; le quota
+                     // pris à l'admission est rendu immédiatement.
+                     active.fetch_sub(1, Ordering::Release);
+                     continue;
+                 }
+             }
+             Err(e)
+-                if matches!(
+-                    e.kind(),
+-                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+-                ) =>
++                if true /* ~ changed by cargo-mutants ~ */ =>
+             {
+                 // Pas de connexion prête (listener non-bloquant) : courte
+                 // attente, puis re-sonde du fanion d'arrêt en tête de boucle.
+                 std::thread::sleep(ACCEPT_POLL_INTERVAL);
+             }
+             Err(e) => {
+                 if stop_flag.load(Ordering::Acquire) {
+                     break clean_stop();

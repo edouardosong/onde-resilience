@@ -1,0 +1,21 @@
+--- src/health.rs
++++ replace find_crlf -> Option<usize> with Some(0)
+@@ -357,17 +357,17 @@
+             }
+             Err(_) => return RequestHead::Dead, // timeout lecture ou erreur socket
+         }
+     }
+ }
+ 
+ /// Position du premier `\r\n` dans `buf`, si présent.
+ fn find_crlf(buf: &[u8]) -> Option<usize> {
+-    buf.windows(2).position(|w| w == b"\r\n")
++    Some(0) /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// Écrit une réponse HTTP/1.1 minimale JSON + `Connection: close`.
+ fn write_response(stream: &mut TcpStream, status: &str, body: &str) -> std::io::Result<()> {
+     let response = format!(
+         "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+         body.len()
+     );

@@ -1,0 +1,56 @@
+--- src/health.rs
++++ replace read_request_head -> RequestHead with Default::default()
+@@ -317,52 +317,17 @@
+ /// Lit l'en-tête HTTP jusqu'à la première ligne complète (CRLF), avec :
+ /// - un plafond strict [`MAX_REQUEST_BYTES`] — au-delà SANS fin de ligne →
+ ///   [`RequestHead::TooLarge`] (réponse 431 puis fermeture) ;
+ /// - un budget TOTAL `deadline` (slowloris) : chaque lecture individuelle
+ ///   est bornée par min([`SOCKET_TIMEOUT`], temps restant), et la boucle
+ ///   s'arrête dès que l'échéance globale est atteinte ;
+ /// - la tolérance RFC 7230 §3.5 : les lignes vides initiales sont ignorées.
+ fn read_request_head(stream: &mut TcpStream, deadline: Instant) -> RequestHead {
+-    let mut buf: Vec<u8> = Vec::with_capacity(256);
+-    let mut chunk = [0u8; 512];
+-    loop {
+-        let now = Instant::now();
+-        if now >= deadline {
+-            return RequestHead::Dead; // budget total épuisé → coupure slowloris
+-        }
+-        // Timeout par opération = min(timeout socket, temps restant) :
+-        // même sans vérification explicite, aucun read ne déborde du budget.
+-        let _ = stream.set_read_timeout(Some(SOCKET_TIMEOUT.min(deadline - now)));
+-        match stream.read(&mut chunk) {
+-            Ok(0) => return RequestHead::Dead, // fermeture sans requête complète
+-            Ok(n) => {
+-                buf.extend_from_slice(&chunk[..n]);
+-                // RFC 7230 §3.5 : ignorer d'éventuelles lignes vides initiales
+-                // (certains clients envoient un CRLF supplémentaire).
+-                loop {
+-                    match find_crlf(&buf) {
+-                        Some(0) => {
+-                            buf.drain(..2);
+-                        }
+-                        Some(pos) => {
+-                            return RequestHead::Line(
+-                                String::from_utf8_lossy(&buf[..pos]).into_owned(),
+-                            );
+-                        }
+-                        None => break,
+-                    }
+-                }
+-                if buf.len() > MAX_REQUEST_BYTES {
+-                    return RequestHead::TooLarge;
+-                }
+-            }
+-            Err(_) => return RequestHead::Dead, // timeout lecture ou erreur socket
+-        }
+-    }
++    Default::default() /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// Position du premier `\r\n` dans `buf`, si présent.
+ fn find_crlf(buf: &[u8]) -> Option<usize> {
+     buf.windows(2).position(|w| w == b"\r\n")
+ }
+ 
+ /// Écrit une réponse HTTP/1.1 minimale JSON + `Connection: close`.

@@ -1,0 +1,21 @@
+--- src/health.rs
++++ replace - with / in read_request_head
+@@ -326,17 +326,17 @@
+     let mut chunk = [0u8; 512];
+     loop {
+         let now = Instant::now();
+         if now >= deadline {
+             return RequestHead::Dead; // budget total épuisé → coupure slowloris
+         }
+         // Timeout par opération = min(timeout socket, temps restant) :
+         // même sans vérification explicite, aucun read ne déborde du budget.
+-        let _ = stream.set_read_timeout(Some(SOCKET_TIMEOUT.min(deadline - now)));
++        let _ = stream.set_read_timeout(Some(SOCKET_TIMEOUT.min(deadline / /* ~ changed by cargo-mutants ~ */ now)));
+         match stream.read(&mut chunk) {
+             Ok(0) => return RequestHead::Dead, // fermeture sans requête complète
+             Ok(n) => {
+                 buf.extend_from_slice(&chunk[..n]);
+                 // RFC 7230 §3.5 : ignorer d'éventuelles lignes vides initiales
+                 // (certains clients envoient un CRLF supplémentaire).
+                 loop {
+                     match find_crlf(&buf) {

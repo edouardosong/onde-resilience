@@ -7,12 +7,21 @@
 //!
 //! Garanties :
 //! - écoute exclusivement sur `127.0.0.1` (jamais d'interface externe) ;
-//! - timeouts socket bornés (lecture/écriture 2 s) — aucune connexion ne
-//!   peut retenir le serveur indéfiniment ;
-//! - plafond de connexions concurrentes (au-delà → réponse 503 immédiate) ;
-//! - taille de requête plafonnée (8 Kio) ;
-//! - arrêt propre : la destruction de [`HealthHandle`] ferme le listener,
-//!   ce qui réveille la boucle d'acceptation qui se termine proprement.
+//! - budget de temps **total** par connexion ([`CONNECTION_BUDGET`], appliqué
+//!   aux lectures) EN PLUS des timeouts socket par opération — un client lent
+//!   type slowloris ne peut retenir un thread au-delà du budget global ;
+//! - plafond de connexions concurrentes : la décision d'admission est prise
+//!   **atomiquement dans la boucle d'acceptation, avant tout spawn**, donc
+//!   une rafale ne peut pas dépasser le plafond ; au-delà → réponse 503
+//!   immédiate servie inline (zéro thread spawned) ;
+//! - taille de requête plafonnée (8 Kio) : au-delà → réponse **431** PUIS
+//!   fermeture (la doc promettait déjà 431 — l'implémentation s'y aligne) ;
+//! - arrêt propre VÉRIFIABLE : le thread d'acceptation possède le SEUL
+//!   listener (aucun clone partagé, fd unique) en mode non-bloquant et sonde
+//!   le fanion d'arrêt à intervalle court ([`ACCEPT_POLL_INTERVAL`]) ; à
+//!   l'arrêt il sort de sa boucle, ce qui ferme le listener et libère le
+//!   port — y compris sans aucune connexion entrante (un rebind immédiat
+//!   sur le même port réussit).
 //!
 //! # Exemple (port éphémère, CI-safe)
 //!
@@ -42,15 +51,26 @@ use std::io::{Read, Write};
 use std::net::{Shutdown as SocketShutdown, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::metrics::NodeMetrics;
 
 /// Taille maximale acceptée pour une requête (octets) — au-delà → 431.
 const MAX_REQUEST_BYTES: usize = 8 * 1024;
 
-/// Timeout borné appliqué à chaque socket client (lecture ET écriture).
+/// Timeout borné appliqué à chaque socket client (lecture ET écriture) —
+/// borne PAR OPÉRATION, complétée par le budget total ci-dessous.
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Budget de temps **TOTAL** par connexion (lectures cumulées) : un client
+/// qui drippe ses octets assez vite pour éviter chaque timeout individuel
+/// (slowloris) est coupé dès que ce budget global est épuisé. Aucune
+/// connexion ne peut retenir un thread au-delà.
+const CONNECTION_BUDGET: Duration = Duration::from_secs(10);
+
+/// Intervalle de sondage du fanion d'arrêt par la boucle d'acceptation
+/// (listener non-bloquant) : latence d'arrêt bornée par cette valeur.
+const ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 /// Plafond de threads de connexion actifs ; au-delà, réponse 503 servie en
 /// ligne par la boucle d'acceptation (jamais de spawn illimité).
@@ -62,39 +82,37 @@ const MAX_CONSECUTIVE_ACCEPT_ERRORS: u32 = 32;
 
 /// Poignée du serveur de santé — port effectif + arrêt propre.
 ///
-/// La destruction (`Drop`) déclenche l'arrêt : fermeture du listener (la
-/// boucle d'acceptation bloquée sur `accept()` reçoit une erreur, voit le
-/// fanion d'arrêt et se termine), puis fermeture des sockets en cours par
-/// leurs propres timeouts.
+/// Le thread d'acceptation détient l'UNIQUE listener (aucun clone `try_clone`
+/// partagé : dropper un clone ne ferme pas le socket et ne réveille pas un
+/// `accept()` bloquant). Cette poignée n'a donc AUCUN descripteur à fermer :
+/// la destruction (`Drop`) ou [`HealthHandle::shutdown`] arme seulement le
+/// fanion d'arrêt. Le thread, dont le listener est non-bloquant, sonde ce
+/// fanion au plus tard après [`ACCEPT_POLL_INTERVAL`], quitte sa boucle, et
+/// c'est LA SORTIE DU THREAD qui ferme l'unique fd — libérant réellement le
+/// port, sans nécessiter la moindre connexion entrante pour « pomper » la
+/// boucle.
 #[derive(Debug)]
 pub struct HealthHandle {
     /// Port effectif lié (utile après un bind sur le port 0 éphémère).
     pub port: u16,
     stop_flag: Arc<AtomicBool>,
-    /// Clone du listener détenu par le thread — fermé ici en premier pour
-    /// réveiller `accept()`.
-    thread_listener: Option<TcpListener>,
 }
 
 impl HealthHandle {
-    /// Arrêt propre : ferme le listener et signale la boucle d'acceptation.
-    /// Les requêtes déjà acceptées se terminent seules (timeouts bornés).
-    pub fn shutdown(mut self) {
-        self.stop_internal();
-        // `self.thread_listener` est fermée par `stop_internal`.
-    }
-
-    fn stop_internal(&mut self) {
-        self.stop_flag.store(true, Ordering::Release);
-        // Fermer le clone du listener réveille immédiatement un accept()
-        // bloquant dans le thread serveur.
-        self.thread_listener = None;
+    /// Arrêt propre : arme le fanion d'arrêt ; le thread d'acceptation sort
+    /// de sa boucle sous [`ACCEPT_POLL_INTERVAL`], ferme le listener (port
+    /// libéré) et se termine. Les connexions déjà acceptées s'achèvent
+    /// seules, au plus tard au bout du budget total par connexion.
+    pub fn shutdown(self) {
+        // L'armement vit dans `Drop` (chemin unique, idempotent) : cette
+        // méthode nommée exprime l'intention sur les sites d'appel.
+        drop(self);
     }
 }
 
 impl Drop for HealthHandle {
     fn drop(&mut self) {
-        self.stop_internal();
+        self.stop_flag.store(true, Ordering::Release);
     }
 }
 
@@ -113,7 +131,11 @@ impl Drop for HealthHandle {
 pub fn spawn_health_server(port: u16, metrics: Arc<NodeMetrics>) -> std::io::Result<HealthHandle> {
     let listener = TcpListener::bind(("127.0.0.1", port))?;
     let effective_port = listener.local_addr()?.port();
-    let thread_listener = listener.try_clone()?;
+    // Le thread devient l'unique propriétaire du listener, passé en
+    // non-bloquant : `accept()` ne bloque jamais, la boucle re-sonde le
+    // fanion d'arrêt à intervalle court, et la sortie du thread ferme le
+    // seul fd → libération du port vérifiable (rebind immédiat).
+    listener.set_nonblocking(true)?;
     let stop_flag = Arc::new(AtomicBool::new(false));
     let stop_thread = stop_flag.clone();
     let active = Arc::new(AtomicUsize::new(0));
@@ -125,7 +147,6 @@ pub fn spawn_health_server(port: u16, metrics: Arc<NodeMetrics>) -> std::io::Res
     Ok(HealthHandle {
         port: effective_port,
         stop_flag,
-        thread_listener: Some(thread_listener),
     })
 }
 
@@ -146,9 +167,14 @@ fn accept_loop(
         match listener.accept() {
             Ok((stream, _peer)) => {
                 consecutive_errors = 0;
-                if active.load(Ordering::Relaxed) >= MAX_CONCURRENT_CONNECTIONS {
-                    // Surchargé (impossible en pratique sur localhost) :
-                    // refus explicite servi inline, aucun thread spawned.
+                // Admission DANS LE PARENT, atomique et AVANT tout spawn :
+                // le compteur est incrémenté au moment de la décision, donc
+                // une rafale ne peut pas dépasser le plafond (pas de fenêtre
+                // TOCTOU entre la décision et l'incrément côté thread enfant).
+                if active.fetch_add(1, Ordering::AcqRel) >= MAX_CONCURRENT_CONNECTIONS {
+                    active.fetch_sub(1, Ordering::Release);
+                    // Surchargé : refus explicite servi inline par la boucle
+                    // d'acceptation elle-même, aucun thread spawned.
                     serve_inline_busy(stream);
                     continue;
                 }
@@ -157,15 +183,26 @@ fn accept_loop(
                 let spawned = std::thread::Builder::new()
                     .name("onde-health-conn".to_string())
                     .spawn(move || {
-                        a.fetch_add(1, Ordering::Relaxed);
                         handle_connection(stream, &m);
-                        a.fetch_sub(1, Ordering::Relaxed);
+                        a.fetch_sub(1, Ordering::Release);
                     });
                 if spawned.is_err() {
                     // Épuisement de threads OS : on ignore cette connexion
-                    // (le client retentera) sans jamais paniquer.
+                    // (le client retentera) sans jamais paniquer ; le quota
+                    // pris à l'admission est rendu immédiatement.
+                    active.fetch_sub(1, Ordering::Release);
                     continue;
                 }
+            }
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                ) =>
+            {
+                // Pas de connexion prête (listener non-bloquant) : courte
+                // attente, puis re-sonde du fanion d'arrêt en tête de boucle.
+                std::thread::sleep(ACCEPT_POLL_INTERVAL);
             }
             Err(e) => {
                 if stop_flag.load(Ordering::Acquire) {
@@ -179,6 +216,7 @@ fn accept_loop(
                     );
                     return;
                 }
+                std::thread::sleep(ACCEPT_POLL_INTERVAL);
             }
         }
     }
@@ -190,19 +228,48 @@ fn clean_stop() {
 }
 
 /// Réponse 503 servie inline quand le plafond de connexions est atteint.
+///
+/// La fermeture passe par `shutdown(BOTH)` AVANT le drop : fermer un socket
+/// dont le tampon de réception contient encore la requête du client émettrait
+/// un RST (le client verrait « Connection reset » au lieu de notre 503).
 fn serve_inline_busy(mut stream: TcpStream) {
     let body = "{\"error\":\"busy\"}";
     let _ = write_response(&mut stream, "503 Service Unavailable", body);
+    let _ = stream.shutdown(SocketShutdown::Both);
 }
 
-/// Traite UNE connexion : parse la ligne de requête, route, répond, ferme.
-fn handle_connection(mut stream: TcpStream, metrics: &Arc<NodeMetrics>) {
-    let _ = stream.set_read_timeout(Some(SOCKET_TIMEOUT));
+/// Traite UNE connexion avec le budget total par défaut.
+fn handle_connection(stream: TcpStream, metrics: &Arc<NodeMetrics>) {
+    handle_connection_with_budget(stream, metrics, CONNECTION_BUDGET);
+}
+
+/// Traite UNE connexion avec un budget de temps **TOTAL** (lectures cumulées)
+/// : parse la ligne de requête, route, répond, ferme. Un client qui drippe
+/// ses octets assez vite pour rester sous chaque timeout individuel est
+/// coupé dès que le budget global est épuisé — aucune connexion ne peut
+/// retenir un thread indéfiniment.
+fn handle_connection_with_budget(
+    mut stream: TcpStream,
+    metrics: &Arc<NodeMetrics>,
+    budget: Duration,
+) {
+    let deadline = Instant::now() + budget;
     let _ = stream.set_write_timeout(Some(SOCKET_TIMEOUT));
 
-    let request_line = match read_request_head(&mut stream) {
-        Some(line) => line,
-        None => return, // timeout, connexion vide ou requête surdimensionnée
+    let request_line = match read_request_head(&mut stream, deadline) {
+        RequestHead::Line(line) => line,
+        RequestHead::TooLarge => {
+            // Aligné sur la documentation : répondre 431 PUIS fermer, au
+            // lieu d'une fermeture silencieuse (RST observé avant T23).
+            let _ = write_response(
+                &mut stream,
+                "431 Request Header Fields Too Large",
+                "{\"error\":\"request too large\"}",
+            );
+            let _ = stream.shutdown(SocketShutdown::Both);
+            return;
+        }
+        RequestHead::Dead => return, // budget épuisé, timeout, connexion vide ou fermée
     };
 
     let mut parts = request_line.split_whitespace();
@@ -236,25 +303,59 @@ fn handle_connection(mut stream: TcpStream, metrics: &Arc<NodeMetrics>) {
     let _ = stream.shutdown(SocketShutdown::Both);
 }
 
-/// Lit l'en-tête HTTP jusqu'à la première ligne complète (CRLF), borné à
-/// [`MAX_REQUEST_BYTES`]. Retourne la request-line, ou None si rien de
-/// valable n'arrive à temps.
-fn read_request_head(stream: &mut TcpStream) -> Option<String> {
-    let mut buf = Vec::with_capacity(256);
+/// Issue de la lecture de la tête de requête.
+enum RequestHead {
+    /// Ligne de requête complète (première ligne non vide terminée par CRLF).
+    Line(String),
+    /// Plafond de taille dépassé sans fin de ligne → le serveur répondra 431.
+    TooLarge,
+    /// Rien d'exploitable : budget total épuisé, timeout par opération,
+    /// connexion vide ou fermée prématurément → fermeture sans réponse.
+    Dead,
+}
+
+/// Lit l'en-tête HTTP jusqu'à la première ligne complète (CRLF), avec :
+/// - un plafond strict [`MAX_REQUEST_BYTES`] — au-delà SANS fin de ligne →
+///   [`RequestHead::TooLarge`] (réponse 431 puis fermeture) ;
+/// - un budget TOTAL `deadline` (slowloris) : chaque lecture individuelle
+///   est bornée par min([`SOCKET_TIMEOUT`], temps restant), et la boucle
+///   s'arrête dès que l'échéance globale est atteinte ;
+/// - la tolérance RFC 7230 §3.5 : les lignes vides initiales sont ignorées.
+fn read_request_head(stream: &mut TcpStream, deadline: Instant) -> RequestHead {
+    let mut buf: Vec<u8> = Vec::with_capacity(256);
     let mut chunk = [0u8; 512];
     loop {
+        let now = Instant::now();
+        if now >= deadline {
+            return RequestHead::Dead; // budget total épuisé → coupure slowloris
+        }
+        // Timeout par opération = min(timeout socket, temps restant) :
+        // même sans vérification explicite, aucun read ne déborde du budget.
+        let _ = stream.set_read_timeout(Some(SOCKET_TIMEOUT.min(deadline - now)));
         match stream.read(&mut chunk) {
-            Ok(0) => return None, // fermeture sans requête complète
+            Ok(0) => return RequestHead::Dead, // fermeture sans requête complète
             Ok(n) => {
                 buf.extend_from_slice(&chunk[..n]);
-                if let Some(pos) = find_crlf(&buf) {
-                    return Some(String::from_utf8_lossy(&buf[..pos]).into_owned());
+                // RFC 7230 §3.5 : ignorer d'éventuelles lignes vides initiales
+                // (certains clients envoient un CRLF supplémentaire).
+                loop {
+                    match find_crlf(&buf) {
+                        Some(0) => {
+                            buf.drain(..2);
+                        }
+                        Some(pos) => {
+                            return RequestHead::Line(
+                                String::from_utf8_lossy(&buf[..pos]).into_owned(),
+                            );
+                        }
+                        None => break,
+                    }
                 }
                 if buf.len() > MAX_REQUEST_BYTES {
-                    return None;
+                    return RequestHead::TooLarge;
                 }
             }
-            Err(_) => return None, // timeout lecture (> SOCKET_TIMEOUT)
+            Err(_) => return RequestHead::Dead, // timeout lecture ou erreur socket
         }
     }
 }
@@ -279,17 +380,38 @@ mod tests {
     use super::*;
     use serde_json::Value;
 
-    /// Vérifie que `port` finit par refuser les connexions (listener bien
-    /// fermé après arrêt), avec borne de temps courte (CI-safe).
-    fn assert_port_released(port: u16) {
+    /// Preuve de libération par REBIND direct sur le MÊME port : un ancien
+    /// test sondait avec des connexions TCP, ce qui « pompait » la boucle
+    /// d'acceptation et masquait l'arrêt cassé (le clone du listener ne
+    /// fermait pas le socket). Ici, aucune sonde : seul le fanion d'arrêt
+    /// sondé par le thread doit fermer l'unique fd, sous délai borné.
+    fn assert_port_rebindable(port: u16) {
         let deadline = std::time::Instant::now() + Duration::from_secs(3);
-        while TcpStream::connect(("127.0.0.1", port)).is_ok() {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "port must be released after shutdown"
-            );
-            std::thread::sleep(Duration::from_millis(20));
+        loop {
+            match TcpListener::bind(("127.0.0.1", port)) {
+                Ok(rebound) => {
+                    drop(rebound);
+                    return;
+                }
+                Err(_) => {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "port must be released (rebindable) after shutdown"
+                    );
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+            }
         }
+    }
+
+    /// Paire client/serveur locale pour tester les fonctions de service
+    /// directement (budget court, sans passer par le thread d'acceptation).
+    fn local_pair() -> (TcpStream, TcpStream) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = TcpStream::connect(addr).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        (client, server)
     }
 
     /// Client HTTP minimal (std-only) : GET, lit toute la réponse.
@@ -324,7 +446,14 @@ mod tests {
         let v: Value =
             serde_json::from_str(raw[body_start..].trim()).expect("body must be valid JSON");
         assert_eq!(v["status"], "ok");
-        assert!(v["uptime_s"].is_u64());
+        // Assertion numérique SAINe (pas seulement is_u64) : l'uptime d'un
+        // serveur fraîchement démarré est borné par quelques secondes — un
+        // unix_now cassé (→ 0 ou horloge absurde) sort de cette borne.
+        let uptime = v["uptime_s"].as_u64().expect("uptime_s numeric");
+        assert!(
+            uptime <= 60,
+            "fresh server uptime must be small, got {uptime}"
+        );
         assert_eq!(v["peers"]["known"], 3);
         assert_eq!(v["peers"]["synced"], 2);
         for field in [
@@ -380,22 +509,209 @@ mod tests {
     }
 
     #[test]
-    fn test_shutdown_releases_port_cleanly() {
+    fn test_shutdown_releases_port_without_probes() {
         let metrics = Arc::new(NodeMetrics::new());
         let handle = spawn_health_server(0, metrics).expect("ephemeral bind");
         let port = handle.port;
         handle.shutdown();
-        // Le port doit finir par refuser les connexions (listener fermé).
-        assert_port_released(port);
+        // AUCUNE connexion sonde entre shutdown et vérification : la seule
+        // force de libération est le fanion d'arrêt sondé par le thread
+        // (≤ ACCEPT_POLL_INTERVAL). Une petite attente couvre plusieurs polls.
+        std::thread::sleep(Duration::from_millis(150));
+        assert_port_rebindable(port);
     }
 
     #[test]
-    fn test_drop_impl_also_stops_server() {
+    fn test_drop_impl_also_stops_server_without_probes() {
         let metrics = Arc::new(NodeMetrics::new());
         let handle = spawn_health_server(0, metrics).expect("ephemeral bind");
         let port = handle.port;
         drop(handle);
-        assert_port_released(port);
+        std::thread::sleep(Duration::from_millis(150));
+        assert_port_rebindable(port);
+    }
+
+    #[test]
+    fn test_burst_beyond_cap_admits_exactly_16_then_busy_cleanly() {
+        let metrics = Arc::new(NodeMetrics::new());
+        let handle = spawn_health_server(0, metrics).expect("ephemeral bind");
+
+        // 16 titulaires : requête INCOMPLÈTE (pas de CRLF) → leur thread de
+        // connexion reste actif, bloqué en lecture dans les limites du budget.
+        let mut holders = Vec::new();
+        for _ in 0..MAX_CONCURRENT_CONNECTIONS {
+            let mut s = TcpStream::connect(("127.0.0.1", handle.port)).unwrap();
+            let _ = s.set_write_timeout(Some(Duration::from_secs(2)));
+            s.write_all(b"GET /he").expect("holder write");
+            holders.push(s);
+        }
+        // Laisse la boucle parente admettre les 16 (fetch_add côté parent).
+        std::thread::sleep(Duration::from_millis(200));
+
+        // Toute nouvelle connexion pendant que les 16 sont actives → 503 busy
+        // PROPRE (réponse complète lue, corps exact) — tue le mutant
+        // `>=`→`<` (qui refuserait au contraire SOUS le plafond) et le mutant
+        // serve_inline_busy vidé (réponse absente).
+        let late = http_get(handle.port, "/health", "GET");
+        assert!(late.starts_with("HTTP/1.1 503"), "got: {late}");
+        assert!(late.contains("{\"error\":\"busy\"}"), "got: {late}");
+
+        // Rafale supplémentaire : toutes servies inline busy, zéro crash.
+        for _ in 0..9 {
+            let raw = http_get(handle.port, "/health", "GET");
+            assert!(raw.starts_with("HTTP/1.1 503"), "got: {raw}");
+        }
+
+        // Libération : les titulaires ferment → capacité restaurée → 200.
+        drop(holders);
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        loop {
+            let raw = http_get(handle.port, "/health", "GET");
+            if raw.starts_with("HTTP/1.1 200") {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "capacity must be restored after holders close"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        handle.shutdown();
+    }
+
+    #[test]
+    fn test_oversized_request_gets_431_then_close() {
+        let metrics = Arc::new(NodeMetrics::new());
+        let handle = spawn_health_server(0, metrics).expect("ephemeral bind");
+        let mut s = TcpStream::connect(("127.0.0.1", handle.port)).unwrap();
+        let _ = s.set_read_timeout(Some(Duration::from_secs(5)));
+        s.write_all(&vec![b'A'; 20 * 1024])
+            .expect("oversized write");
+        let mut raw = Vec::new();
+        s.read_to_end(&mut raw)
+            .expect("server must answer 431 then close");
+        let raw = String::from_utf8_lossy(&raw).to_string();
+        assert!(raw.starts_with("HTTP/1.1 431"), "expected 431, got: {raw}");
+        assert!(
+            raw.ends_with("{\"error\":\"request too large\"}"),
+            "got: {raw}"
+        );
+        handle.shutdown();
+    }
+
+    #[test]
+    fn test_exact_cap_bytes_without_crlf_not_yet_rejected() {
+        // Exactement MAX_REQUEST_BYTES octets SANS CRLF : sous le plafond
+        // STRICT (`>`), le serveur ne doit PAS encore répondre — il attend la
+        // suite. Tue le mutant `>`→`>=` (qui rejetterait à la borne exacte).
+        let metrics = Arc::new(NodeMetrics::new());
+        let handle = spawn_health_server(0, metrics).expect("ephemeral bind");
+        let mut s = TcpStream::connect(("127.0.0.1", handle.port)).unwrap();
+        s.write_all(&vec![b'A'; MAX_REQUEST_BYTES])
+            .expect("boundary write");
+        let _ = s.set_read_timeout(Some(Duration::from_millis(400)));
+        let mut probe = [0u8; 64];
+        match s.read(&mut probe) {
+            Ok(n) => panic!("server answered prematurely below strict cap ({n} bytes)"),
+            Err(e) => assert!(
+                matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ),
+                "unexpected error: {e}"
+            ),
+        }
+        drop(s);
+        handle.shutdown();
+    }
+
+    #[test]
+    fn test_large_but_legal_request_line_under_cap_succeeds() {
+        // ~7 Kio DANS la ligne de requête (espaces inter-tokens, légaux pour
+        // split_whitespace), encore SOUS le plafond de 8 Kio → 200 attendu.
+        // Tue les mutants de `8 * 1024` : `8 + 1024` (cap réduit à 1032 →
+        // 431 prématuré) et `8 / 1024` (cap 0 → 431 immédiat).
+        let metrics = Arc::new(NodeMetrics::new());
+        let handle = spawn_health_server(0, metrics).expect("ephemeral bind");
+        let pad = " ".repeat(7 * 1024);
+        let req = format!("GET {pad}/health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+        assert!(req.len() > 8 + 1024, "pad must exceed the *→+ mutant cap");
+        assert!(
+            req.len() < MAX_REQUEST_BYTES,
+            "must stay under the strict cap"
+        );
+        let mut s = TcpStream::connect(("127.0.0.1", handle.port)).unwrap();
+        let _ = s.set_read_timeout(Some(Duration::from_secs(5)));
+        s.write_all(req.as_bytes()).expect("legal large write");
+        let mut raw = String::new();
+        s.read_to_string(&mut raw).expect("response must end");
+        assert!(
+            raw.starts_with("HTTP/1.1 200"),
+            "got: {}",
+            &raw[..raw.len().min(40)]
+        );
+        handle.shutdown();
+    }
+
+    #[test]
+    fn test_leading_empty_lines_tolerated_rfc7230_3_5() {
+        // RFC 7230 §3.5 : un CRLF vide initial doit être ignoré, pas traité
+        // comme une request-line vide (ancien comportement → 405).
+        let metrics = Arc::new(NodeMetrics::new());
+        let handle = spawn_health_server(0, metrics).expect("ephemeral bind");
+        let mut s = TcpStream::connect(("127.0.0.1", handle.port)).unwrap();
+        let _ = s.set_read_timeout(Some(Duration::from_secs(5)));
+        s.write_all(b"\r\n\r\nGET /health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+            .expect("leading-crlf write");
+        let mut raw = String::new();
+        s.read_to_string(&mut raw).expect("response must end");
+        assert!(
+            raw.starts_with("HTTP/1.1 200"),
+            "got: {}",
+            &raw[..raw.len().min(40)]
+        );
+        handle.shutdown();
+    }
+
+    #[test]
+    fn test_slowloris_cannot_hold_thread_past_total_budget() {
+        // Chemin réel partagé : handle_connection_with_budget avec budget
+        // court. Le client drippe des octets plus vite que tout timeout
+        // individuel → le serveur doit couper dès le budget TOTAL épuisé.
+        let (client, server_stream) = local_pair();
+        let metrics = Arc::new(NodeMetrics::new());
+        let server = std::thread::spawn(move || {
+            handle_connection_with_budget(server_stream, &metrics, Duration::from_millis(600));
+        });
+        let started = std::time::Instant::now();
+        let mut s = client;
+        let _ = s.set_write_timeout(Some(Duration::from_secs(2)));
+        let mut buf = [0u8; 128];
+        let mut eof_at: Option<Duration> = None;
+        for _ in 0..60 {
+            let _ = s.write_all(b"x");
+            let _ = s.set_read_timeout(Some(Duration::from_millis(50)));
+            match s.read(&mut buf) {
+                Ok(0) => {
+                    eof_at = Some(started.elapsed());
+                    break;
+                }
+                Ok(_) => panic!("slowloris drip must not produce a response"),
+                Err(e) => assert!(
+                    matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ),
+                    "unexpected client read error: {e}"
+                ),
+            }
+        }
+        let eof = eof_at.expect("server must close the slowloris connection");
+        assert!(
+            eof < Duration::from_millis(1500),
+            "total budget must cut the connection promptly (eof after {eof:?})"
+        );
+        server.join().expect("server thread must finish cleanly");
     }
 
     #[test]

@@ -1,0 +1,23 @@
+--- src/health.rs
++++ replace serve_inline_busy with ()
+@@ -228,19 +228,17 @@
+ }
+ 
+ /// Réponse 503 servie inline quand le plafond de connexions est atteint.
+ ///
+ /// La fermeture passe par `shutdown(BOTH)` AVANT le drop : fermer un socket
+ /// dont le tampon de réception contient encore la requête du client émettrait
+ /// un RST (le client verrait « Connection reset » au lieu de notre 503).
+ fn serve_inline_busy(mut stream: TcpStream) {
+-    let body = "{\"error\":\"busy\"}";
+-    let _ = write_response(&mut stream, "503 Service Unavailable", body);
+-    let _ = stream.shutdown(SocketShutdown::Both);
++    () /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// Traite UNE connexion avec le budget total par défaut.
+ fn handle_connection(stream: TcpStream, metrics: &Arc<NodeMetrics>) {
+     handle_connection_with_budget(stream, metrics, CONNECTION_BUDGET);
+ }
+ 
+ /// Traite UNE connexion avec un budget de temps **TOTAL** (lectures cumulées)

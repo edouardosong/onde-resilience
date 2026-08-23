@@ -1,0 +1,21 @@
+--- src/health.rs
++++ replace <impl Drop for HealthHandle>::drop with ()
+@@ -107,17 +107,17 @@
+         // L'armement vit dans `Drop` (chemin unique, idempotent) : cette
+         // méthode nommée exprime l'intention sur les sites d'appel.
+         drop(self);
+     }
+ }
+ 
+ impl Drop for HealthHandle {
+     fn drop(&mut self) {
+-        self.stop_flag.store(true, Ordering::Release);
++        () /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// Démarre le serveur de santé lié à `127.0.0.1:port`.
+ ///
+ /// `port = 0` → bind éphémère choisi par l'OS ; le port effectif est exposé
+ /// par [`HealthHandle::port`]. Le thread d'acceptation est détaché (le nœud
+ /// n'a pas à attendre sa fin) mais reste propre : erreurs persistantes ou

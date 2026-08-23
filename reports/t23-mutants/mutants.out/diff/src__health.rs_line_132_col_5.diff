@@ -1,0 +1,39 @@
+--- src/health.rs
++++ replace spawn_health_server -> std::io::Result<HealthHandle> with Ok(Default::default())
+@@ -124,35 +124,17 @@
+ /// signal d'arrêt → sortie nette avec log structuré.
+ ///
+ /// # Erreurs
+ ///
+ /// Retourne l'erreur `std::io` du bind (port occupé, privilèges…) —
+ /// l'appelant décide : fatal pour un daemon demandant explicitement la
+ /// santé, jamais silencieux.
+ pub fn spawn_health_server(port: u16, metrics: Arc<NodeMetrics>) -> std::io::Result<HealthHandle> {
+-    let listener = TcpListener::bind(("127.0.0.1", port))?;
+-    let effective_port = listener.local_addr()?.port();
+-    // Le thread devient l'unique propriétaire du listener, passé en
+-    // non-bloquant : `accept()` ne bloque jamais, la boucle re-sonde le
+-    // fanion d'arrêt à intervalle court, et la sortie du thread ferme le
+-    // seul fd → libération du port vérifiable (rebind immédiat).
+-    listener.set_nonblocking(true)?;
+-    let stop_flag = Arc::new(AtomicBool::new(false));
+-    let stop_thread = stop_flag.clone();
+-    let active = Arc::new(AtomicUsize::new(0));
+-
+-    std::thread::Builder::new()
+-        .name("onde-health".to_string())
+-        .spawn(move || accept_loop(listener, metrics, active, stop_thread))?;
+-
+-    Ok(HealthHandle {
+-        port: effective_port,
+-        stop_flag,
+-    })
++    Ok(Default::default()) /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// Boucle d'acceptation : sert chaque connexion (thread dédié plafonné),
+ /// s'arrête proprement sur signal d'arrêt, erreur persistante ou listener
+ /// fermé.
+ fn accept_loop(
+     listener: TcpListener,
+     metrics: Arc<NodeMetrics>,

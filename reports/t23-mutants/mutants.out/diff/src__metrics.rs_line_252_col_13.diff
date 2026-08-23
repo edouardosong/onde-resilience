@@ -1,0 +1,21 @@
+--- src/metrics.rs
++++ delete match arm Ok(serde_json::Value::Object(map)) in NodeMetrics::log_startup_snapshot
+@@ -244,17 +244,17 @@
+     ///
+     /// Retourne la ligne EXACTEMENT telle qu'elle vient d'être passée à
+     /// `tracing::info!` — les tests vérifient la sortie RÉELLE de cette
+     /// fonction plutôt qu'une réplique de sa logique (un corps vidé ou
+     /// altéré fait échouer le test). En cas de sérialisation impossible,
+     /// rien n'est loggé et une ligne dégénérée `"{}"` est retournée.
+     pub fn log_startup_snapshot(&self, node_name: &str) -> String {
+         let mut value = match serde_json::to_value(self.snapshot()) {
+-            Ok(serde_json::Value::Object(map)) => map,
++             /* ~ changed by cargo-mutants ~ */
+             _ => return "{}".to_string(), // sérialisation impossible → pas de log trompeur
+         };
+         value.insert("event".into(), serde_json::json!("startup"));
+         value.insert("node".into(), serde_json::json!(node_name));
+         let line = serde_json::Value::Object(value).to_string();
+         tracing::info!("{line}");
+         line
+     }

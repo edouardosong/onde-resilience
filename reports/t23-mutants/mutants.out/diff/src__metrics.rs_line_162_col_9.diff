@@ -1,0 +1,23 @@
+--- src/metrics.rs
++++ replace NodeMetrics::record_storage_removed with ()
+@@ -154,19 +154,17 @@
+         self.storage_stored_bytes
+             .fetch_add(stored_bytes, Ordering::Relaxed);
+     }
+ 
+     /// Compter `count` messages purgés du magasin (sweep). Les jauges sont
+     /// **saturantes** : elles ne peuvent jamais passer sous zéro (pas de
+     /// wrapping `u64` dans le JSON de santé).
+     pub fn record_storage_removed(&self, count: u64, raw_bytes: u64, stored_bytes: u64) {
+-        saturating_sub(&self.storage_events, count);
+-        saturating_sub(&self.storage_raw_bytes, raw_bytes);
+-        saturating_sub(&self.storage_stored_bytes, stored_bytes);
++        () /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Compter une requête servie par l'endpoint de santé.
+     pub fn record_health_request(&self) {
+         self.health_requests.fetch_add(1, Ordering::Relaxed);
+     }
+ 
+     // ---- Lectures (consommateurs : santé, logs) --------------------

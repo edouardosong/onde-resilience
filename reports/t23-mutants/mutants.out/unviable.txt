@@ -1,0 +1,7 @@
+src/health.rs:132:5: replace spawn_health_server -> std::io::Result<HealthHandle> with Ok(Default::default())
+src/health.rs:256:35: replace + with * in handle_connection_with_budget
+src/health.rs:325:5: replace read_request_head -> RequestHead with Default::default()
+src/health.rs:334:74: replace - with + in read_request_head
+src/health.rs:334:74: replace - with / in read_request_head
+src/metrics.rs:203:9: replace NodeMetrics::snapshot -> MetricsSnapshot with Default::default()
+src/metrics.rs:252:13: delete match arm Ok(serde_json::Value::Object(map)) in NodeMetrics::log_startup_snapshot

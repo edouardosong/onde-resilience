@@ -1,0 +1,29 @@
+--- src/metrics.rs
++++ replace NodeMetrics::log_startup_snapshot -> String with "xyzzy".into()
+@@ -243,25 +243,17 @@
+     /// toute donnée secrète ne sont JAMAIS incluses.
+     ///
+     /// Retourne la ligne EXACTEMENT telle qu'elle vient d'être passée à
+     /// `tracing::info!` — les tests vérifient la sortie RÉELLE de cette
+     /// fonction plutôt qu'une réplique de sa logique (un corps vidé ou
+     /// altéré fait échouer le test). En cas de sérialisation impossible,
+     /// rien n'est loggé et une ligne dégénérée `"{}"` est retournée.
+     pub fn log_startup_snapshot(&self, node_name: &str) -> String {
+-        let mut value = match serde_json::to_value(self.snapshot()) {
+-            Ok(serde_json::Value::Object(map)) => map,
+-            _ => return "{}".to_string(), // sérialisation impossible → pas de log trompeur
+-        };
+-        value.insert("event".into(), serde_json::json!("startup"));
+-        value.insert("node".into(), serde_json::json!(node_name));
+-        let line = serde_json::Value::Object(value).to_string();
+-        tracing::info!("{line}");
+-        line
++        "xyzzy".into() /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// Instantané complet du nœud — corps JSON exact de `GET /health`.
+ #[derive(Debug, Clone, PartialEq, serde::Serialize)]
+ pub struct MetricsSnapshot {
+     /// Toujours `"ok"` tant que l'endpoint répond (la santé détaillée vit
+     /// dans les jauges ; un nœud qui répond prouve son runtime).

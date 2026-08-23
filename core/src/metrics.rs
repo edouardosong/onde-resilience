@@ -241,14 +241,22 @@ impl NodeMetrics {
     /// Log structuré UNIQUE de démarrage : une ligne JSON contenant le
     /// snapshot complet + identité affichable du nœud. La seed Ed25519 et
     /// toute donnée secrète ne sont JAMAIS incluses.
-    pub fn log_startup_snapshot(&self, node_name: &str) {
+    ///
+    /// Retourne la ligne EXACTEMENT telle qu'elle vient d'être passée à
+    /// `tracing::info!` — les tests vérifient la sortie RÉELLE de cette
+    /// fonction plutôt qu'une réplique de sa logique (un corps vidé ou
+    /// altéré fait échouer le test). En cas de sérialisation impossible,
+    /// rien n'est loggé et une ligne dégénérée `"{}"` est retournée.
+    pub fn log_startup_snapshot(&self, node_name: &str) -> String {
         let mut value = match serde_json::to_value(self.snapshot()) {
             Ok(serde_json::Value::Object(map)) => map,
-            _ => return, // sérialisation impossible → pas de log trompeur
+            _ => return "{}".to_string(), // sérialisation impossible → pas de log trompeur
         };
         value.insert("event".into(), serde_json::json!("startup"));
         value.insert("node".into(), serde_json::json!(node_name));
-        tracing::info!("{}", serde_json::Value::Object(value));
+        let line = serde_json::Value::Object(value).to_string();
+        tracing::info!("{line}");
+        line
     }
 }
 
@@ -307,6 +315,7 @@ pub struct StorageHealth {
 mod tests {
     use super::*;
     use std::sync::Arc;
+    use std::time::Duration;
 
     #[test]
     fn test_counters_start_at_zero() {
@@ -420,18 +429,51 @@ mod tests {
 
     #[test]
     fn test_startup_snapshot_log_is_single_line_json() {
-        // Le log structuré de démarrage doit être du JSON valide sur UNE
-        // ligne, avec event=startup et sans fuite de secret.
+        // On appelle la fonction RÉELLE et on vérifie SA sortie (et non une
+        // réplique de sa logique) : un corps vidé ou altéré par un mutant
+        // fait échouer ce test.
         let m = NodeMetrics::new();
-        let mut value = serde_json::to_value(m.snapshot()).unwrap();
-        if let serde_json::Value::Object(ref mut map) = value {
-            map.insert("event".into(), serde_json::json!("startup"));
-            map.insert("node".into(), serde_json::json!("test-node"));
-        }
-        let line = value.to_string();
-        assert!(!line.contains('\n'));
-        let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+        m.record_ingested();
+        m.set_peers(3, 2);
+        let line = m.log_startup_snapshot("test-node");
+        assert!(!line.contains('\n'), "single line required, got: {line}");
+        let v: serde_json::Value = serde_json::from_str(&line).expect("valid JSON line");
         assert_eq!(v["event"], "startup");
         assert_eq!(v["node"], "test-node");
+        assert_eq!(v["status"], "ok");
+        assert_eq!(v["peers"]["known"], 3);
+        assert_eq!(v["metrics"]["messages_ingested"], 1);
+        // Assertion numérique saine sur l'uptime (pas seulement is_u64).
+        let uptime = v["uptime_s"].as_u64().expect("uptime_s numeric");
+        assert!(
+            uptime <= 60,
+            "fresh registry uptime must be small, got {uptime}"
+        );
+    }
+
+    #[test]
+    fn test_uptime_tracks_measured_wall_time() {
+        // L'uptime doit avancer avec le temps mesuré : tue les mutants
+        // unix_now→{0,1} et uptime_secs→{0,1}.
+        let start = std::time::Instant::now();
+        let m = NodeMetrics::new();
+        std::thread::sleep(Duration::from_millis(2100));
+        let wall = start.elapsed().as_secs(); // ≥ 2 s mesurées
+        assert!(
+            wall >= 2,
+            "test premise: at least 2s must elapse, got {wall}"
+        );
+        let u = m.uptime_secs();
+        assert!(
+            u >= wall,
+            "uptime must track measured time: u={u} wall={wall}"
+        );
+        assert!(
+            u <= wall + 1,
+            "uptime must stay bounded by measured wall clock: u={u} wall={wall}"
+        );
+        // Le JSON de snapshot expose bien cette même valeur numérique.
+        let v: serde_json::Value = serde_json::from_str(&m.snapshot_json()).unwrap();
+        assert_eq!(v["uptime_s"].as_u64(), Some(u));
     }
 }

@@ -1,0 +1,81 @@
+--- src/health.rs
++++ replace accept_loop with ()
+@@ -154,77 +154,17 @@
+ /// s'arrête proprement sur signal d'arrêt, erreur persistante ou listener
+ /// fermé.
+ fn accept_loop(
+     listener: TcpListener,
+     metrics: Arc<NodeMetrics>,
+     active: Arc<AtomicUsize>,
+     stop_flag: Arc<AtomicBool>,
+ ) {
+-    let mut consecutive_errors: u32 = 0;
+-    loop {
+-        if stop_flag.load(Ordering::Acquire) {
+-            break clean_stop();
+-        }
+-        match listener.accept() {
+-            Ok((stream, _peer)) => {
+-                consecutive_errors = 0;
+-                // Admission DANS LE PARENT, atomique et AVANT tout spawn :
+-                // le compteur est incrémenté au moment de la décision, donc
+-                // une rafale ne peut pas dépasser le plafond (pas de fenêtre
+-                // TOCTOU entre la décision et l'incrément côté thread enfant).
+-                if active.fetch_add(1, Ordering::AcqRel) >= MAX_CONCURRENT_CONNECTIONS {
+-                    active.fetch_sub(1, Ordering::Release);
+-                    // Surchargé : refus explicite servi inline par la boucle
+-                    // d'acceptation elle-même, aucun thread spawned.
+-                    serve_inline_busy(stream);
+-                    continue;
+-                }
+-                let m = metrics.clone();
+-                let a = active.clone();
+-                let spawned = std::thread::Builder::new()
+-                    .name("onde-health-conn".to_string())
+-                    .spawn(move || {
+-                        handle_connection(stream, &m);
+-                        a.fetch_sub(1, Ordering::Release);
+-                    });
+-                if spawned.is_err() {
+-                    // Épuisement de threads OS : on ignore cette connexion
+-                    // (le client retentera) sans jamais paniquer ; le quota
+-                    // pris à l'admission est rendu immédiatement.
+-                    active.fetch_sub(1, Ordering::Release);
+-                    continue;
+-                }
+-            }
+-            Err(e)
+-                if matches!(
+-                    e.kind(),
+-                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+-                ) =>
+-            {
+-                // Pas de connexion prête (listener non-bloquant) : courte
+-                // attente, puis re-sonde du fanion d'arrêt en tête de boucle.
+-                std::thread::sleep(ACCEPT_POLL_INTERVAL);
+-            }
+-            Err(e) => {
+-                if stop_flag.load(Ordering::Acquire) {
+-                    break clean_stop();
+-                }
+-                consecutive_errors += 1;
+-                tracing::warn!("event=health_accept_error count={consecutive_errors} error={e}");
+-                if consecutive_errors >= MAX_CONSECUTIVE_ACCEPT_ERRORS {
+-                    tracing::error!(
+-                        "event=health_listener_died consecutive_errors={consecutive_errors}"
+-                    );
+-                    return;
+-                }
+-                std::thread::sleep(ACCEPT_POLL_INTERVAL);
+-            }
+-        }
+-    }
++    () /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// Arrêt propre de la boucle d'acceptation (log structuré unique).
+ fn clean_stop() {
+     tracing::info!("event=health_stopped reason=shutdown");
+ }
+ 
+ /// Réponse 503 servie inline quand le plafond de connexions est atteint.
