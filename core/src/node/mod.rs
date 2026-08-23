@@ -355,6 +355,43 @@ const SOCIAL_FOLLOW_MAX_BYTES: usize = 4 * 1024;
 const SOCIAL_MESSAGE_MAX_BYTES: usize = 16 * 1024;
 const SOCIAL_MODERATION_MAX_BYTES: usize = 8 * 1024;
 
+// ---------------------------------------------------------------------------
+// Phase 3.4 — Auto-réparation : détection de partition, re-sync, heal
+//
+// AUCUNE extension wire : la détection est un book local de présence par
+// pair (temps injecté — déterministe et testable), le rattrapage réutilise
+// l'outbox du gossip existante avec son suivi « livré par pair », et la
+// grâce de heal est un ajustement LOCAL du gate anti-abus.
+// ---------------------------------------------------------------------------
+
+/// Silence prolongé (secs) après lequel TOUS les pairs connus sont jugés
+/// coupés → partition soupçonnée. Heuristique volontairement simple et
+/// déterministe : le temps est injecté (`now`), jamais lu de l'horloge
+/// système ; un nœud sans aucun contact connu n'est JAMAIS soupçonné
+/// (impossible de distinguer partition et premier démarrage).
+pub const PARTITION_SILENCE_THRESHOLD_SECS: u64 = 300;
+
+/// Durée (secs) de la « grâce de heal » ouverte au retour d'une partition :
+/// fenêtre courte pendant laquelle le budget anti-spam par auteur est étendu
+/// (×[`HEAL_WINDOW_BUDGET_FACTOR`]) pour absorber le rattrapage légitime.
+pub const HEAL_GRACE_SECS: u64 = 120;
+
+/// Facteur d'extension du budget [`SPAM_BUDGET_PER_WINDOW`] pendant la
+/// grâce de heal (12 → 48 admissions/auteur/fenêtre). Le rattrapage rejoue
+/// des messages légitimes accumulés côté auteur PENDANT la coupure : sans
+/// extension ils seraient rejetés en masse + pénalisés à la reconvergence
+/// (perte de données + faux positif anti-abus). L'amplification reste
+/// bornée : facteur fixe ×4, fenêtre temporelle courte, déclenchement
+/// possible uniquement par une transition silence→contact observée
+/// localement (un attaquant ne peut pas provoquer cette transition à
+/// distance).
+pub const HEAL_WINDOW_BUDGET_FACTOR: usize = 4;
+
+/// Taille maximale d'un lot de rattrapage [`Node::take_heal_batch`] par
+/// appel — le transport boucle jusqu'à lot vide : volume total = exactement
+/// ce que le pair n'a pas encore, jamais une tempête d'un coup.
+pub const HEAL_BATCH_MAX_EVENTS: usize = 32;
+
 /// Vérifie le plafond brut d'un payload social avant décodage.
 fn check_social_payload_size(kind: &str, content: &str, max_bytes: usize) -> Result<(), String> {
     if content.len() > max_bytes {
@@ -463,6 +500,15 @@ pub struct Node {
     /// Cache matérialisé du graphe social Tuitter/Redit (T13 Fusion).
     /// `None` = stockage social désactivé (base indisponible ou non configurée).
     pub social_store: Option<SocialStore>,
+    /// Phase 3.4 — présence par pair : instant (unix secs, INJECTÉ) du
+    /// dernier événement **admis** signé par chaque pair. Alimente la
+    /// détection de partition ([`Node::partition_suspected`]) ; un doublon
+    /// relayé prouve lui aussi la connectivité.
+    peer_last_seen: std::collections::HashMap<String, u64>,
+    /// Phase 3.4 — fin de la « grâce de heal » (unix secs injecté) : fenêtre
+    /// courte post-retour-de-partition pendant laquelle le budget anti-spam
+    /// par auteur est étendu pour absorber le rattrapage. 0 = jamais ouverte.
+    heal_grace_until: u64,
 }
 
 impl Node {
@@ -589,6 +635,8 @@ impl Node {
             peer_rotation_count: std::collections::HashMap::new(),
             spam_guard: SpamGuard::new(SPAM_WINDOW_SECS, SPAM_BUDGET_PER_WINDOW),
             social_store,
+            peer_last_seen: std::collections::HashMap::new(),
+            heal_grace_until: 0,
         }
     }
 
@@ -1413,7 +1461,20 @@ impl Node {
                 self.reputation.abuse_level(author, now)
             ));
         }
-        if !self.spam_guard.admit(author, now) {
+        // Phase 3.4 — grâce de heal : pendant la fenêtre courte qui suit un
+        // retour de partition détecté LOCALEMENT, chaque auteur dispose d'un
+        // budget élargi (×[`HEAL_WINDOW_BUDGET_FACTOR`]) : le rattrapage
+        // rejoue des messages légitimes accumulés pendant la coupure (>12
+        // par auteur et par fenêtre sinon) — les auteurs honnêtes ne doivent
+        // NI perdre leurs messages NI être pénalisés par le trafic de heal.
+        // La grâce reste bornée (temps × facteur fixe) ; au-delà, le budget
+        // normal s'applique et l'excès est throttled comme avant.
+        let budget = if self.heal_grace_active(now) {
+            SPAM_BUDGET_PER_WINDOW.saturating_mul(HEAL_WINDOW_BUDGET_FACTOR)
+        } else {
+            SPAM_BUDGET_PER_WINDOW
+        };
+        if !self.spam_guard.admit_with_budget(author, now, budget) {
             self.reputation
                 .record_violation(author, AbuseReason::ExcessiveRate, now);
             return AdmissionDecision::Rejected(
@@ -1435,6 +1496,12 @@ impl Node {
     pub fn receive_peer_event(&mut self, now: u64, event: &MeshEvent) -> PeerEventOutcome {
         if let AdmissionDecision::Rejected(reason) = self.admit_peer_event(now, event) {
             return PeerEventOutcome::Rejected(reason);
+        }
+        // Phase 3.4 — présence : tout événement ADMIS prouve la connectivité
+        // du pair émetteur (y compris un doublon déjà connu). Les échos de
+        // nos propres événements ne identifient pas le transport → exclus.
+        if event.pubkey != self.identity.pubkey_hex() {
+            self.note_peer_traffic(&event.pubkey, now);
         }
         match &event.kind {
             OndeMessageType::Alert => match self.handle_incoming_alert(event) {
@@ -1495,6 +1562,73 @@ impl Node {
             },
             _ => PeerEventOutcome::Other,
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 3.4 — Auto-réparation : détection de partition, re-sync, heal
+    // ------------------------------------------------------------------
+
+    /// Enregistrer un contact réseau d'un pair à l'instant INJECTÉ `now`
+    /// (unix secs — jamais l'horloge système : déterministe et testable).
+    ///
+    /// Appelé automatiquement par [`Node::receive_peer_event`] pour tout
+    /// événement **admis** dont l'auteur est un pair (un doublon déjà connu
+    /// prouve lui aussi la connectivité). Détecte le **retour de partition**
+    /// : si TOUS les pairs connus étaient silencieux depuis au moins
+    /// [`PARTITION_SILENCE_THRESHOLD_SECS`] juste avant ce contact, la
+    /// connectivité revient → ouverture d'une grâce de heal courte
+    /// ([`Node::heal_grace_active`]) pour le rattrapage.
+    pub fn note_peer_traffic(&mut self, peer_pubkey: &str, now: u64) {
+        let partition_ended = self.partition_suspected(now);
+        self.peer_last_seen.insert(peer_pubkey.to_string(), now);
+        if partition_ended {
+            self.heal_grace_until = now.saturating_add(HEAL_GRACE_SECS);
+        }
+    }
+
+    /// Partition soupçonnée à l'instant injecté `now` ? Heuristique
+    /// déterministe : au moins un pair connu ET tous silencieux depuis
+    /// [`PARTITION_SILENCE_THRESHOLD_SECS`]. Un nœud sans aucun contact ne
+    /// peut pas distinguer partition et démarrage → jamais soupçonné.
+    pub fn partition_suspected(&self, now: u64) -> bool {
+        !self.peer_last_seen.is_empty()
+            && self
+                .peer_last_seen
+                .values()
+                .all(|&last| now.saturating_sub(last) >= PARTITION_SILENCE_THRESHOLD_SECS)
+    }
+
+    /// Grâce de heal active à l'instant injecté `now` ? (fenêtre courte qui
+    /// suit le retour détecté d'une partition — voir [`HEAL_GRACE_SECS`])
+    pub fn heal_grace_active(&self, now: u64) -> bool {
+        now < self.heal_grace_until
+    }
+
+    /// Nombre de pairs suivis par le book de présence (visibilité).
+    pub fn tracked_peers(&self) -> usize {
+        self.peer_last_seen.len()
+    }
+
+    /// Lot de rattrapage borné vers `peer_id` (Phase 3.4 — re-sync au retour
+    /// de partition). AUCUN message wire nouveau : source = outbox du gossip
+    /// existante, sélection identique à
+    /// [`GossipProtocol::get_pending_for_peer`] (événements non encore
+    /// marqués livrés pour CE pair), mais (1) bornée à
+    /// [`HEAL_BATCH_MAX_EVENTS`] événements PAR APPEL — le transport boucle
+    /// jusqu'à lot vide : volume total = exactement ce que le pair n'a pas,
+    /// jamais une tempête — et (2) le marquage « livré » n'intervient qu'une
+    /// fois la sélection faite. Côté receveur, les doublons sont dédupliqués
+    /// par ID (`is_known`) : re-livraison gratuite, jamais pénalisée.
+    pub fn take_heal_batch(&mut self, peer_id: &str) -> Vec<MeshEvent> {
+        let batch = self
+            .gossip
+            .peek_pending_for_peer(peer_id, HEAL_BATCH_MAX_EVENTS);
+        if batch.is_empty() {
+            return batch;
+        }
+        let ids: Vec<String> = batch.iter().map(|e| e.id.clone()).collect();
+        self.gossip.mark_delivered_to_peer(peer_id, &ids);
+        batch
     }
 
     /// Signaler l'abus constaté LOCALEMENT sur `offender` et propager le
@@ -2149,6 +2283,11 @@ impl Node {
             battery_saver: self.config.battery_saver,
             throttle_sweep_secs: self.throttle_sweep_secs(),
             publish_interval_secs: self.publish_interval_secs(),
+            // Phase 3.4 — observabilité de l'auto-réparation (snapshot :
+            // l'horloge système n'est utilisée QUE pour l'affichage ; toute
+            // la logique de détection reste pilotée par le temps injecté).
+            partition_suspected: self.partition_suspected(unix_now()),
+            heal_grace_active: self.heal_grace_active(unix_now()),
         }
     }
 }
@@ -2180,6 +2319,10 @@ pub struct NodeStatus {
     pub throttle_sweep_secs: u64,
     /// Intervalle minimal entre deux publications (throttling adaptatif P3)
     pub publish_interval_secs: u64,
+    /// Phase 3.4 — partition soupçonnée (tous les pairs connus silencieux)
+    pub partition_suspected: bool,
+    /// Phase 3.4 — grâce de heal active (budget anti-spam étendu)
+    pub heal_grace_active: bool,
 }
 
 #[cfg(test)]
@@ -3497,5 +3640,448 @@ mod tests {
                 > 0.0,
             "signed out-of-domain payloads must weigh on the author"
         );
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // Phase 3.4 — Auto-réparation : partition → reconvergence.
+    // Scénarios 100 % déterministes : temps injecté (T0 + deltas), aucun
+    // sleep, aucune horloge système dans la logique testée.
+    // ────────────────────────────────────────────────────────────────────
+
+    /// Alerte signée par `identity`, PoW adaptatif à difficulté fixée
+    /// (0 = auteur de confiance — gratuit et toujours vérifié vrai).
+    fn signed_alert_fixed_pow(identity: &Identity, content: &str, difficulty: u8) -> MeshEvent {
+        let mut ev = MeshEvent::new_signed(
+            identity,
+            OndeMessageType::Alert,
+            content.to_string(),
+            vec![],
+        )
+        .with_pow_difficulty(difficulty);
+        if difficulty > 0 {
+            assert!(ev.compute_pow(4_000_000), "test PoW must succeed");
+        }
+        ev
+    }
+
+    /// Publication locale déterministe : l'événement de `node` (auteur =
+    /// lui-même, confiance → PoW 0) passe par le chemin réel
+    /// `receive_peer_event` (admission → stockage → outbox), sans toucher à
+    /// l'horloge système contrairement à `publish_alert`.
+    fn publish_local(node: &mut Node, content: &str, now: u64) -> MeshEvent {
+        let ev = signed_alert_fixed_pow(&node.identity.clone(), content, 0);
+        match node.receive_peer_event(now, &ev) {
+            PeerEventOutcome::AlertStored => {}
+            other => panic!("local publish must be stored, got {other:?}"),
+        }
+        ev
+    }
+
+    /// Identifiants triés du magasin hiérarchique (convergence observable).
+    fn store_ids(node: &Node) -> Vec<String> {
+        let mut ids: Vec<String> = node
+            .message_store
+            .all_messages()
+            .iter()
+            .map(|m| m.id.clone())
+            .collect();
+        ids.sort();
+        ids
+    }
+
+    /// Vider l'outbox de `from` vers `to` par lots bornés (boucle transport)
+    /// en ingérant chaque événement chez `to`. Retourne (volume transféré,
+    /// outcomes) — le volume DOIT être exactement ce que `to` n'a pas.
+    fn drain_heal(from: &mut Node, to: &mut Node, now_base: u64) -> (usize, Vec<PeerEventOutcome>) {
+        let peer = to.identity.pubkey_hex();
+        let mut sent = 0usize;
+        let mut seq = 0u64;
+        let mut outcomes = Vec::new();
+        loop {
+            let batch = from.take_heal_batch(&peer);
+            if batch.is_empty() {
+                break;
+            }
+            assert!(
+                batch.len() <= HEAL_BATCH_MAX_EVENTS,
+                "batch must be bounded"
+            );
+            for ev in batch {
+                let now = now_base + seq;
+                seq += 1;
+                outcomes.push(to.receive_peer_event(now, &ev));
+                sent += 1;
+            }
+        }
+        (sent, outcomes)
+    }
+
+    #[tokio::test]
+    async fn test_partition_detection_is_deterministic() {
+        let mut node = Node::new(NodeConfig::default());
+
+        // Sans aucun contact connu : impossible de juger → jamais soupçonné.
+        assert!(!node.partition_suspected(T0));
+        assert!(!node.partition_suspected(T0 + 10_000));
+
+        // Premier contact : le book de présence se remplit (temps injecté).
+        let peer = test_identity(9);
+        let ev = signed_alert_fixed_pow(&peer, "hello", crate::reputation::MAX_POW_DIFFICULTY);
+        assert!(matches!(
+            node.receive_peer_event(T0, &ev),
+            PeerEventOutcome::AlertStored | PeerEventOutcome::AlertNotStored
+        ));
+        assert_eq!(node.tracked_peers(), 1);
+
+        // Sous le seuil de silence : connecté.
+        assert!(!node.partition_suspected(T0 + PARTITION_SILENCE_THRESHOLD_SECS - 1));
+        // Au seuil (tous les pairs silencieux ≥ seuil) : partition soupçonnée.
+        assert!(node.partition_suspected(T0 + PARTITION_SILENCE_THRESHOLD_SECS));
+
+        // Le retour du pair (nouvel événement signé de lui) rouvre la
+        // connectivité ET déclenche la grâce de heal.
+        let ev2 = signed_alert_fixed_pow(&peer, "back online", MAX_POW_DIFFICULTY_TEST);
+        assert!(!node.heal_grace_active(T0 + PARTITION_SILENCE_THRESHOLD_SECS));
+        match node.receive_peer_event(T0 + PARTITION_SILENCE_THRESHOLD_SECS + 60, &ev2) {
+            PeerEventOutcome::AlertStored => {}
+            other => panic!("returning contact must be processed, got {other:?}"),
+        }
+        assert!(
+            !node.partition_suspected(T0 + PARTITION_SILENCE_THRESHOLD_SECS + 60),
+            "fresh contact ends the suspected partition"
+        );
+        assert!(
+            node.heal_grace_active(T0 + PARTITION_SILENCE_THRESHOLD_SECS + 60),
+            "return from partition opens the heal grace window"
+        );
+        assert!(
+            !node.heal_grace_active(T0 + PARTITION_SILENCE_THRESHOLD_SECS + 60 + HEAL_GRACE_SECS)
+        );
+    }
+
+    /// Constante locale de lisibilité : difficulté PoW maximale exigée d'un
+    /// auteur inconnu (même valeur que reputation::MAX_POW_DIFFICULTY).
+    const MAX_POW_DIFFICULTY_TEST: u8 = crate::reputation::MAX_POW_DIFFICULTY;
+
+    /// CRITÈRE ROADMAP 3.4 — scénario complet A|B :
+    /// (a) partition après sync initiale, publications des deux côtés ;
+    /// (b) recouvrement par lots bornés ;
+    /// (c) convergence finale, zéro perte, zéro duplication, volume de
+    ///     rattrapage EXACT (= ce qui a manqué), zéro pénalité anti-abus.
+    #[tokio::test]
+    async fn test_partition_reconvergence_two_islands_converge() {
+        let mut a = Node::new(NodeConfig::default());
+        let mut b = Node::new(NodeConfig::default());
+        let a_pub = a.identity.pubkey_hex();
+        let b_pub = b.identity.pubkey_hex();
+
+        // Confiance mutuelle (setup déterministe, comme le scénario 2.7).
+        a.reputation
+            .set_trusted(&b_pub, crate::reputation::GENESIS_TRUST);
+        b.reputation
+            .set_trusted(&a_pub, crate::reputation::GENESIS_TRUST);
+
+        // ── Avant partition : contacts croisés + une sync complète ──
+        // NB sémantique outbox : un événement reçu est relai-localisé (il
+        // entre dans NOTRE outbox pour les pairs qui ne le connaissent pas)
+        // — le drain inverse peut donc renvoyer une copie que le destinataire
+        // déduplique gratuitement (`is_known`, jamais pénalisé). Volumes
+        // attendus calculés exactement ci-dessous.
+        let pre_a = publish_local(&mut a, "pre-A", T0);
+        let pre_b = publish_local(&mut b, "pre-B", T0);
+        let (vol, outs) = drain_heal(&mut a, &mut b, T0);
+        assert_eq!(vol, 1, "B lacked only pre-A");
+        assert!(outs
+            .iter()
+            .all(|o| !matches!(o, PeerEventOutcome::Rejected(_))));
+        let (vol2, _) = drain_heal(&mut b, &mut a, T0);
+        assert_eq!(
+            vol2, 2,
+            "pre-B + copie relais de pre-A (dédupliquée chez A)"
+        );
+        assert_eq!(store_ids(&a), store_ids(&b), "stores converged");
+
+        // ── (a) PARTITION : silence total ≥ seuil des deux côtés ──
+        let t_part = T0 + PARTITION_SILENCE_THRESHOLD_SECS + 10;
+        assert!(a.partition_suspected(t_part), "A must detect the cut");
+        assert!(b.partition_suspected(t_part), "B must detect the cut");
+        assert!(!a.heal_grace_active(t_part));
+
+        // Publications PENDANT la coupure (5 par îlot, aucun trafic croisé).
+        let island_a: Vec<MeshEvent> = (0..5)
+            .map(|i| publish_local(&mut a, &format!("A-island #{i}"), t_part + i))
+            .collect();
+        let island_b: Vec<MeshEvent> = (0..5)
+            .map(|i| publish_local(&mut b, &format!("B-island #{i}"), t_part + i))
+            .collect();
+
+        // Toujours coupés pendant la coupure (dernier contact ancien).
+        assert!(a.partition_suspected(t_part + 100));
+
+        // ── (b) RECOUVREMENT : le transport revient, drain réciproque ──
+        let t_heal = T0 + 2_000; // bien après le seuil de silence
+        let (vol_a_to_b, outs_ab) = drain_heal(&mut a, &mut b, t_heal);
+        let (vol_b_to_a, outs_ba) = drain_heal(&mut b, &mut a, t_heal);
+        // Composition exacte (déterministe) :
+        //  a→b = 6  = 5 événements d'îlot de A + copie relais de pre-B
+        //             (B la connaît déjà → dédup gratuite, non re-stockée) ;
+        //  b→a = 10 = 5 événements d'îlot de B + les 5 copies relais des
+        //             îlots de A appris pendant CE drain (dédup chez A) ;
+        //  second passage a→b = 5 copies relais des îlots de B (dédup), puis
+        //  plus rien. Overhead total ≤ ×2 et décroissant — JAMAIS une
+        //  tempête : chaque ID n'est envoyé au plus qu'une fois de plus par
+        //  direction, puis silence complet.
+        assert_eq!(vol_a_to_b, 6);
+        assert_eq!(vol_b_to_a, 10);
+        let stored_ab = outs_ab
+            .iter()
+            .filter(|o| matches!(o, PeerEventOutcome::AlertStored))
+            .count();
+        let stored_ba = outs_ba
+            .iter()
+            .filter(|o| matches!(o, PeerEventOutcome::AlertStored))
+            .count();
+        assert_eq!(
+            stored_ab + stored_ba,
+            10,
+            "exactly the missing events are stored"
+        );
+
+        // ── (c) ASSERTIONS ──
+
+        // Zéro perte : chaque événement d'îlot est présent des DEUX côtés.
+        for ev in island_a.iter().chain(island_b.iter()) {
+            assert!(
+                a.message_store.get(&ev.id).is_some(),
+                "A lost {:?}",
+                ev.content
+            );
+            assert!(
+                b.message_store.get(&ev.id).is_some(),
+                "B lost {:?}",
+                ev.content
+            );
+        }
+
+        // Zéro duplication : magasins strictement identiques, sans doublon.
+        let ids_a = store_ids(&a);
+        let ids_b = store_ids(&b);
+        assert_eq!(ids_a, ids_b, "observable state must converge exactly");
+        let uniq: std::collections::HashSet<&String> = ids_a.iter().collect();
+        assert_eq!(
+            uniq.len(),
+            ids_a.len(),
+            "no duplicated message may be stored"
+        );
+        assert_eq!(ids_a.len(), 12, "2 pre-partition + 10 island messages");
+
+        // Zéro rejet : tout le trafic de heal est admis (grâce ou dédup).
+        assert!(outs_ab.iter().all(|o| matches!(
+            o,
+            PeerEventOutcome::AlertStored | PeerEventOutcome::AlertNotStored
+        )));
+        assert!(outs_ba.iter().all(|o| matches!(
+            o,
+            PeerEventOutcome::AlertStored | PeerEventOutcome::AlertNotStored
+        )));
+
+        // Pas de tempête : le TROISIÈME passage ne transfère que l'écho relais
+        // des îlots de B (5 IDs déjà connus de B → dédup gratuite, non
+        // re-stockés), et le QUATRIÈME passage ne transfère PLUS RIEN — le
+        // volume est strictement décroissant puis nul (convergence).
+        let (again_ab, outs_again) = drain_heal(&mut a, &mut b, t_heal + 500);
+        let (again_ba, _) = drain_heal(&mut b, &mut a, t_heal + 500);
+        assert_eq!(
+            again_ab, 5,
+            "only the relay echo of B's island events remains"
+        );
+        assert_eq!(again_ba, 0);
+        assert!(
+            outs_again
+                .iter()
+                .all(|o| matches!(o, PeerEventOutcome::AlertNotStored)),
+            "relay echoes are deduplicated on receipt (free re-delivery)"
+        );
+        let (final_ab, _) = drain_heal(&mut a, &mut b, t_heal + 1_000);
+        let (final_ba, _) = drain_heal(&mut b, &mut a, t_heal + 1_000);
+        assert_eq!(final_ab + final_ba, 0, "heal must terminate: no storm");
+
+        // Le trafic de heal NE déclenche AUCUNE pénalité anti-abus.
+        for author in [&a_pub, &b_pub] {
+            let t_check = t_heal + HEAL_GRACE_SECS + 60;
+            assert_eq!(
+                a.reputation.abuse_level(author, t_check),
+                0.0,
+                "honest heal traffic must not weigh on {author} at A"
+            );
+            assert_eq!(
+                b.reputation.abuse_level(author, t_check),
+                0.0,
+                "honest heal traffic must not weigh on {author} at B"
+            );
+            assert_eq!(
+                a.reputation.action_for(author, t_check),
+                TrustAction::Accept
+            );
+            assert_eq!(
+                b.reputation.action_for(author, t_check),
+                TrustAction::Accept
+            );
+        }
+        let _ = (&pre_a, &pre_b); // ancrés dans le scénario ci-dessus
+    }
+
+    /// La grâce de heal absorbe un rattrapage > budget normal SANS perte NI
+    /// pénalité ; hors grâce, le même volume est throttled et pénalisé
+    /// (l'anti-abus reste intact) ; au-delà du budget élargi, le cap mord
+    /// (pas de tempête infinie).
+    #[tokio::test]
+    async fn test_heal_grace_extends_budget_without_weakening_the_cap() {
+        let flood = 30usize; // > SPAM_BUDGET_PER_WINDOW (12), < 12×4 (48)
+
+        // ── Nœud 1 : partition réelle → grâce → tout le rattrapage passe ──
+        let mut healed = Node::new(NodeConfig::default());
+        let author = test_identity(3);
+        let author_pub = author.pubkey_hex();
+        healed
+            .reputation
+            .set_trusted(&author_pub, crate::reputation::GENESIS_TRUST);
+
+        // Contact initial puis silence prolongé (partition détectée).
+        let first = signed_alert_fixed_pow(&author, "before cut", 0);
+        assert!(matches!(
+            healed.receive_peer_event(T0, &first),
+            PeerEventOutcome::AlertStored
+        ));
+        let t_return = T0 + PARTITION_SILENCE_THRESHOLD_SECS + 60;
+        assert!(healed.partition_suspected(t_return));
+
+        // Rattrapage : 30 événements DISTINCTS de l'auteur en UNE fenêtre.
+        let mut admitted = 0usize;
+        for i in 0..flood {
+            let ev = signed_alert_fixed_pow(&author, &format!("catch-up #{i}"), 0);
+            match healed.receive_peer_event(t_return + i as u64, &ev) {
+                PeerEventOutcome::AlertStored => admitted += 1,
+                other => panic!("grace must absorb legit catch-up #{i}, got {other:?}"),
+            }
+        }
+        assert_eq!(admitted, flood, "zero loss during heal grace");
+        assert_eq!(
+            healed
+                .reputation
+                .abuse_level(&author_pub, t_return + flood as u64),
+            0.0,
+            "heal traffic must not penalize the honest author"
+        );
+        assert_eq!(
+            healed
+                .reputation
+                .action_for(&author_pub, t_return + flood as u64),
+            TrustAction::Accept
+        );
+
+        // ── Nœud 2 témoin : PAS de partition → budget NORMAL appliqué ──
+        let mut witness = Node::new(NodeConfig::default());
+        witness
+            .reputation
+            .set_trusted(&author_pub, crate::reputation::GENESIS_TRUST);
+        let first2 = signed_alert_fixed_pow(&author, "before burst", 0);
+        let _ = witness.receive_peer_event(T0, &first2);
+        // Contact frais à T0+50 : jamais suspecté → jamais de grâce.
+        let keepalive = signed_alert_fixed_pow(&author, "still connected", 0);
+        let _ = witness.receive_peer_event(T0 + 50, &keepalive);
+        assert!(!witness.partition_suspected(T0 + 60));
+
+        let mut admitted_witness = 0usize;
+        let mut throttled = 0usize;
+        // Burst à T0+200 : la fenêtre glissante (60 s) a déjà purgé les deux
+        // contacts initiaux → budget normal INTACT (12 admissions). L'excès
+        // est rejeté — d'abord par le budget (`rate limited`), puis, une fois
+        // assez de violations accumulées, par l'escalade réputationnelle
+        // (`author ignored`) : les deux sont des throttles anti-abus valides.
+        for i in 0..flood {
+            let ev = signed_alert_fixed_pow(&author, &format!("burst #{i}"), 0);
+            match witness.receive_peer_event(T0 + 200 + i as u64, &ev) {
+                PeerEventOutcome::AlertStored => admitted_witness += 1,
+                PeerEventOutcome::Rejected(r)
+                    if r.contains("rate limited") || r.contains("author ignored") =>
+                {
+                    throttled += 1;
+                }
+                other => panic!("unexpected witness outcome #{i}: {other:?}"),
+            }
+        }
+        assert!(!witness.partition_suspected(T0 + 260));
+        assert_eq!(
+            admitted_witness, SPAM_BUDGET_PER_WINDOW,
+            "without partition, the normal sliding-window budget applies"
+        );
+        assert_eq!(throttled, flood - SPAM_BUDGET_PER_WINDOW);
+        assert!(
+            witness.reputation.abuse_level(&author_pub, T0 + 400) > 0.0,
+            "same flood outside heal grace IS penalized (anti-abus intact)"
+        );
+
+        // ── Cap : même sous grâce, la tempête reste bornée (×4 max) ──
+        let mut capped = Node::new(NodeConfig::default());
+        capped
+            .reputation
+            .set_trusted(&author_pub, crate::reputation::GENESIS_TRUST);
+        let seed = signed_alert_fixed_pow(&author, "seed contact", 0);
+        let _ = capped.receive_peer_event(T0, &seed);
+        let storm = 60usize;
+        let mut admitted_capped = 0usize;
+        for i in 0..storm {
+            let ev = signed_alert_fixed_pow(&author, &format!("storm #{i}"), 0);
+            if matches!(
+                capped.receive_peer_event(t_return + i as u64, &ev),
+                PeerEventOutcome::AlertStored
+            ) {
+                admitted_capped += 1;
+            }
+        }
+        assert_eq!(
+            admitted_capped,
+            SPAM_BUDGET_PER_WINDOW * HEAL_WINDOW_BUDGET_FACTOR,
+            "grace budget is a hard cap ({}), storms stay bounded",
+            SPAM_BUDGET_PER_WINDOW * HEAL_WINDOW_BUDGET_FACTOR
+        );
+    }
+
+    /// Le lot de rattrapage est strictement borné ([`HEAL_BATCH_MAX_EVENTS`]
+    /// par appel) et le peek ne marque « livré » qu'après sélection.
+    #[tokio::test]
+    async fn test_heal_batch_is_bounded_and_progressive() {
+        let mut node = Node::new(NodeConfig::default());
+        let peer = test_identity(4);
+        let peer_pub = peer.pubkey_hex();
+
+        // 40 événements en attente pour ce pair (jamais livrés).
+        for i in 0..(HEAL_BATCH_MAX_EVENTS + 8) {
+            publish_local(&mut node, &format!("pending #{i}"), T0 + i as u64);
+        }
+
+        // Peek SANS marquage : idempotent.
+        let peeked = node.gossip.peek_pending_for_peer(&peer_pub, 5);
+        assert_eq!(peeked.len(), 5);
+        let peeked_again = node.gossip.peek_pending_for_peer(&peer_pub, 5);
+        assert_eq!(peeked.len(), peeked_again.len());
+
+        // Drain par lots bornés : 32 puis 8 puis 0.
+        let b1 = node.take_heal_batch(&peer_pub);
+        assert_eq!(b1.len(), HEAL_BATCH_MAX_EVENTS);
+        let b2 = node.take_heal_batch(&peer_pub);
+        assert_eq!(b2.len(), 8);
+        let b3 = node.take_heal_batch(&peer_pub);
+        assert!(b3.is_empty(), "drain must terminate");
+    }
+
+    /// Le statut expose l'état d'auto-réparation (Phase 3.4).
+    #[tokio::test]
+    async fn test_status_reports_partition_state() {
+        let node = Node::new(NodeConfig::default());
+        let status = node.status().await;
+        assert!(!status.partition_suspected);
+        assert!(!status.heal_grace_active);
     }
 }

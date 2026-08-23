@@ -251,7 +251,15 @@ impl SpamGuard {
     /// **rien n'est enregistré** (le compteur ne monte que sur ce qui passe —
     /// l'attaque ne peut pas se auto-blinder).
     pub fn admit(&mut self, author: &str, now: u64) -> bool {
-        if self.budget == 0 {
+        self.admit_with_budget(author, now, self.budget)
+    }
+
+    /// Variante à budget explicite (Phase 3.4 — grâce de heal) : permet au
+    /// nœud d'étendre TEMPORAIREMENT le budget par auteur pendant le
+    /// rattrapage post-partition, sans toucher à la fenêtre ni aux bornes.
+    /// Sémantique identique à [`SpamGuard::admit`] sinon.
+    pub fn admit_with_budget(&mut self, author: &str, now: u64, budget: usize) -> bool {
+        if budget == 0 {
             return false;
         }
         let window = self.entries.entry(author.to_string()).or_default();
@@ -260,7 +268,7 @@ impl SpamGuard {
         while window.stamps.front().copied().is_some_and(|t| t < horizon) {
             window.stamps.pop_front();
         }
-        if window.stamps.len() >= self.budget {
+        if window.stamps.len() >= budget {
             // Refus : rien n'est enregistré (le refus ne consomme pas le budget).
             if window.stamps.is_empty() {
                 self.entries.remove(author);
