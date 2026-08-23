@@ -72,7 +72,12 @@ impl ZimReader {
         if major_version < 5 {
             return Err(format!("not a valid ZIM (major version {major_version})"));
         }
-        let article_count = u64::from_le_bytes(header[14..22].try_into().unwrap());
+        // INVARIANT statique : `header` est un tableau [u8; 70], donc
+        // header[14..22] fait exactement 8 octets — la conversion en [u8; 8]
+        // est garantie à la compilation et ne peut pas échouer à l'exécution.
+        let article_count = u64::from_le_bytes(header[14..22].try_into().expect(
+            "INVARIANT : header est [u8; 70], donc header[14..22] fait exactement 8 octets",
+        ));
         Ok(article_count)
     }
 
@@ -254,7 +259,15 @@ impl MBTilesRenderer {
             bits += 1;
 
             if bits == 5 {
-                geohash.push(base32.chars().nth(accumulated & 0x1F).unwrap());
+                // INVARIANT : l'alphabet geohash `base32` fait exactement
+                // 32 caractères (sans a/i/l/o) et `accumulated & 0x1F`
+                // vaut 0..=31 (5 bits accumulés avant chaque vidage),
+                // donc `nth()` est toujours `Some`.
+                geohash.push(
+                    base32.chars().nth(accumulated & 0x1F).expect(
+                        "INVARIANT : base32 (geohash) fait 32 caractères et accumulated & 0x1F est dans 0..=31",
+                    ),
+                );
                 bits = 0;
                 accumulated = 0;
             }
