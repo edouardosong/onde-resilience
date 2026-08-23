@@ -532,6 +532,31 @@ mod tests {
     }
 
     #[test]
+    fn test_idle_server_survives_quiet_period_then_still_serves_200() {
+        // Anti-mutant health.rs:198:20 (garde `WouldBlock | Interrupted` →
+        // false) : sous ce mutant, chaque tick sans connexion tombe dans le
+        // bras générique `Err(e)` et incrémente `consecutive_errors` ; après
+        // MAX_CONSECUTIVE_ACCEPT_ERRORS ticks (~0,64 s à 20 ms/tick) un
+        // serveur SANS TRAFIC s'auto-détruit (thread terminé, fd fermé).
+        // Aucun autre test n'a d'idle > 0,64 s avant requête : ici silence
+        // STRICT ≥ 50 ticks (1 s, sans aucune sonde qui réinitialiserait le
+        // compteur via Ok(..)) PUIS une requête GET doit encore répondre 200.
+        let metrics = Arc::new(NodeMetrics::new());
+        let handle = spawn_health_server(0, metrics).expect("ephemeral bind");
+
+        let idle_ticks = MAX_CONSECUTIVE_ACCEPT_ERRORS + 18; // ≥ 50 ticks
+        assert!(
+            ACCEPT_POLL_INTERVAL * idle_ticks >= Duration::from_secs(1),
+            "idle period must cover at least one full second"
+        );
+        std::thread::sleep(ACCEPT_POLL_INTERVAL * idle_ticks);
+
+        let raw = http_get(handle.port, "/health", "GET");
+        assert!(raw.starts_with("HTTP/1.1 200 OK"), "got: {raw}");
+        handle.shutdown();
+    }
+
+    #[test]
     fn test_burst_beyond_cap_admits_exactly_16_then_busy_cleanly() {
         let metrics = Arc::new(NodeMetrics::new());
         let handle = spawn_health_server(0, metrics).expect("ephemeral bind");
