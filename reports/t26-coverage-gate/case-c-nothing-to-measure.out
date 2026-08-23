@@ -1,0 +1,5 @@
+[diff-coverage] seuil=80% tolérance=±2 pts base=fixture-c
+*** PASS — nothing to measure ***
+  .rs modifiés hors périmètre core/ : 1
+  exclusions déclarées appliquées   : 1
+    exclu : core/src/bin/node.rs

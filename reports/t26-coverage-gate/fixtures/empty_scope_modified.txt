@@ -1,0 +1,2 @@
+core/src/bin/node.rs
+ui/src-tauri/src/main.rs

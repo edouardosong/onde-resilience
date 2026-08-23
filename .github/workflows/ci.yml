@@ -267,3 +267,94 @@ jobs:
       - name: npm audit (ui)
         working-directory: ui/web
         run: npm audit --audit-level=high || true   # report non-bloquant hebdo
+
+  #────────────────────────────────────────────────────────────────────────
+  # JOB 4 — coverage-gate (T26) : diff-coverage >= 80 % ± 2 pts sur les
+  # fichiers .rs modifiés du workspace core/ uniquement.
+  # Décision utilisateur 2026-08-23 · spec : reports/t22-coverage/proposition-gate.md
+  # Exclusions déclarées : src/bin/*, whisper_cpp_sys (vendored), build.rs,
+  # cfg(test) (couvert par construction), #[ignore] non compté couvert.
+  # Jamais de faux rouge : aucun .rs modifié mesurable -> PASS explicite ;
+  # push sans base de diff fiable -> skip passant.
+  #────────────────────────────────────────────────────────────────────────
+  coverage-gate:
+    name: Gate coverage (diff ≥ 80 % ± 2 pts)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0            # historique complet : base de diff résoluble
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: "1.96.0"
+
+      - name: Cache cargo
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            core/target
+          key: ${{ runner.os }}-cargo-covgate-${{ hashFiles('core/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-covgate-
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@ba47c86ac325773530516bb756137ac718732518 # v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Resolve diff base (PR = sha de base · push = commit parent · sinon skip passant)
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "DIFF_BASE=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_ENV"
+            echo "Base de diff (pull_request) : ${{ github.event.pull_request.base.sha }}"
+          else
+            BEFORE="${{ github.event.before }}"
+            if [ -z "$BEFORE" ] \
+               || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] \
+               || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+              echo "GATE_SKIP=1" >> "$GITHUB_ENV"
+              echo "Aucune base de diff fiable sur ${GITHUB_EVENT_NAME} -> gate SKIP passant."
+            else
+              echo "DIFF_BASE=${BEFORE}" >> "$GITHUB_ENV"
+              echo "Base de diff (${GITHUB_EVENT_NAME}) : ${BEFORE}"
+            fi
+          fi
+
+      - name: List modified .rs files vs DIFF_BASE
+        if: env.GATE_SKIP != '1'
+        run: |
+          set -euo pipefail
+          git diff --diff-filter=d --name-only "$DIFF_BASE" -- '*.rs' > /tmp/modified_rs.txt
+          echo ".rs modifiés (suppressions exclues) : $(wc -l < /tmp/modified_rs.txt)"
+          cat /tmp/modified_rs.txt
+
+      - name: Generate coverage JSON (cargo llvm-cov)
+        if: env.GATE_SKIP != '1'
+        working-directory: core
+        run: cargo llvm-cov --workspace --locked --json --output-path cov.json
+
+      # Script stdlib-only : agrégat lignes sur fichiers modifiés, exit 1 si < seuil-tolérance.
+      - name: Gate — diff coverage ≥ 80 % ± 2 pts (fichiers .rs modifiés uniquement)
+        if: env.GATE_SKIP != '1'
+        run: |
+          set -euo pipefail
+          python3 scripts/diff_coverage.py \
+            --cov core/cov.json \
+            --modified-file /tmp/modified_rs.txt \
+            --threshold 80 --tolerance 2 \
+            --label "base=${DIFF_BASE}"
+
+      - name: Upload triage artifacts (échec uniquement)
+        if: failure() && env.GATE_SKIP != '1'
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        with:
+          name: coverage-gate-triage
+          path: |
+            core/cov.json
+            /tmp/modified_rs.txt
+          if-no-files-found: ignore

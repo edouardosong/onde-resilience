@@ -1,0 +1,8 @@
+[diff-coverage] seuil=80% tolérance=±2 pts base=vrai-rapport-fichier-bien-couvert
+==============================================================================
+STATUT         %        lignes  fichier (core-relatif)
+------------------------------------------------------------------------------
+ok        98.50%   328/333     core/crates/dtn-router/src/lib.rs
+------------------------------------------------------------------------------
+AGREGAT diff : 98.50% (328/333 lignes) sur 1 fichier(s) modifié(s) mesuré(s)
+*** PASS — 98.50% >= seuil 80% ***

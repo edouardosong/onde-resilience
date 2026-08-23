@@ -1,0 +1,12 @@
+[diff-coverage] seuil=80% tolérance=±2 pts base=vrai-rapport-top-fail
+==============================================================================
+STATUT         %        lignes  fichier (core-relatif)
+------------------------------------------------------------------------------
+MANQUE    66.67%    72/108     core/crates/llm-inference/src/lib.rs
+MANQUE    73.02%    92/126     core/src/network/mod.rs
+MANQUE    75.15%   248/330     core/crates/zim-parser/src/lib.rs
+MANQUE    77.27%    17/22      core/src/ai/mod.rs
+------------------------------------------------------------------------------
+AGREGAT diff : 73.21% (429/586 lignes) sur 4 fichier(s) modifié(s) mesuré(s)
+*** FAIL — 73.21% < 78% (seuil 80% - tolérance 2 pts) ***
+  pire fichier : core/crates/llm-inference/src/lib.rs 66.67% (72/108 lignes)
