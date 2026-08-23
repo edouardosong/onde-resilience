@@ -95,11 +95,25 @@ impl ZimHeader {
         let (language, p5) = read_cstr(data, p4)?;
 
         // After the language string: MIME list, then cluster/url/title pointer
-        // tables in canonical order.
+        // tables in canonical order (each `article_count` u32 entries). Compute
+        // in 64-bit and validate against the buffer so a corrupt article_count
+        // (e.g. 0xFFFFFFFF) is a typed error instead of an overflow panic or an
+        // OOM-sized allocation downstream.
         let mime_list_pos = p5 as u32;
-        let cluster_ptr_pos = mime_list_pos + article_count * 4;
-        let url_ptr_pos = cluster_ptr_pos + article_count * 4;
-        let title_ptr_pos = url_ptr_pos + article_count * 4;
+        let table_end = |pos: u64| -> Result<u32, ZimError> {
+            // article_count is u32, so the product fits in u64 without overflow.
+            let end = pos + (article_count as u64) * 4;
+            if end > data.len() as u64 || end > u32::MAX as u64 {
+                return Err(ZimError::OutOfBounds {
+                    offset: pos.min(u32::MAX as u64) as u32,
+                    len: data.len() as u32,
+                });
+            }
+            Ok(end as u32)
+        };
+        let cluster_ptr_pos = table_end(mime_list_pos as u64)?;
+        let url_ptr_pos = table_end(cluster_ptr_pos as u64)?;
+        let title_ptr_pos = table_end(url_ptr_pos as u64)?;
 
         Ok(ZimHeader {
             major_version: major,
@@ -187,6 +201,32 @@ mod tests {
         match ZimHeader::parse(&data) {
             Err(ZimError::BadVersion(7)) => {}
             other => panic!("expected BadVersion(7), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn corrupt_article_count_max_u32_is_typed_error_not_panic() {
+        // Regression (F2): ac = 0xFFFFFFFF used to overflow the u32 pointer-table
+        // arithmetic ("attempt to multiply with overflow" in debug, wraparound
+        // in release). It must now be a typed error.
+        let mut data = build_header(80);
+        data[28..32].copy_from_slice(&u32::MAX.to_le_bytes());
+        match ZimHeader::parse(&data) {
+            Err(ZimError::OutOfBounds { .. } | ZimError::TruncatedHeader) => {}
+            other => panic!("expected typed bounds error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn corrupt_article_count_600m_is_typed_error_not_panic() {
+        // Regression (F2): ac = 600M used to pass the u32 math and later OOM in
+        // Vec::with_capacity during index loading. The pointer tables must be
+        // validated against the buffer up front.
+        let mut data = build_header(80);
+        data[28..32].copy_from_slice(&600_000_000u32.to_le_bytes());
+        match ZimHeader::parse(&data) {
+            Err(ZimError::OutOfBounds { .. } | ZimError::TruncatedHeader) => {}
+            other => panic!("expected typed bounds error, got {:?}", other),
         }
     }
 

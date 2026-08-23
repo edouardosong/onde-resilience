@@ -117,24 +117,70 @@ pub fn decompress(code: u8, src: &[u8], expected_size: u32) -> Result<Vec<u8>, Z
 
 /// LZ4 block decode with exact-length verification.
 ///
-/// `lz4_flex` (with its default `safe-decode` feature) decodes into a caller
-/// buffer and reports overflow, but not underflow: a stream shorter than the
-/// declared size would leave an uninitialized tail behind. We therefore decode
-/// into one spare byte of sentinel value — the decoder writes contiguously from
-/// index 0 and never touches the tail — then recover the true decoded length by
-/// scanning that sentinel back. Any mismatch with the declared size is a typed
-/// error, never silent garbage.
+/// The stream's sequence metadata carries explicit literal/match lengths, so we
+/// first walk it to recover the true decoded size and reject any mismatch with
+/// the declared size *before* decoding (both overflow and underflow become a
+/// typed error). Then [`lz4_flex::decompress`] — the official wrapper — decodes
+/// into a buffer that reserves the extra `BLOCK_COPY_SIZE` capacity its fast
+/// paths may write past the logical end ("wildcopy"). No sentinel byte is
+/// involved, so valid content ending in `0xFF` is accepted and no out-of-bounds
+/// heap write can occur. Any failure is a typed error, never silent garbage.
 fn decompress_lz4(src: &[u8], expected: usize) -> Result<Vec<u8>, ZimError> {
-    let mut buf = vec![0xFFu8; expected + 1];
-    lz4_flex::decompress_into(src, &mut buf).map_err(|_| ZimError::ShortDecompression)?;
-    let mut true_len = buf.len();
-    while true_len > 0 && buf[true_len - 1] == 0xFF {
-        true_len -= 1;
-    }
-    if true_len != expected {
+    if lz4_block_decoded_size(src)? != expected {
         return Err(ZimError::ShortDecompression);
     }
-    Ok(buf[..expected].to_vec())
+    let out = lz4_flex::decompress(src, expected).map_err(|_| ZimError::ShortDecompression)?;
+    Ok(out)
+}
+
+/// Walk an LZ4 block's sequence metadata and return the exact number of bytes
+/// it decodes to. Bounds-checked; a malformed stream is a typed error. The walk
+/// mirrors `lz4_flex`'s decoder loop (token, literal run, optional offset +
+/// match) without writing any output.
+fn lz4_block_decoded_size(src: &[u8]) -> Result<usize, ZimError> {
+    let mut pos = 0usize;
+    let mut total = 0usize;
+    let in_len = src.len().saturating_sub(1);
+    loop {
+        let token = *src.get(pos).ok_or(ZimError::ShortDecompression)?;
+        pos += 1;
+        // Literal length: nibble, or LSIC continuation bytes when it is 15.
+        let mut literal_len = (token >> 4) as usize;
+        if literal_len == 15 {
+            literal_len += read_lz4_integer(src, &mut pos)?;
+        }
+        if src.len() < pos + literal_len {
+            return Err(ZimError::ShortDecompression);
+        }
+        pos += literal_len;
+        // The final sequence carries no match: the decoder stops here.
+        if in_len <= pos {
+            return Ok(total + literal_len);
+        }
+        // Offset (u16), then match length: 4 + nibble, or LSIC when it is 15.
+        if src.len() < pos + 2 {
+            return Err(ZimError::ShortDecompression);
+        }
+        pos += 2;
+        let mut match_len = (4 + (token & 0xF)) as usize;
+        if match_len == 4 + 15 {
+            match_len += read_lz4_integer(src, &mut pos)?;
+        }
+        total += literal_len + match_len;
+    }
+}
+
+/// Read an LZ4 "linear small integer code" (LSIC) value at `pos`, advancing it.
+fn read_lz4_integer(src: &[u8], pos: &mut usize) -> Result<usize, ZimError> {
+    let mut n = 0usize;
+    loop {
+        let b = *src.get(*pos).ok_or(ZimError::ShortDecompression)?;
+        *pos += 1;
+        n += b as usize;
+        if b != 0xFF {
+            return Ok(n);
+        }
+    }
 }
 
 /// Read a little-endian u32 at `p`, bounds-checked.
@@ -257,6 +303,73 @@ mod tests {
         let short = b"short";
         let payload = lz4_flex::compress(short);
         match decompress(COMP_LZ4, &payload, HTML.len() as u32) {
+            Err(ZimError::ShortDecompression) => {}
+            other => panic!("expected ShortDecompression, got {:?}", other),
+        }
+    }
+
+    /// Hand-crafted LZ4 block that decodes to exactly 55 bytes. Its third
+    /// sequence takes lz4_flex's hot path with a non-overlapping match, so the
+    /// decoder "wildcopies" 24 bytes from output position 42 — i.e. up to index
+    /// 65, past the logical end (55). Decoding into an exactly-sized buffer
+    /// (the old sentinel approach) wrote out of bounds; this stream is the
+    /// regression witness for that heap corruption.
+    fn crafted_wildcopy_stream() -> (Vec<u8>, Vec<u8>) {
+        let mut s = Vec::new();
+        // S0: token lit=4 match=4, literal "aaaa", offset 1 (overlapping path).
+        s.push(0x40);
+        s.extend_from_slice(b"aaaa");
+        s.extend_from_slice(&1u16.to_le_bytes());
+        // M1: token lit=14 match=6, 14 literals, offset 1 (overlapping path).
+        s.push(0xE2);
+        s.extend_from_slice(&[b'm'; 14]);
+        s.extend_from_slice(&1u16.to_le_bytes());
+        // X: token lit=14 match=6, 14 literals, offset 32 (non-overlapping =>
+        // 24-byte wildcopy that runs past the logical end of the output).
+        s.push(0xE2);
+        s.extend_from_slice(&[b'x'; 14]);
+        s.extend_from_slice(&32u16.to_le_bytes());
+        // Y: final sequence, token lit=7, 7 literals (cold path, exact copy).
+        s.push(0x70);
+        s.extend_from_slice(&[b'y'; 7]);
+        let mut want = vec![b'a'; 8];
+        want.extend_from_slice(&[b'm'; 20]); // M1: lit 14 + match 6 (offset 1)
+        want.extend_from_slice(&[b'x'; 14]);
+        want.extend_from_slice(&[b'm'; 6]); // X match: offset 32 lands in the 'm' region
+        want.extend_from_slice(&[b'y'; 7]);
+        assert_eq!(want.len(), 55);
+        (s, want)
+    }
+
+    #[test]
+    fn lz4_exact_length_hot_path_wildcopy_decodes_cleanly() {
+        // Regression (F1): decoded size == declared size with a final write on
+        // the wildcopy fast path. Must return exactly 55 bytes and leave the
+        // heap intact — repeated to surface any out-of-bounds write.
+        let (stream, want) = crafted_wildcopy_stream();
+        for _ in 0..200 {
+            let out = decompress(COMP_LZ4, &stream, 55).expect("lz4 decode");
+            assert_eq!(out, want);
+        }
+    }
+
+    #[test]
+    fn lz4_payload_ending_in_ff_bytes_decodes() {
+        // Regression (F3): valid content whose last bytes are 0xFF must not be
+        // mistaken for a sentinel tail — exact-length check only.
+        let payload = b"onde\xff\xff\xff";
+        let compressed = lz4_flex::compress(payload);
+        let decoded = decompress(COMP_LZ4, &compressed, payload.len() as u32).expect("lz4 decode");
+        assert_eq!(decoded, payload);
+    }
+
+    #[test]
+    fn lz4_decodes_more_than_declared_is_typed_error() {
+        // Regression (F1): a stream that decodes past the declared size is a
+        // typed error — not an out-of-bounds write or silent truncation.
+        let payload = b"aaaaaaaaaa".repeat(8);
+        let compressed = lz4_flex::compress(&payload);
+        match decompress(COMP_LZ4, &compressed, (payload.len() - 3) as u32) {
             Err(ZimError::ShortDecompression) => {}
             other => panic!("expected ShortDecompression, got {:?}", other),
         }
