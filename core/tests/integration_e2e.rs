@@ -1521,13 +1521,21 @@ async fn test_e2e_critical_alert_full_lifecycle() -> Result<(), String> {
 
         // ── 6. Propagation après redémarrage : A' re-diffuse l'alerte. ──
         // La base SQLite persiste le payload (pas l'événement signé complet) :
-        // la re-diffusion produit donc un événement FRAIS signé par la même
-        // identité, avec un contenu identique — comportement documenté.
+        // la re-diffusion produit un événement FRAIS signé par la même identité.
+        // Le contenu porte un marqueur de re-diffusion DISTINCT du premier
+        // envoi : l'ID d'un événement est SHA-256(pubkey, horodatage flou ±30 s,
+        // kind, tags, contenu) — avec le MÊME contenu et la même identité, deux
+        // émissions dont les horodatages flous coïncident (≈1,7 % des runs)
+        // produiraient le MÊME ID, que C connaîtrait déjà depuis l'étape 2.
+        let re_content = format!("{content} — re-diffusée après redémarrage");
         let re_event = node_a2
-            .publish_alert(content.clone())
+            .publish_alert(re_content.clone())
             .await
             .map_err(|e| e.to_string())?;
-        assert_eq!(re_event.content, content, "A' re-diffuse le même contenu");
+        assert_eq!(
+            re_event.content, re_content,
+            "A' re-diffuse l'alerte (contenu marqué)"
+        );
 
         let mut node_d = Node::new(NodeConfig {
             display_name: "D".to_string(),
@@ -1546,8 +1554,8 @@ async fn test_e2e_critical_alert_full_lifecycle() -> Result<(), String> {
             .map_err(|e| e.to_string())?;
         assert_eq!(
             d_payload,
-            content.as_bytes(),
-            "D reçoit un contenu identique à l'alerte d'origine"
+            re_content.as_bytes(),
+            "D reçoit le contenu de la re-diffusion"
         );
 
         // ── 7. Résilience au pair défaillant : B « tombe » (déjà retiré de
@@ -1563,7 +1571,11 @@ async fn test_e2e_critical_alert_full_lifecycle() -> Result<(), String> {
             .get(&re_event.id)
             .ok_or_else(|| "C doit stocker l'alerte re-diffusée".to_string())?
             .map_err(|e| e.to_string())?;
-        assert_eq!(c_payload, content.as_bytes(), "C a le même contenu");
+        assert_eq!(
+            c_payload,
+            re_content.as_bytes(),
+            "C a le contenu de la re-diffusion"
+        );
         assert!(
             node_c.message_store.get(&event.id).is_some(),
             "C garde aussi l'alerte originale de l'étape 2"
