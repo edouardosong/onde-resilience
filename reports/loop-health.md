@@ -14,11 +14,12 @@
 | Durée moyenne par tâche | ≈ 1 jour calendaire (17 tâches / ~2,5 j avec 2 lanes) | mesure horaire précise n/d avant 08-23 |
 | Coût token estimé | lane Qwen local ≈ 0 € (LM Studio) ; lane ox-alpha = compteur provider, historique n/d | suivi futur : estimation grossière par tâche |
 | Taux de flaky | 1 événement (T19 e2e, 1,75 %/run) → corrigé côté TEST uniquement, 0 récidive | quarantaine appliquée |
-| Mutation score | T21 health/metrics : 37/58 caught (63,8 % brut) ; misses triés : ~11 pertinents (caps/busy) → cible T23 ≈ 100 % pertinent caught | passes archivées reports/t21-mutants, reports/t23-mutants |
+| Mutation score | T23 health/metrics : 48/64 caught (75 % brut), cluster pertinent caps/busy/budget 10/10 CAUGHT (cible atteinte) ; 8 misses classés acceptables, 1 mal classé (idle guard 198:20) → T24 | passes archivées reports/t21-mutants, reports/t23-mutants |
 | Drifts lockfile détectés en gate | 0 | règle --locked/npm ci active depuis 08-23 |
-| Secrets détectés | 0 | gitleaks verts, dont scan full-history 70 commits (T21) |
+| Secrets détectés | 0 | gitleaks verts, dont scans full-history (70 commits T21, 124 commits T23) |
 | Gates rejetées (CHANGES_REQUESTED) | 5 (T1, T3, T11, T13, T17) — toutes → fixes → APPROVED ; 0 REJECT définitif | cycle preuve-négative efficace |
 | Builds cassés post-merge | 0 régression code ; 1 panne CI workflows (SHAs d'actions inventés, externe au code, réparée T12-T16) | |
 
 ## Journal
 - 2026-08-23 : seed initial + formalisation du suivi (propositions utilisateur 9.1-9.4 adoptées).
+- 2026-08-23 : reprise boucle après migration clone (~/Documents/onde-repo) — 2 lanes mortes-silencieuses détectées et relancées (filet heartbeat respecté) ; T23 mergée it.13 (checker reprise APPROVED 1re passe, 0 gate rejetée) ; finding MEDIUM ouvert → T24 ; artefacts checker archivés reports/t23-checker-r2/.
