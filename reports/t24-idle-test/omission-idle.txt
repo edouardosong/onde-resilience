@@ -1,0 +1,32 @@
+# T24 preuve negative — mutant manuel health.rs:198:20 garde (WouldBlock|Interrupted) -> false
+# Test : health::tests::test_idle_server_survives_quiet_period_then_still_serves_200
+# Protocole : spawn serveur sante (port ephemere), silence STRICT >= 1 s (>= 50 ticks de 20 ms), puis GET /health attendu 200.
+# Sous le mutant : chaque tick WouldBlock incremente consecutive_errors ; a MAX_CONSECUTIVE_ACCEPT_ERRORS (32) erreurs (~0,64 s)
+# le thread d'acceptation meurt et ferme l'unique fd => la requete finale echoue en ConnectionRefused.
+# Sur code sain : ce meme test PASSE (exit 0, voir gates finales).
+# date: 2026-08-23T15:58:35Z  commit de base: cdd07f0ac57b11f6aee8eb8db93da3f10c5ba332
+
+   Compiling onde-core v0.2.0 (/home/linux/onde-wt/t24-idle-test/core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.81s
+     Running unittests src/lib.rs (target/debug/deps/onde_core-1566a29cf551e68b)
+
+running 1 test
+test health::tests::test_idle_server_survives_quiet_period_then_still_serves_200 ... FAILED
+
+failures:
+
+---- health::tests::test_idle_server_survives_quiet_period_then_still_serves_200 stdout ----
+
+thread 'health::tests::test_idle_server_survives_quiet_period_then_still_serves_200' (38789) panicked at src/health.rs:419:66:
+server must be reachable: Os { code: 111, kind: ConnectionRefused, message: "Connection refused" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    health::tests::test_idle_server_survives_quiet_period_then_still_serves_200
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 198 filtered out; finished in 1.00s
+
+error: test failed, to rerun pass `-p onde-core --lib`
+
+CARGO_TEST_EXIT_CODE=101
