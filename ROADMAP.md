@@ -121,7 +121,7 @@ une alerte hors-ligne, avec mise à jour d'APK signée.
 | 2.3 | **ZIM/Wikipedia offline** : chargement ZIM réel, recherche + affichage | Consultation hors-ligne (Playwright) |
 | 2.4 | **Cartes MBTiles offline** : rendu tuiles réelles | Affichage carte hors-ligne (Playwright) |
 | 2.5 | **Mode batterie** : profils mobile/desktop/gateway adaptatifs (déjà présent) + vérif conso | Bench charge/décharge |
-| 2.6 | **Compression + budget mémoire** : validation sur gros volume | Pas d'OOM à 100k messages |
+| 2.6 | **Compression + budget mémoire** : validation sur gros volume — ✅ **VALIDÉ** (T20-r3, 2026-08-23 : `core/tests/mem_budget_stress.rs`, 100k messages via chemin réel d'ingestion, pic RSS 51 MiB < seuil 256 MiB, build release) | Pas d'OOM à 100k messages |
 | 2.7 | **Réputation anti-abus** : pénalités propagées, détection de spam | Attaque de spam contenue (test) |
 
 **Livrable v2.0.0** : nœud autonome avec IA locale (questions santé/

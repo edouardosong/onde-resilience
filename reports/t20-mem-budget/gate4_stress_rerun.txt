@@ -1,0 +1,141 @@
+# T20 stress REJEU orchestrateur 2026-08-23 (solde finding F1 checker-t20-r3)
+# commande : ONDE_STRESS=1 cargo test --release --locked --test mem_budget_stress -- --nocapture
+dim. 23 août 2026 17:26:06 UTC
+   Compiling libc v0.2.189
+   Compiling cfg-if v1.0.4
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.47
+   Compiling version_check v0.9.5
+   Compiling typenum v1.20.1
+   Compiling find-msvc-tools v0.1.11
+   Compiling shlex v2.0.1
+   Compiling pkg-config v0.3.34
+   Compiling subtle v2.6.1
+   Compiling once_cell v1.21.4
+   Compiling generic-array v0.14.7
+   Compiling serde_core v1.0.229
+   Compiling smallvec v1.15.2
+   Compiling zmij v1.0.23
+   Compiling pin-project-lite v0.2.17
+   Compiling parking_lot_core v0.9.12
+   Compiling tracing-core v0.1.36
+   Compiling serde_json v1.0.151
+   Compiling syn v2.0.119
+   Compiling syn v3.0.3
+   Compiling scopeguard v1.2.0
+   Compiling block-buffer v0.10.4
+   Compiling serde v1.0.229
+   Compiling getrandom v0.2.17
+   Compiling cpufeatures v0.2.17
+   Compiling errno v0.3.14
+   Compiling jobserver v0.1.35
+   Compiling rand_core v0.6.4
+   Compiling lock_api v0.4.14
+   Compiling crypto-common v0.1.7
+   Compiling cc v1.4.3
+   Compiling memchr v2.8.3
+   Compiling semver v1.0.28
+   Compiling digest v0.10.7
+   Compiling itoa v1.0.18
+   Compiling rustc_version v0.4.1
+   Compiling parking_lot v0.12.5
+   Compiling signal-hook-registry v1.4.8
+   Compiling mio v1.2.2
+   Compiling socket2 v0.6.5
+   Compiling zerocopy v0.8.56
+   Compiling bytes v1.12.1
+   Compiling curve25519-dalek v4.1.3
+   Compiling zstd-safe v7.2.4
+   Compiling vcpkg v0.2.15
+   Compiling thiserror v1.0.69
+   Compiling crc32fast v1.5.0
+   Compiling zstd-sys v2.0.16+zstd.1.5.7
+   Compiling inout v0.1.4
+   Compiling bitflags v2.13.1
+   Compiling adler2 v2.0.1
+   Compiling crc-catalog v2.5.0
+   Compiling libsqlite3-sys v0.35.0
+   Compiling foldhash v0.1.5
+   Compiling simd-adler32 v0.3.10
+   Compiling regex-syntax v0.8.11
+   Compiling byteorder v1.5.0
+   Compiling miniz_oxide v0.8.9
+   Compiling hashbrown v0.15.5
+   Compiling crc v3.4.0
+   Compiling serde_derive v1.0.229
+   Compiling tokio-macros v2.7.2
+   Compiling regex-automata v0.4.18
+   Compiling zeroize_derive v1.5.0
+   Compiling tracing-attributes v0.1.31
+   Compiling zeroize v1.9.0
+   Compiling tokio v1.53.1
+   Compiling thiserror-impl v1.0.69
+   Compiling tracing v0.1.44
+   Compiling curve25519-dalek-derive v0.1.1
+   Compiling ppv-lite86 v0.2.21
+   Compiling cipher v0.4.4
+   Compiling universal-hash v0.5.1
+   Compiling signature v2.2.0
+   Compiling lazy_static v1.5.0
+   Compiling quick-error v1.2.3
+   Compiling log v0.4.33
+   Compiling opaque-debug v0.3.1
+   Compiling poly1305 v0.8.0
+   Compiling tracing-log v0.2.0
+   Compiling lz4_flex v0.3.6
+   Compiling sharded-slab v0.1.7
+   Compiling ed25519 v2.2.3
+   Compiling flate2 v1.1.9
+   Compiling chacha20 v0.9.1
+   Compiling rand_chacha v0.3.1
+   Compiling matchers v0.2.0
+   Compiling lzma-rs v0.3.0
+   Compiling hashlink v0.10.0
+   Compiling hmac v0.12.1
+   Compiling sha2 v0.10.9
+   Compiling aead v0.5.2
+   Compiling thread_local v1.1.10
+   Compiling nu-ansi-term v0.50.3
+   Compiling rustix v1.1.4
+   Compiling fallible-streaming-iterator v0.1.9
+   Compiling getrandom v0.4.3
+   Compiling fallible-iterator v0.3.0
+   Compiling ed25519-dalek v2.2.0
+   Compiling tracing-subscriber v0.3.23
+   Compiling chacha20poly1305 v0.10.1
+   Compiling hkdf v0.12.4
+   Compiling rand v0.8.7
+   Compiling dtn-router v0.1.0 (/home/linux/onde-wt/t20-mem-budget/core/crates/dtn-router)
+   Compiling llm-inference v0.1.0 (/home/linux/onde-wt/t20-mem-budget/core/crates/llm-inference)
+   Compiling whisper-stt v0.2.0 (/home/linux/onde-wt/t20-mem-budget/core/crates/whisper-stt)
+   Compiling llama-bind v0.2.0 (/home/linux/onde-wt/t20-mem-budget/core/crates/llama-bind)
+   Compiling x25519-dalek v2.0.1
+   Compiling async-trait v0.1.92
+   Compiling socket2 v0.5.10
+   Compiling base64 v0.22.1
+   Compiling hex v0.4.3
+   Compiling linux-raw-sys v0.12.1
+   Compiling fastrand v2.5.0
+   Compiling tempfile v3.27.0
+   Compiling zstd v0.13.3
+   Compiling zim-parser v0.2.0 (/home/linux/onde-wt/t20-mem-budget/core/crates/zim-parser)
+   Compiling rusqlite v0.37.0
+   Compiling onde-core v0.2.0 (/home/linux/onde-wt/t20-mem-budget/core)
+    Finished `release` profile [optimized] target(s) in 34.73s
+     Running tests/mem_budget_stress.rs (target/release/deps/mem_budget_stress-5c306822a97f652e)
+
+running 2 tests
+compression corpus compressible: brut=2176000 B stocké=256000 B ratio=0.12
+test compression_reduces_corpus_storage ... ok
+test stress_ingest_memory_bounded has been running for over 60 seconds
+stress: n=100000 (bulk=99872, strict=128) stored=100000 rejected=0 elapsed=776s baseline_rss=Some(5) MiB peak_rss=Some(51) MiB (seuil 256 MiB)
+compression: brut=23388890 B stocké=18719551 B ratio=0.80
+sqlite: fichier=37650432 B (WAL inclus)
+stress: post-restauration restored=100000 peak_rss=100 MiB (seuil 256 MiB)
+test stress_ingest_memory_bounded ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 813.71s
+
+EXIT_CODE=0
+dim. 23 août 2026 17:40:15 UTC
