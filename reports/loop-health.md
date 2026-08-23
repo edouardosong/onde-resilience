@@ -23,3 +23,5 @@
 ## Journal
 - 2026-08-23 : seed initial + formalisation du suivi (propositions utilisateur 9.1-9.4 adoptées).
 - 2026-08-23 : reprise boucle après migration clone (~/Documents/onde-repo) — 2 lanes mortes-silencieuses détectées et relancées (filet heartbeat respecté) ; T23 mergée it.13 (checker reprise APPROVED 1re passe, 0 gate rejetée) ; finding MEDIUM ouvert → T24 ; artefacts checker archivés reports/t23-checker-r2/.
+- 2026-08-23 : incident zombie (session ancien orchestrateur réveillée) — détournement checkout t20 + suppression passagère worktree t24 ; récupéré sans perte (FROZEN.md, règle vérif .git, cherry-pick e20db17 planifié).
+- 2026-08-23 : T24 mergée it.14 (mutant idle 198:20 tué, preuve négative rejouée par checker) ; T22 coverage lancée.
