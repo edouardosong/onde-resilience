@@ -636,7 +636,10 @@ mod tests {
         let pad = " ".repeat(7 * 1024);
         let req = format!("GET {pad}/health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
         assert!(req.len() > 8 + 1024, "pad must exceed the *→+ mutant cap");
-        assert!(req.len() < MAX_REQUEST_BYTES, "must stay under the strict cap");
+        assert!(
+            req.len() < MAX_REQUEST_BYTES,
+            "must stay under the strict cap"
+        );
         let mut s = TcpStream::connect(("127.0.0.1", handle.port)).unwrap();
         let _ = s.set_read_timeout(Some(Duration::from_secs(5)));
         s.write_all(req.as_bytes()).expect("legal large write");
