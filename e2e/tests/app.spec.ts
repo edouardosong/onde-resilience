@@ -6,7 +6,11 @@ import { PlaywrightAiFixture } from '@midscene/web/playwright';
 // chaque test reçoit aiTap / aiInput / aiAssert (screenshot → LLM local → action).
 const test = base.extend(PlaywrightAiFixture());
 
-const APP_URL = 'file:///home/linux/Documents/CleanOnde/android/app/src/main/assets/index.html';
+// URL de l'app sous test : surchargeable via l'environnement (autre appareil,
+// serveur local, variante build) ; défaut inchangé pour ne rien casser.
+const APP_URL =
+  process.env.APP_URL ??
+  'file:///home/linux/Documents/CleanOnde/android/app/src/main/assets/index.html';
 
 // Chargement stable : attendre la fin du load + un settle avant les appels IA
 // (évite le race 'Execution context was destroyed' lors de l'injection Midscene).
