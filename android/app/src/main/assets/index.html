@@ -1080,7 +1080,9 @@
             if (f) {
                 const label = document.getElementById('file-drop-label');
                 const sizeKo = Math.max(1, Math.round(f.size / 1024));
-                label.textContent = `\u2713 ${esc(f.name)} (${sizeKo} Ko) \u2014 pr\u00eat \u00e0 partager via le mesh`;
+                // textContent attend le texte BRUT (pas esc()) : esc() double-échapperait
+            // les noms contenant &<>"' — esc() reste réservé aux insertions innerHTML.
+            label.textContent = `\u2713 ${f.name} (${sizeKo} Ko) \u2014 pr\u00eat \u00e0 partager via le mesh`;
             }
         });
 
