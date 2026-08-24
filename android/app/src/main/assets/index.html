@@ -204,6 +204,9 @@
             color: var(--text-secondary);
         }
 
+        .card .voice-player.playing .waveform .bar { opacity: 0.45; }
+        .card .voice-player.playing .play-btn { background: var(--warning); }
+
         /* ===== WRITE POST ===== */
         .compose-bar {
             display: flex;
@@ -380,6 +383,8 @@
             flex-direction: column;
             gap: 12px;
             margin-bottom: 16px;
+            overflow-y: auto;
+            min-height: 0;
         }
 
         .ai-chat .msg {
@@ -660,7 +665,7 @@
                     <button id="btn-aid" style="flex:1;padding:8px;border-radius:20px;border:1px solid var(--border);background:transparent;color:var(--text-secondary);font-weight:600;font-size:12px;cursor:pointer;">Entraide</button>
                 </div>
                 <div class="feed" id="feed-container">
-                    <div class="card">
+                    <div class="card" data-type="alert">
                         <div class="card-header">
                             <div class="avatar">AL</div>
                             <div class="meta">
@@ -672,7 +677,7 @@
                         <div class="content">⚠️ Coupure réseau secteur Nord. Point d'eau disponible Place de la Mairie. Apportez vos bouteilles.</div>
                         <div class="pow-badge">✓ PoW vérifié · 4 hops</div>
                     </div>
-                    <div class="card">
+                    <div class="card" data-type="aid">
                         <div class="card-header">
                             <div class="avatar" style="background:var(--info);">BM</div>
                             <div class="meta">
@@ -684,7 +689,7 @@
                         <div class="content">Possède un groupe électrogène et des médicaments. Quartier sud — contactez-moi pour coordination. Disponible jusqu'à 20h.</div>
                         <div class="pow-badge">✓ PoW vérifié · 2 hops</div>
                     </div>
-                    <div class="card">
+                    <div class="card" data-type="voice">
                         <div class="card-header">
                             <div class="avatar" style="background:var(--warning);">CD</div>
                             <div class="meta">
@@ -742,12 +747,12 @@
             <!-- AI CHAT PAGE -->
             <div class="page" id="page-ai">
                 <h2 class="section-title">🧠 Assistant IA</h2>
-                <div class="model-badge" id="model-badge">Modèle local : Qwen 1.8B (Q4_K_M)</div>
+                <div class="model-badge" id="model-badge">Moteur local : PocketPal · Qwen 1.8B</div>
                 <div class="ai-chat">
                     <div class="messages" id="ai-messages">
                         <div class="msg ai">
                             👋 Je suis votre assistant local ONDE. Je peux vous aider avec les premiers secours, la navigation hors-ligne, ou répondre à vos questions.
-                            <div class="meta">PocketPal · 1.8B · inférence locale</div>
+                            <div class="meta">PocketPal · Qwen 1.8B · inférence locale</div>
                         </div>
                     </div>
                 </div>
@@ -766,7 +771,12 @@
                 </div>
                 <div style="display:flex;gap:8px;margin-bottom:16px;">
                     <button id="btn-send-tx" style="flex:1;padding:10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--accent);color:var(--black);font-weight:600;font-size:13px;cursor:pointer;">Envoyer</button>
-                    <button style="flex:1;padding:10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:transparent;color:var(--text-secondary);font-weight:600;font-size:13px;cursor:pointer;">Recevoir</button>
+                    <button id="btn-receive" style="flex:1;padding:10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:transparent;color:var(--text-secondary);font-weight:600;font-size:13px;cursor:pointer;">Recevoir</button>
+                </div>
+                <div id="receive-panel" style="display:none;padding:14px;background:var(--surface-elevated);border:1px solid var(--accent-dim);border-radius:var(--radius-sm);margin-bottom:16px;text-align:center;">
+                    <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-secondary);margin-bottom:6px;">Code de réception du nœud</div>
+                    <div id="receive-code" style="font-family:monospace;font-size:18px;color:var(--accent);letter-spacing:2px;">u09tunq-ONDE</div>
+                    <div style="font-size:11px;color:var(--text-secondary);margin-top:6px;">Partagez ce code : le donneur l'utilise pour adresser les crédits. La transaction sera poussée au prochain contact mesh.</div>
                 </div>
                 <div style="font-size:11px;color:var(--text-secondary);margin-bottom:10px;border-bottom:1px solid var(--border);padding-bottom:6px;">HISTORIQUE</div>
                 <div class="tx-list" id="tx-list">
@@ -814,6 +824,7 @@
                         <div class="stat-label">Articles</div>
                     </div>
                 </div>
+                <div id="search-hint" style="display:none;font-size:12px;color:var(--warning);margin-bottom:10px;">Saisissez un terme de recherche…</div>
                 <div id="article-results">
                     <div class="article-card">
                         <h3>Premiers secours</h3>
@@ -838,9 +849,10 @@
                     <div style="font-size:14px;margin-bottom:4px;">Scannez ce QR pour appairer</div>
                     <div class="qr-hint">L'appareil distant créera un hotspot temporaire</div>
                 </div>
+                <input type="file" id="p2p-file-input" style="display:none;">
                 <div class="file-drop" id="file-drop">
                     <div style="font-size:32px;margin-bottom:8px;">📂</div>
-                    <div style="font-size:14px;">Glissez un fichier ici ou tapez pour sélectionner</div>
+                    <div id="file-drop-label" style="font-size:14px;">Glissez un fichier ici ou tapez pour sélectionner</div>
                 </div>
             </div>
         </div>
@@ -902,51 +914,73 @@
             });
         });
 
-        // ===== COMPOSE =====
-        document.getElementById('compose-send').addEventListener('click', () => {
+        // ===== COMPOSE (le type suit l'onglet actif ; Entrée publie) =====
+        function publishMessage() {
             const input = document.getElementById('compose-input');
-            if (input.value && input.value.trim()) {
-                // Simulate PoW + publish
-                const feed = document.getElementById('feed-container');
-                const card = document.createElement('div');
-                card.className = 'card';
-                card.innerHTML = `
-                    <div class="card-header">
-                        <div class="avatar">MO</div>
-                        <div class="meta">
-                            <div class="name">Moi</div>
-                            <div class="time">À l'instant</div>
-                        </div>
-                        <span class="card-type alert">ALERTE</span>
+            if (!input.value || !input.value.trim()) return;
+            const isAid = activeFeedTab === 'aid';
+            // Simulate PoW + publish
+            const feed = document.getElementById('feed-container');
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.dataset.type = isAid ? 'aid' : 'alert';
+            card.innerHTML = `
+                <div class="card-header">
+                    <div class="avatar" style="${isAid ? 'background:var(--info);' : ''}">MO</div>
+                    <div class="meta">
+                        <div class="name">Moi</div>
+                        <div class="time">À l'instant</div>
                     </div>
-                    <div class="content">${esc(input.value)}</div>
-                    <div class="pow-badge">✓ PoW calculé · 0 hops · diffusion en cours...</div>
-                `;
-                feed.insertBefore(card, feed.firstChild);
-                input.value = '';
-            }
+                    <span class="card-type ${isAid ? 'aid' : 'alert'}">${isAid ? 'ENTRAIDE' : 'ALERTE'}</span>
+                </div>
+                <div class="content">${esc(input.value)}</div>
+                <div class="pow-badge">✓ PoW calculé · 0 hops · diffusion en cours...</div>
+            `;
+            feed.insertBefore(card, feed.firstChild);
+            input.value = '';
+            applyFeedFilter();
+        }
+
+        document.getElementById('compose-send').addEventListener('click', publishMessage);
+        document.getElementById('compose-input').addEventListener('keydown', e => {
+            if (e.key === 'Enter') { e.preventDefault(); publishMessage(); }
         });
 
-        // ===== FEED TABS =====
-        document.getElementById('btn-alerts').addEventListener('click', function() {
-            this.style.borderColor = 'var(--accent)';
-            this.style.background = 'var(--accent)';
-            this.style.color = 'var(--black)';
-            const aid = document.getElementById('btn-aid');
-            aid.style.borderColor = 'var(--border)';
-            aid.style.background = 'transparent';
-            aid.style.color = 'var(--text-secondary)';
-        });
+        // ===== FEED TABS (état + filtre réel du feed) =====
+        let activeFeedTab = 'alerts'; // 'alerts' | 'aid'
 
-        document.getElementById('btn-aid').addEventListener('click', function() {
-            this.style.borderColor = 'var(--accent)';
-            this.style.background = 'var(--accent)';
-            this.style.color = 'var(--black)';
+        function applyFeedFilter() {
+            document.querySelectorAll('#feed-container .card').forEach(card => {
+                const t = card.dataset.type || 'alert';
+                const show = (activeFeedTab === 'aid') ? (t === 'aid') : (t !== 'aid');
+                card.style.display = show ? '' : 'none';
+            });
+        }
+
+        function setFeedTab(tab) {
+            activeFeedTab = tab;
             const alerts = document.getElementById('btn-alerts');
-            alerts.style.borderColor = 'var(--border)';
-            alerts.style.background = 'transparent';
-            alerts.style.color = 'var(--text-secondary)';
-        });
+            const aid = document.getElementById('btn-aid');
+            if (tab === 'alerts') {
+                alerts.style.borderColor = 'var(--accent)';
+                alerts.style.background = 'var(--accent)';
+                alerts.style.color = 'var(--black)';
+                aid.style.borderColor = 'var(--border)';
+                aid.style.background = 'transparent';
+                aid.style.color = 'var(--text-secondary)';
+            } else {
+                aid.style.borderColor = 'var(--accent)';
+                aid.style.background = 'var(--accent)';
+                aid.style.color = 'var(--black)';
+                alerts.style.borderColor = 'var(--border)';
+                alerts.style.background = 'transparent';
+                alerts.style.color = 'var(--text-secondary)';
+            }
+            applyFeedFilter();
+        }
+
+        document.getElementById('btn-alerts').addEventListener('click', () => setFeedTab('alerts'));
+        document.getElementById('btn-aid').addEventListener('click', () => setFeedTab('aid'));
 
         // ===== WAVEFORM GENERATOR =====
         (function generateWaveform() {
@@ -959,6 +993,16 @@
                 container.appendChild(bar);
             }
         })();
+
+        // ===== VOIX : bouton lecture (toggle ▶/⏸ + état playing) =====
+        document.querySelectorAll('.voice-player .play-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const wasPlaying = btn.textContent.trim() === '\u23F8';
+                btn.textContent = wasPlaying ? '\u25B6' : '\u23F8';
+                const player = btn.closest('.voice-player');
+                if (player) player.classList.toggle('playing', !wasPlaying);
+            });
+        });
 
         // ===== RADAR NODES =====
         (function populateRadar() {
@@ -1004,7 +1048,7 @@
             setTimeout(() => {
                 const aiMsg = document.createElement('div');
                 aiMsg.className = 'msg ai';
-                aiMsg.innerHTML = `${getAiResponse(userText)}<div class="meta">PocketPal · inférence locale · ${Math.floor(Math.random() * 2000 + 500)}ms</div>`;
+                aiMsg.innerHTML = `${getAiResponse(userText)}<div class="meta">PocketPal · Qwen 1.8B · ${Math.floor(Math.random() * 2000 + 500)}ms</div>`;
                 messages.appendChild(aiMsg);
                 messages.scrollTop = messages.scrollHeight;
             }, 800);
@@ -1022,11 +1066,34 @@
             return responses[Math.floor(Math.random() * responses.length)];
         }
 
+        // ===== WALLET : bouton Recevoir (affiche le code de réception du nœud) =====
+        document.getElementById('btn-receive').addEventListener('click', () => {
+            const panel = document.getElementById('receive-panel');
+            panel.style.display = (panel.style.display === 'none') ? 'block' : 'none';
+        });
+
+        // ===== P2P : sélection de fichier (tap → file picker + feedback) =====
+        const p2pInput = document.getElementById('p2p-file-input');
+        document.getElementById('file-drop').addEventListener('click', () => p2pInput.click());
+        p2pInput.addEventListener('change', () => {
+            const f = p2pInput.files && p2pInput.files[0];
+            if (f) {
+                const label = document.getElementById('file-drop-label');
+                const sizeKo = Math.max(1, Math.round(f.size / 1024));
+                label.textContent = `\u2713 ${esc(f.name)} (${sizeKo} Ko) \u2014 pr\u00eat \u00e0 partager via le mesh`;
+            }
+        });
+
         // ===== SEARCH ENCYCLOPEDIA =====
         document.getElementById('search-btn').addEventListener('click', () => {
             const input = document.getElementById('search-input');
             const results = document.getElementById('article-results');
-            if (input.value && results) {
+            if (!input.value || !input.value.trim()) {
+                const hint = document.getElementById('search-hint');
+                if (hint) { hint.style.display = 'block'; setTimeout(() => { hint.style.display = 'none'; }, 2500); }
+                return;
+            }
+            if (results) {
                 results.innerHTML = `
                     <div class="article-card">
                         <h3>Résultats pour "${esc(input.value)}"</h3>
@@ -1072,19 +1139,20 @@
             const typeClass = post.type === 'alert' ? 'alert' : 'aid';
             const typeLabel = post.type === 'alert' ? 'ALERTE' : 'ENTRAIDE';
             const bgColor = post.type === 'alert' ? 'var(--danger)' : 'var(--info)';
+            card.dataset.type = post.type === 'alert' ? 'alert' : 'aid';
             card.innerHTML = `
                 <div class="card-header">
-                    <div class="avatar" style="background:${bgColor};">${post.name[0]}</div>
+                    <div class="avatar" style="background:${bgColor};">${esc(post.name[0])}</div>
                     <div class="meta">
-                        <div class="name">${post.name}</div>
+                        <div class="name">${esc(post.name)}</div>
                         <div class="time">À l'instant</div>
                     </div>
                     <span class="card-type ${typeClass}">${typeLabel}</span>
                 </div>
-                <div class="content">${post.content}</div>
+                <div class="content">${esc(post.content)}</div>
                 <div class="pow-badge">✓ PoW vérifié · ${Math.floor(Math.random() * 5)} hops · DTN store-and-forward</div>
             `;
-            if (feed) feed.insertBefore(card, feed.firstChild);
+            if (feed) { feed.insertBefore(card, feed.firstChild); applyFeedFilter(); }
         }, 30000);
     </script>
 </body>

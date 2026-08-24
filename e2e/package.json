@@ -1,0 +1,14 @@
+{
+  "name": "onde-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tests E2E Midscene.js + Playwright de l'UI ONDE (assets/index.html)",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@midscene/web": "^1.6.0",
+    "@playwright/test": "^1.54.0",
+    "dotenv": "^17.4.2"
+  }
+}
