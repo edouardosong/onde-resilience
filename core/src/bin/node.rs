@@ -247,6 +247,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!("event=trust_bootstrap count={}", trust_pubkeys.len());
     }
 
+    // T32-C — garde opérateur NON bloquante : publier vers des pairs sans
+    // Web of Trust explicite est le piège exact de l'incident réel du
+    // 2026-08-24. Un receveur qui n'a pas NOTRE clé dans son propre --trust
+    // refuse nos alertes en difficulté 0 (plancher PoW adaptatif : auteur
+    // inconnu ⇒ MAX_POW_DIFFICULTY) ; la frame part, arrive, puis est rejetée
+    // au gate d'admission — invisible côté émetteur sans log. La sémantique
+    // DTN (store-and-forward) reste inchangée : on prévient, on n'empêche pas.
+    if publish_msg.is_some() && !tcp_peers.is_empty() && trust_pubkeys.is_empty() {
+        tracing::warn!(
+            "event=publish_without_trust peer_count={} my_pubkey={} hint=listez cette clé dans le --trust de CHAQUE pair visé, sinon ses refus d'admission (PoW adaptatif) écartent l'alerte sans livraison",
+            tcp_peers.len(),
+            node.identity.pubkey_hex()
+        );
+    }
+
     // Phase 3.6 — log structuré UNIQUE de démarrage : snapshot JSON complet
     // (mêmes champs que GET /health), sans aucun secret.
     node.metrics.log_startup_snapshot(&node.config.display_name);

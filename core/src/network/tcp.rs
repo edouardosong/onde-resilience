@@ -773,6 +773,13 @@ pub fn unix_now_secs() -> u64 {
 pub fn process_inbound(node: &mut Node, transport: &TcpTransport) -> PumpReport {
     use crate::node::{PeerEventOutcome as Outcome, SocialEventOutcome};
     let mut report = PumpReport::default();
+    // T32-C : première raison de refus de la passe (paire, raison) — les
+    // refus d'admission ne laissent AUCUNE autre trace hors compteurs
+    // mémoire ; sur appareils (incident 2026-08-24), un refus légitime du
+    // gate anti-abus était indistinguable d'une perte réseau (« silence
+    // total »). Une ligne structurée par passe rend le verdict visible sans
+    // inonder les logs (au pire une ligne par passe de pump, pas par event).
+    let mut first_rejection: Option<(String, String)> = None;
     for frame in transport.drain_inbound() {
         report.frames_received += 1;
         match MeshEvent::from_wire_bytes(&frame.payload) {
@@ -791,9 +798,14 @@ pub fn process_inbound(node: &mut Node, transport: &TcpTransport) -> PumpReport 
                         | SocialEventOutcome::ModerationApplied => report.events_ingested += 1,
                         SocialEventOutcome::Ignored => report.events_neutral += 1,
                     },
-                    Outcome::Rejected(_) => report.events_rejected += 1,
-                    Outcome::EndorsementRejected(_) => report.events_rejected += 1,
-                    Outcome::AbuseReportRejected(_) => report.events_rejected += 1,
+                    Outcome::Rejected(reason)
+                    | Outcome::EndorsementRejected(reason)
+                    | Outcome::AbuseReportRejected(reason) => {
+                        if first_rejection.is_none() {
+                            first_rejection = Some((frame.peer_key.clone(), reason));
+                        }
+                        report.events_rejected += 1;
+                    }
                     // Alerte valide non retenue (déjà connue/budget), kind non
                     // géré : neutre — ni ingéré ni rejeté (convention Node).
                     Outcome::AlertNotStored | Outcome::Other => report.events_neutral += 1,
@@ -804,6 +816,11 @@ pub fn process_inbound(node: &mut Node, transport: &TcpTransport) -> PumpReport 
                 tracing::warn!(target: "onde_core::network", "event=tcp_wire_decode_failed peer={} error={e}", frame.peer_key);
             }
         }
+    }
+    if let Some((peer_key, reason)) = first_rejection {
+        tracing::warn!(target: "onde_core::network",
+            "event=tcp_admission_rejected count={} first_peer={peer_key} first_reason={reason}",
+            report.events_rejected);
     }
     report
 }
