@@ -24,10 +24,12 @@ apparaît donc comme non couvert — comportement voulu (T22 §4).
 
 Codes de sortie :
   0  PASS (>= seuil), ou bande de tolérance [seuil-tolérance, seuil[ (WARN),
-     ou « nothing to measure » (aucun fichier mesurable après exclusions /
-     push sans base de diff) — jamais de faux rouge ;
+     ou « nothing to measure » légitime (aucun .rs modifié dans core/, ou
+     fichiers modifiés non instrumentés dans un rapport NON vide, ou push
+     sans base de diff) — jamais de faux rouge ;
   1  FAIL : agrégat < seuil - tolérance ;
-  2  erreur de configuration / entrée illisible.
+  2  erreur de configuration / entrée illisible / rapport VALIDE mais VIDE
+     alors que des fichiers modifiés attendent une mesure (T29).
 
 Variables d'environnement : SEUIL (seuil %), TOLERANCE (points).
 """
@@ -207,6 +209,22 @@ def main(argv: list[str]) -> int:
         return 2
     except json.JSONDecodeError as exc:
         print(f"ERREUR CONFIG : JSON invalide ({args.cov}) : {exc}", file=sys.stderr)
+        return 2
+
+    # T29 — un rapport VALIDE mais VIDE alors que des fichiers modifiés
+    # attendent une mesure signale un run cargo-llvm-cov mal configuré
+    # (filtres/périmètre erronés) : erreur de configuration, PAS un PASS.
+    # Le PASS « nothing to measure » reste réservé aux cas légitimes :
+    # aucun .rs modifié dans core/ (wanted vide) ou fichiers modifiés
+    # réellement non instrumentés dans un rapport NON vide (AVERTISSEMENT).
+    if wanted and not index:
+        print(
+            f"ERREUR CONFIG : rapport de couverture VALIDE mais SANS AUCUN fichier "
+            f"indexé ({args.cov}) alors que {len(wanted)} fichier(s) modifié(s) "
+            f"attendent une mesure : {', '.join(wanted)}. Run cargo-llvm-cov "
+            f"probablement mal configuré (périmètre/filtres).",
+            file=sys.stderr,
+        )
         return 2
 
     rows, not_instrumented = [], []

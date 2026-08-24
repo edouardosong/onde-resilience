@@ -161,7 +161,7 @@ Le projet est développé sous une **boucle d'agents auditable** (détecter → 
 | Secrets | `gitleaks detect` (+ historique complet) | bloquant, 0 leak |
 | AST | `ast-grep scan -c .ast-grep/sgconfig.yml` | aucun finding nouveau vs [`reports/ast-grep-baseline.txt`](reports/ast-grep-baseline.txt) (anti-`unwrap`/`unsafe` hors tests dans modules critiques crypto/network/storage/protocol/reputation) |
 | Preuve négative | `cargo-mutants` ciblé sur le diff | cluster pertinent caught ; passes archivées ([t21](reports/t21-mutants/), [t23](reports/t23-mutants/)) |
-| Coverage | cargo-llvm-cov + [`scripts/diff_coverage.py`](scripts/diff_coverage.py), job [`coverage-gate`](.github/workflows/ci.yml) | **gate ACTIVE** (T26) : diff-coverage ≥ **80 % ± 2 pts** sur les fichiers `.rs` modifiés du workspace core/ (exclusions déclarées : `src/bin/*`, `whisper_cpp_sys`, `build.rs`) · baseline core = **89,80 % lignes** ([T22](reports/t22-coverage/proposition-gate.md)) |
+| Coverage | cargo-llvm-cov + [`scripts/diff_coverage.py`](scripts/diff_coverage.py), job [`coverage-gate`](.github/workflows/ci.yml) | **gate ACTIVE** (T26) : diff-coverage ≥ **80 % ± 2 pts** sur les fichiers `.rs` modifiés du workspace core/ (exclusions déclarées : `src/bin/*`, `whisper_cpp_sys`, `build.rs`, `target/**`) · baseline core = **89,80 % lignes** ([T22](reports/t22-coverage/proposition-gate.md)) |
 | E2E UI | `npx playwright test` (ui/web) | 5 specs + 1 skip documenté |
 | Simulation | `uv run --project simulation pytest -q` | 23 passed, déterminisme seed=42 |
 | Fuzzing | `cargo fuzz list` (5 cibles : protocole, crypto, parsing) | 0 crash exploitable (~130M cas, coverage stable) |
