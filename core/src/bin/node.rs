@@ -142,9 +142,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if i + 1 < args.len() {
                     for entry in args[i + 1].split(',') {
                         let key = entry.trim();
-                        if !key.is_empty() {
-                            trust_pubkeys.push(key.to_string());
+                        if key.is_empty() {
+                            continue;
                         }
+                        if !is_ed25519_pubkey_hex(key) {
+                            return Err(format!(
+                                "--trust expects comma-separated 64-char hex ed25519 public keys, got {:?}",
+                                key
+                            )
+                            .into());
+                        }
+                        trust_pubkeys.push(key.to_string());
                     }
                     i += 1;
                 } else {
@@ -170,7 +178,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("  --db <path>              SQLite database path (persistence)");
                 println!("  --battery-saver          Enable battery saver mode (throttled background work)");
                 println!(
-                    "  --geohash <geohash>       Node geohash position (7 chars, default: u09tunq)"
+                    "  --geohash <geohash>      Node geohash position (7 chars, default: u09tunq)"
                 );
                 println!("  --health-port <port>     Serve GET /health JSON on 127.0.0.1:<port>");
                 println!("                           (0 = ephemeral port; disabled by default)");
@@ -185,9 +193,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "                           (ex. 192.168.1.12:9333 ; reconnexion automatique)"
                 );
                 println!(
-                    "  --publish <message>    Publier une alerte signée au démarrage (une fois)"
+                    "  --publish <message>      Publier une alerte signée au démarrage (une fois)"
                 );
-                println!("  --trust <hex[,hex…]>   Clés publiques de confiance (Web of Trust, bootstrap)");
+                println!(
+                    "  --trust <hex[,hex…]>     Clés publiques de confiance (Web of Trust, bootstrap)"
+                );
                 println!("  --help, -h               Show this help");
                 return Ok(());
             }
@@ -377,4 +387,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     node.stop().await;
 
     Ok(())
+}
+
+/// Une clé publique ed25519 est 32 octets : exactement 64 caractères
+/// hexadécimaux (casse indifférente). Validation manuelle volontaire :
+/// aucune dépendance ajoutée au binaire.
+fn is_ed25519_pubkey_hex(key: &str) -> bool {
+    key.len() == 64 && key.bytes().all(|b| b.is_ascii_hexdigit())
 }
