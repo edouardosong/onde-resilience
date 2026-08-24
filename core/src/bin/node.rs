@@ -35,6 +35,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // QUE s'ils sont listés dans --peers.
     let mut tcp_listen: Option<std::net::SocketAddr> = None;
     let mut tcp_peers: Vec<std::net::SocketAddr> = Vec::new();
+    // T32-B — démo/ops sur appareils réels : publication unique au démarrage +
+    // Web of Trust explicite (mêmes sémantiques que les tests e2e Phase A).
+    let mut publish_msg: Option<String> = None;
+    let mut trust_pubkeys: Vec<String> = Vec::new();
 
     let mut i = 1;
     while i < args.len() {
@@ -126,6 +130,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .into());
                 }
             }
+            "--publish" => {
+                if i + 1 < args.len() {
+                    publish_msg = Some(args[i + 1].clone());
+                    i += 1;
+                } else {
+                    return Err("--publish expects a value <message>".to_string().into());
+                }
+            }
+            "--trust" => {
+                if i + 1 < args.len() {
+                    for entry in args[i + 1].split(',') {
+                        let key = entry.trim();
+                        if !key.is_empty() {
+                            trust_pubkeys.push(key.to_string());
+                        }
+                    }
+                    i += 1;
+                } else {
+                    return Err("--trust expects a value <hex_pubkey[,hex_pubkey…]>"
+                        .to_string()
+                        .into());
+                }
+            }
             "--geohash" => {
                 if i + 1 < args.len() {
                     geohash = args[i + 1].clone();
@@ -157,6 +184,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!(
                     "                           (ex. 192.168.1.12:9333 ; reconnexion automatique)"
                 );
+                println!(
+                    "  --publish <message>    Publier une alerte signée au démarrage (une fois)"
+                );
+                println!("  --trust <hex[,hex…]>   Clés publiques de confiance (Web of Trust, bootstrap)");
                 println!("  --help, -h               Show this help");
                 return Ok(());
             }
@@ -208,6 +239,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut node = Node::new(config);
     node.start().await?;
 
+    // T32-B — Web of Trust explicit (opt-in) : mêmes sémantiques que le
+    // bootstrap des tests e2e Phase A (confiance → difficulté PoW réduite pour
+    // les pairs connus, gate complet conservé).
+    if !trust_pubkeys.is_empty() {
+        node.reputation.bootstrap(&trust_pubkeys);
+        tracing::info!("event=trust_bootstrap count={}", trust_pubkeys.len());
+    }
+
     // Phase 3.6 — log structuré UNIQUE de démarrage : snapshot JSON complet
     // (mêmes champs que GET /health), sans aucun secret.
     node.metrics.log_startup_snapshot(&node.config.display_name);
@@ -258,6 +297,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!("event=tcp_mesh_peers count={}", transport.peer_keys().len());
         Some(transport)
     };
+
+    // T32-B — publication unique au démarrage (opt-in). L'événement entre dans
+    // les broadcasts pending du gossip : il sera livré à chaque pair qui se
+    // connectera ensuite (store-and-forward, même sémantique que DTN).
+    if let Some(msg) = publish_msg {
+        match node.publish_alert(msg).await {
+            Ok(event) => tracing::info!(
+                "event=alert_published id={} kind={:?} signature_valid={} pubkey={}",
+                event.id,
+                event.kind,
+                event.signature_valid(),
+                node.identity.pubkey_hex()
+            ),
+            Err(e) => return Err(format!("publish failed: {e}").into()),
+        }
+    }
 
     const PUMP_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
     match &transport {
