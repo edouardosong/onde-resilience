@@ -14,6 +14,12 @@ android {
         versionName "0.2.0"
     }
 
+    // Génère BuildConfig (désactivé par défaut depuis AGP 8) : requis pour le
+    // gate debug-only du débogage WebView dans MainActivity (BuildConfig.DEBUG).
+    buildFeatures {
+        buildConfig true
+    }
+
     buildTypes {
         release {
             minifyEnabled false

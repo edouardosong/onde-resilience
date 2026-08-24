@@ -42,8 +42,11 @@ public class MainActivity extends AppCompatActivity {
         // Testabilité E2E (T32-B / Midscene.js + Playwright via CDP) :
         // active le DevTools Protocol sur la WebView. Accessible uniquement en
         // local via `adb forward tcp:9222 localabstract:webview_devtools_remote_<pid>`.
-        // À terme : à conditionner au build debug (BuildConfig.DEBUG).
-        webView.setWebContentsDebuggingEnabled(true);
+        // Dette T32-B : débogage WebView conditionné au build DEBUG ;
+        // en release il reste DÉSACTIVÉ.
+        if (BuildConfig.DEBUG) {
+            webView.setWebContentsDebuggingEnabled(true);
+        }
 
         webView.setWebViewClient(new WebViewClient());
         webView.loadUrl("file:///android_asset/index.html");
